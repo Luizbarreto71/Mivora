@@ -129,8 +129,6 @@ export type StoreSettings = {
   shipping_default_length_cm: number;
   /** Thin black bar above the header (up to 4 short messages) */
   top_bar_messages: string[];
-  /** Strip below the home banner */
-  home_benefits: { title: string; text: string }[];
   newsletter_enabled: boolean;
   about_headline: string | null;
   about_text: string | null;

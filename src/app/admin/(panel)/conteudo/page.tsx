@@ -256,7 +256,7 @@ export default async function ContentPage() {
 
         <Card title="Textos institucionais da home">
           <p className="text-sm text-muted">
-            Barra superior, faixa de benefícios, bloco de atendimento, newsletter, avisos e redes sociais são editados em{" "}
+            Barra superior, bloco de atendimento, newsletter, avisos e redes sociais são editados em{" "}
             <Link href="/admin/configuracoes" className="underline">
               Configurações
             </Link>

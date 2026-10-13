@@ -1,6 +1,5 @@
 import { Logo } from "@/components/brand/logo";
 import { WhatsAppIcon } from "@/components/brand/social-icons";
-import { Benefits } from "@/components/store/home/benefits";
 import { BrandTiles } from "@/components/store/home/brand-tiles";
 import { CampaignBanner } from "@/components/store/home/campaign-banner";
 import { Hero } from "@/components/store/home/hero";
@@ -47,7 +46,6 @@ export default async function HomePage() {
   return (
     <>
       <Hero banners={content.hero} fallbackProduct={heroProduct} />
-      <Benefits items={settings.home_benefits} />
 
       {!isSupabaseConfigured ? (
         <div className="container-page mt-10">

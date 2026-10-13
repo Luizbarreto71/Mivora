@@ -55,7 +55,7 @@ Reprodução do mockup enviado pela dona da loja, sem trocar a stack nem apagar 
 
 - **Tipografia e cores:** Inter em todo o site (texto 400, destaques 500/600, títulos 600), texto `#121212` sobre branco, rosé e bege nas faixas de campanha, cards com borda discreta.
 - **Cabeçalho:** barra preta fina com mensagens (Configurações → Barra superior; a oferta de boas-vindas entra sozinha), logo à esquerda, busca central com sugestões, conta, favoritos e carrinho, e menu compacto (Início, Todos os produtos, Marcas, Cuidados com a pele, Novidades, Contato). No celular: menu lateral, busca, conta e carrinho.
-- **Home, na ordem do mockup:** banner principal em carrossel → faixa de benefícios → Novidades MIVORA → Descubra por marca → Rotinas de Skincare → Cuidados para cada necessidade → Em breve na MIVORA → depoimentos → rodapé.
+- **Home, na ordem do mockup:** banner principal em carrossel → Novidades MIVORA → Descubra por marca → Rotinas de Skincare → Cuidados para cada necessidade → Em breve na MIVORA → depoimentos → rodapé.
   - **Banners** (Admin → Banners e home): principal, rotinas, em breve e vitrines extras, com título, subtítulo, botões, foto desktop/celular, **cor de fundo**, **produto em destaque** (para banners sem foto) e **período da campanha**. Sem foto, o banner usa fotos reais dos produtos.
   - **Necessidades:** categorias com “Mostrar na home” (Admin → Categorias). Sem imagem própria, cada quadro usa a foto de um produto diferente da categoria.
   - **Marcas:** as cinco primeiras marcas com produtos, pela ordem de Admin → Marcas. Sem imagem da marca, usa a foto de um produto. O nome aparece no tipo do site, nunca como logotipo imitado.
@@ -169,7 +169,7 @@ O checklist também aparece no painel (`/admin`, card “Preparação para o lan
 9. **Entrega e frete:** informar o CEP de origem e criar as opções reais (faixas de CEP ou cidades, taxa, prazo) em Configurações. Para cotar Correios e transportadoras, gerar o token no Melhor Envio e cadastrar `MELHOR_ENVIO_TOKEN` na Vercel/Hostinger. Revisar as políticas de envio e de privacidade, que ganharam um parágrafo sobre a calculadora.
 10. **Domínio** e `NEXT_PUBLIC_SITE_URL`.
 11. **Fotos editoriais da home:** para chegar ao nível do mockup, envie fotos licenciadas para o banner principal (horizontal, com espaço livre à esquerda, ou vertical com o produto no centro), “Rotinas de Skincare”, “Em breve”, cada necessidade e cada marca. Hoje essas áreas usam as fotos de campanha enviadas e fotos dos produtos.
-12. **Textos de confiança:** confirme que pode afirmar “Produtos originais — qualidade e procedência” (notas e fornecedores) e só troque a barra superior para “Enviamos para todo o Brasil” depois de confirmar a cobertura (Configurações → Barra superior e benefícios).
+12. **Barra superior:** só troque a mensagem de frete para “Enviamos para todo o Brasil” depois de confirmar a cobertura (Configurações → Barra superior e newsletter).
 13. **Redes sociais:** preencha Instagram/TikTok/Facebook em Configurações para o “Siga a gente” do rodapé.
 11. **Símbolo ®:** fica desligado; só ative em Configurações se o registro da marca estiver confirmado.
 12. **Analytics e Meta Pixel:** não instalados. Se forem adicionados, incluir aviso de consentimento e atualizar a política de privacidade.

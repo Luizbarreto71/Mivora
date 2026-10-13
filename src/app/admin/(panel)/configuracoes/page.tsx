@@ -185,28 +185,13 @@ export default async function SettingsPage() {
         </Card>
 
         <Card
-          title="Barra superior e benefícios da home"
-          description="Textos da faixa preta acima do cabeçalho e da faixa de benefícios abaixo do banner. Publique apenas o que a loja cumpre (por exemplo, não anuncie entrega para todo o Brasil sem confirmar)."
+          title="Barra superior e newsletter"
+          description="Mensagens da faixa preta acima do cabeçalho. Publique apenas o que a loja cumpre (por exemplo, não anuncie entrega para todo o Brasil sem confirmar)."
         >
           <div className="grid gap-5">
             <Field label="Mensagens da barra superior" htmlFor="top_bar_messages" hint="Uma por linha, até 4 (até 90 caracteres cada). A oferta de boas-vindas ativa entra automaticamente como primeira mensagem.">
               <Textarea id="top_bar_messages" name="top_bar_messages" rows={3} defaultValue={(v.top_bar_messages ?? []).join("\n")} />
             </Field>
-            <div className="grid gap-4 sm:grid-cols-3">
-              {[0, 1, 2].map((i) => {
-                const b = ((v.home_benefits ?? []) as { title: string; text: string }[])[i];
-                return (
-                  <div key={i} className="space-y-3 rounded-md border border-line p-4">
-                    <Field label={`Benefício ${i + 1} — título`} htmlFor={`benefit_title_${i + 1}`}>
-                      <Input id={`benefit_title_${i + 1}`} name={`benefit_title_${i + 1}`} defaultValue={b?.title ?? ""} maxLength={40} />
-                    </Field>
-                    <Field label="Texto" htmlFor={`benefit_text_${i + 1}`}>
-                      <Input id={`benefit_text_${i + 1}`} name={`benefit_text_${i + 1}`} defaultValue={b?.text ?? ""} maxLength={80} />
-                    </Field>
-                  </div>
-                );
-              })}
-            </div>
             <Checkbox name="newsletter_enabled" label="Mostrar a inscrição na newsletter no rodapé" defaultChecked={v.newsletter_enabled ?? true} />
           </div>
         </Card>

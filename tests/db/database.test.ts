@@ -652,12 +652,9 @@ describe("premium home", () => {
     expect(rows.map((r) => r.name)).toEqual(["Hidratação", "Luminosidade", "Poros e textura", "Anti-idade", "Pele sensível"]);
   });
 
-  it("keeps the top bar and benefits editable, without claiming nationwide delivery", async () => {
-    const s = await one<{ top_bar_messages: string[]; home_benefits: { title: string; text: string }[]; newsletter_enabled: boolean }>(
-      `select top_bar_messages, home_benefits, newsletter_enabled from store_settings where id = 1`,
-    );
+  it("keeps the top bar editable, without claiming nationwide delivery", async () => {
+    const s = await one<{ top_bar_messages: string[]; newsletter_enabled: boolean }>(`select top_bar_messages, newsletter_enabled from store_settings where id = 1`);
     expect(s.top_bar_messages).toHaveLength(3);
-    expect(s.home_benefits.map((b) => b.title)).toEqual(["Produtos originais", "Atendimento especializado", "Entrega para sua região"]);
     expect(JSON.stringify(s)).not.toMatch(/todo o Brasil/i);
     expect(s.newsletter_enabled).toBe(true);
     await expect(db.query(`update store_settings set top_bar_messages = array['a','b','c','d','e'] where id = 1`)).rejects.toThrow(/top_bar_valid/);

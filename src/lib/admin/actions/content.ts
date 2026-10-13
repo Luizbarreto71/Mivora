@@ -362,8 +362,6 @@ export async function saveSettings(_: ActionState, fd: FormData): Promise<Action
     .filter(Boolean);
   if (topBar.length > 4) return fail("Use no máximo 4 mensagens na barra superior.");
   if (topBar.some((m) => m.length > 90)) return fail("Cada mensagem da barra superior deve ter até 90 caracteres.");
-  const benefits = [1, 2, 3].map((i) => ({ title: formString(fd, `benefit_title_${i}`), text: formString(fd, `benefit_text_${i}`) })).filter((b) => b.title);
-  if (benefits.some((b) => b.title.length > 40 || b.text.length > 80)) return fail("Benefícios: título com até 40 e texto com até 80 caracteres.");
 
   const { error } = await supabase
     .from("store_settings")
@@ -406,7 +404,6 @@ export async function saveSettings(_: ActionState, fd: FormData): Promise<Action
       shipping_default_width_cm: defaultWidth,
       shipping_default_length_cm: defaultLength,
       top_bar_messages: topBar,
-      home_benefits: benefits,
       newsletter_enabled: formBool(fd, "newsletter_enabled"),
       about_headline: formNullable(fd, "about_headline"),
       about_text: formNullable(fd, "about_text"),

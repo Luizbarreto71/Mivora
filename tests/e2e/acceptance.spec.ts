@@ -496,7 +496,8 @@ test("Home premium — cabeçalho, busca, seções do mockup, produto em abas, n
 
   // home sections in the order of the mockup, with real data
   await page.goto("/");
-  await expect(page.getByRole("region", { name: "Diferenciais da MIVORA" }).getByText("Produtos originais")).toBeVisible();
+  // the benefits strip was removed at the owner's request
+  await expect(page.getByText("Produtos originais")).toHaveCount(0);
   const headings = await page.locator("main h2").filter({ visible: true }).allTextContents();
   const order = ["Novidades MIVORA", "Descubra por marca", "Rotinas de Skincare", "Cuidados para cada necessidade"].map((t) => headings.findIndex((h) => h.includes(t)));
   expect(order.every((i) => i >= 0)).toBe(true);
