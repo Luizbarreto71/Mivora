@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Clock, Gift, Link2, Share2, ShoppingBag, Truck } from "lucide-react";
+import { Check, Clock, CreditCard, Gift, Link2, Share2, ShoppingBag, Truck } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { WhatsAppIcon } from "@/components/brand/social-icons";
 import { buttonClasses } from "@/components/ui/button";
@@ -160,6 +160,10 @@ export function BuyBox({ product }: { product: ProductDetail }) {
         <li className="flex gap-3">
           <Check className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.5} />
           <span>Compra sem cadastro: finalize o pedido com atendimento humano pelo WhatsApp.</span>
+        </li>
+        <li className="flex gap-3">
+          <CreditCard className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.5} />
+          <span>Pagamento combinado no atendimento, depois da confirmação do pedido.</span>
         </li>
         {businessHours ? (
           <li className="flex gap-3">

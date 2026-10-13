@@ -12,6 +12,7 @@ import { formatBRL } from "@/lib/money";
 import { destinationLabel } from "@/lib/shipping/cep";
 import type { ShippingOption, ShippingQuote } from "@/lib/shipping/types";
 import { submitOrder } from "@/lib/store/actions";
+import { rememberDeviceOrder } from "@/lib/store/order-history";
 import { clearCoupon, saveCoupon, savedCoupon } from "@/lib/store/welcome";
 import { DELIVERY_METHOD_LABEL, type DeliveryZone } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -145,6 +146,7 @@ export function CheckoutForm({
       const order: LastOrder = { code: result.code, url: result.whatsappUrl, summarized: result.summarized, at: Date.now() };
       try {
         sessionStorage.setItem(LAST_ORDER_KEY, JSON.stringify(order));
+        rememberDeviceOrder(order);
       } catch {
         /* ignore */
       }

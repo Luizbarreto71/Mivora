@@ -1,16 +1,15 @@
 "use client";
 
-import { ChevronLeft, ChevronRight, Pause, Play } from "lucide-react";
+import { ArrowLeft, ArrowRight, Pause, Play } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import { buttonClasses } from "@/components/ui/button";
 import type { Banner } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
-// aligned with the page container, but always clear of the left arrow
-const TEXT_INSET = "lg:pl-[max(6rem,calc((100vw-88rem)/2+2.5rem))]";
+const DEFAULT_BG = "#F6E4E1";
 
 function usePrefersReducedMotion() {
   return useSyncExternalStore(
@@ -25,11 +24,12 @@ function usePrefersReducedMotion() {
 }
 
 /**
- * Home hero carousel: copy beside the photo (never on top of it), crossfade between
- * slides, autoplay that pauses on hover, focus, off-screen, on request and for
- * reduced motion. Slides without a campaign photo show `stage` (real product photos).
+ * Home banner (mockup): wide rosé banner, copy on the left, photo or product on the right.
+ * Crossfade between slides; autoplay pauses on hover, focus, off-screen, on request and for
+ * reduced motion. Campaign photos dissolve into the slide colour; slides without a photo show
+ * the chosen product under a soft studio light.
  */
-export function HeroCarousel({ slides, stage }: { slides: Banner[]; stage: ReactNode }) {
+export function HeroCarousel({ slides }: { slides: Banner[] }) {
   const count = slides.length;
   const [index, setIndex] = useState(0);
   const [playing, setPlaying] = useState(true);
@@ -51,10 +51,19 @@ export function HeroCarousel({ slides, stage }: { slides: Banner[]; stage: React
     return () => io.disconnect();
   }, [multiple]);
 
+  const controls = {
+    slides,
+    index,
+    autoplay,
+    onSelect: setIndex,
+    onEnd: () => go(1),
+  };
+
   return (
     <section
       ref={sectionRef}
-      className="relative overflow-hidden border-b border-line"
+      className="relative overflow-hidden"
+      style={{ "--hero-h": "clamp(30rem, 37vw, 38rem)" } as CSSProperties}
       aria-roledescription={multiple ? "carrossel" : undefined}
       aria-label={multiple ? "Destaques da MIVORA" : undefined}
       onPointerEnter={(e) => e.pointerType === "mouse" && setHold(true)}
@@ -95,34 +104,35 @@ export function HeroCarousel({ slides, stage }: { slides: Banner[]; stage: React
               aria-hidden={active ? undefined : true}
               inert={!active}
               className={cn(
-                "col-start-1 row-start-1 flex flex-col transition-opacity duration-700 ease-out motion-reduce:transition-none lg:grid lg:min-h-[min(46rem,calc(100dvh-8rem))] lg:grid-cols-[minmax(0,1fr)_minmax(0,min(52vw,52rem))]",
+                "relative col-start-1 row-start-1 flex flex-col transition-opacity duration-700 ease-out motion-reduce:transition-none lg:block lg:h-[var(--hero-h)]",
                 active ? "z-10 opacity-100" : "pointer-events-none opacity-0",
               )}
+              style={{ backgroundColor: s.background_color ?? DEFAULT_BG }}
             >
-              <div className="order-2 flex flex-1 items-center bg-paper lg:order-1">
-                <div className={cn("w-full px-4 pt-10 sm:px-10 sm:pt-14 lg:py-20 lg:pr-16", multiple ? "pb-20 lg:pb-24" : "pb-14 sm:pb-20", TEXT_INSET)}>
+              <div className="container-page relative z-10 flex items-center pb-8 pt-10 sm:pt-14 lg:h-full lg:py-0">
+                <div className="max-w-[36rem] lg:pb-12">
                   {s.eyebrow ? (
-                    <p className={cn("eyebrow mb-5", reveal)} style={delay(0)}>
+                    <p className={cn("mb-4 text-[0.6875rem] font-medium uppercase tracking-[0.22em] text-ink/70", reveal)} style={delay(0)}>
                       {s.eyebrow}
                     </p>
                   ) : null}
-                  <Heading className={cn("heading-display max-w-[17ch] text-balance text-[2.125rem] leading-[1.08] sm:text-[2.75rem] xl:text-[3.25rem]", reveal)} style={delay(1)}>
+                  <Heading className={cn("heading-display text-balance text-[2.25rem] leading-[1.06] sm:text-[2.75rem] lg:text-[3.25rem] xl:text-[3.5rem]", reveal)} style={delay(1)}>
                     {s.title}
                   </Heading>
                   {s.subtitle ? (
-                    <p className={cn("mt-6 max-w-md text-base leading-relaxed text-muted sm:text-lg", reveal)} style={delay(2)}>
+                    <p className={cn("mt-4 max-w-[27rem] text-[0.9375rem] leading-relaxed text-ink/75 sm:text-base", reveal)} style={delay(2)}>
                       {s.subtitle}
                     </p>
                   ) : null}
                   {(s.cta_label && s.cta_href) || (s.cta2_label && s.cta2_href) ? (
-                    <div className={cn("mt-9 flex flex-col gap-3 sm:flex-row", reveal)} style={delay(3)}>
+                    <div className={cn("mt-7 flex flex-col gap-3 sm:flex-row", reveal)} style={delay(3)}>
                       {s.cta_label && s.cta_href ? (
-                        <Link href={s.cta_href} className={buttonClasses("primary", "lg", "sm:min-w-52")}>
-                          {s.cta_label}
+                        <Link href={s.cta_href} className={buttonClasses("primary", "md", "group/cta h-12 gap-3 px-7")}>
+                          {s.cta_label} <ArrowRight className="h-4 w-4 transition-transform group-hover/cta:translate-x-0.5" strokeWidth={1.75} />
                         </Link>
                       ) : null}
                       {s.cta2_label && s.cta2_href ? (
-                        <Link href={s.cta2_href} className={buttonClasses("outline", "lg", "sm:min-w-52")}>
+                        <Link href={s.cta2_href} className={buttonClasses("outline", "md", "h-12 px-7")}>
                           {s.cta2_label}
                         </Link>
                       ) : null}
@@ -130,28 +140,7 @@ export function HeroCarousel({ slides, stage }: { slides: Banner[]; stage: React
                   ) : null}
                 </div>
               </div>
-
-              <div className="relative order-1 aspect-square overflow-hidden bg-ivory sm:aspect-[4/3] lg:order-2 lg:aspect-auto">
-                {s.image_desktop_url ? (
-                  <div
-                    className={cn(
-                      "absolute inset-0 transition-transform duration-[7000ms] ease-out motion-reduce:transition-none",
-                      active ? "scale-100" : "scale-[1.04]",
-                    )}
-                  >
-                    {s.image_mobile_url ? (
-                      <>
-                        <Image src={s.image_mobile_url} alt={s.image_alt ?? ""} fill preload={i === 0} sizes="100vw" className="object-cover lg:hidden" />
-                        <Image src={s.image_desktop_url} alt={s.image_alt ?? ""} fill preload={i === 0} sizes="52vw" className="hidden object-cover lg:block" />
-                      </>
-                    ) : (
-                      <Image src={s.image_desktop_url} alt={s.image_alt ?? ""} fill preload={i === 0} sizes="(min-width: 1024px) 52vw, 100vw" className="object-cover" />
-                    )}
-                  </div>
-                ) : (
-                  stage
-                )}
-              </div>
+              <SlideVisual slide={s} active={active} preload={i === 0} />
             </div>
           );
         })}
@@ -159,60 +148,144 @@ export function HeroCarousel({ slides, stage }: { slides: Banner[]; stage: React
 
       {multiple ? (
         <>
-          <button
-            type="button"
-            onClick={() => go(-1)}
-            aria-label="Destaque anterior"
-            className="absolute left-3 top-[50vw] z-20 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-paper/95 text-ink shadow-[0_2px_14px_rgba(0,0,0,0.12)] transition hover:bg-paper sm:top-[37.5vw] lg:left-5 lg:top-1/2 lg:h-11 lg:w-11"
-          >
-            <ChevronLeft className="h-5 w-5" strokeWidth={1.5} />
-          </button>
-          <button
-            type="button"
-            onClick={() => go(1)}
-            aria-label="Próximo destaque"
-            className="absolute right-3 top-[50vw] z-20 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-paper/95 text-ink shadow-[0_2px_14px_rgba(0,0,0,0.12)] transition hover:bg-paper sm:top-[37.5vw] lg:right-5 lg:top-1/2 lg:h-11 lg:w-11"
-          >
-            <ChevronRight className="h-5 w-5" strokeWidth={1.5} />
-          </button>
-
-          <div className={cn("absolute bottom-0 left-0 z-20 flex items-center gap-4 px-4 pb-6 sm:px-10 lg:pb-10", TEXT_INSET)}>
-            <div className="flex items-center gap-1.5">
-              {slides.map((s, i) => (
-                <button
-                  key={s.id}
-                  type="button"
-                  onClick={() => setIndex(i)}
-                  aria-label={`Ir para o destaque ${i + 1}: ${s.title}`}
-                  aria-current={i === index ? "true" : undefined}
-                  className="group flex h-8 items-center px-0.5"
-                >
-                  <span className={cn("relative block h-[2px] overflow-hidden rounded-full transition-all duration-500", i === index ? "w-12 bg-ink/15" : "w-6 bg-ink/20 group-hover:bg-ink/45")}>
-                    {i === index ? (
-                      <span
-                        key={index}
-                        className="absolute inset-0 origin-left animate-hero-progress bg-ink motion-reduce:animate-none motion-reduce:bg-ink"
-                        style={{ animationPlayState: autoplay ? "running" : "paused" }}
-                        onAnimationEnd={() => go(1)}
-                      />
-                    ) : null}
-                  </span>
-                </button>
-              ))}
+          {/* desktop: under the copy, as in the mockup */}
+          <div className="pointer-events-none absolute inset-x-0 bottom-8 z-20 hidden lg:block">
+            <div className="container-page">
+              <div className="pointer-events-auto flex w-fit items-center gap-5">
+                <Indicators {...controls} />
+                <Arrows onPrev={() => go(-1)} onNext={() => go(1)} />
+                {!reduced ? <PauseButton playing={playing} onToggle={() => setPlaying((p) => !p)} /> : null}
+              </div>
             </div>
-            {!reduced ? (
-              <button
-                type="button"
-                onClick={() => setPlaying((p) => !p)}
-                aria-label={playing ? "Pausar a troca automática" : "Retomar a troca automática"}
-                className="flex h-8 w-8 items-center justify-center rounded-full border border-line text-ink/70 transition hover:border-ink hover:text-ink"
-              >
-                {playing ? <Pause className="h-3.5 w-3.5" strokeWidth={1.75} /> : <Play className="h-3.5 w-3.5" strokeWidth={1.75} />}
-              </button>
-            ) : null}
+          </div>
+          {/* mobile: a slim bar below the banner */}
+          <div className="flex items-center justify-between gap-4 border-b border-line bg-paper px-4 py-2 sm:px-6 lg:hidden">
+            <Indicators {...controls} compact />
+            <div className="flex items-center gap-1">
+              {!reduced ? <PauseButton playing={playing} onToggle={() => setPlaying((p) => !p)} /> : null}
+              <Arrows onPrev={() => go(-1)} onNext={() => go(1)} />
+            </div>
           </div>
         </>
       ) : null}
     </section>
+  );
+}
+
+function SlideVisual({ slide: s, active, preload }: { slide: Banner; active: boolean; preload: boolean }) {
+  const motion = cn("transition-transform duration-[7000ms] ease-out motion-reduce:transition-none", active ? "scale-100" : "scale-[1.04]");
+  if (s.image_desktop_url) {
+    return (
+      <div className="relative aspect-square w-full overflow-hidden sm:aspect-[16/11] lg:absolute lg:inset-y-0 lg:right-0 lg:aspect-auto lg:w-[min(56%,calc(var(--hero-h)*1.18))] lg:[mask-image:linear-gradient(to_right,transparent,#000_34%)]">
+        <div className={cn("absolute inset-0", motion)}>
+          {s.image_mobile_url ? (
+            <>
+              <Image src={s.image_mobile_url} alt={s.image_alt ?? ""} fill preload={preload} sizes="100vw" className="object-cover lg:hidden" />
+              <Image src={s.image_desktop_url} alt={s.image_alt ?? ""} fill preload={preload} sizes="40vw" className="hidden object-cover lg:block" />
+            </>
+          ) : (
+            <Image src={s.image_desktop_url} alt={s.image_alt ?? ""} fill preload={preload} sizes="(min-width: 1024px) 40vw, 100vw" className="object-cover" />
+          )}
+        </div>
+      </div>
+    );
+  }
+  const image = s.product?.image;
+  if (!image) return null;
+  return (
+    <div className="relative aspect-[5/4] w-full overflow-hidden lg:absolute lg:inset-y-0 lg:right-0 lg:aspect-auto lg:w-[52%]">
+      {/* studio light: the product photo (white background) blends into it */}
+      <div
+        aria-hidden="true"
+        className="absolute left-1/2 top-1/2 aspect-square h-[125%] -translate-x-1/2 -translate-y-1/2 rounded-full"
+        style={{ background: "radial-gradient(closest-side, rgba(255,255,255,0.98) 0%, rgba(255,255,255,0.88) 42%, rgba(255,255,255,0.35) 68%, rgba(255,255,255,0) 100%)" }}
+      />
+      <div aria-hidden="true" className="absolute bottom-[7%] left-1/2 h-[6%] w-[34%] -translate-x-1/2 rounded-[50%] bg-ink/10 blur-xl" />
+      {/* multiply on the animated wrapper (a transform would isolate a blend set on the image) */}
+      <div className={cn("absolute inset-0 mix-blend-multiply", motion)}>
+        <Image
+          src={image.url}
+          alt={image.alt ?? s.product?.name ?? ""}
+          fill
+          preload={preload}
+          sizes="(min-width: 1024px) 45vw, 100vw"
+          className="object-contain px-[10%] py-[5%] lg:py-[4%]"
+        />
+      </div>
+    </div>
+  );
+}
+
+function Indicators({
+  slides,
+  index,
+  autoplay,
+  onSelect,
+  onEnd,
+  compact = false,
+}: {
+  slides: Banner[];
+  index: number;
+  autoplay: boolean;
+  onSelect: (i: number) => void;
+  onEnd: () => void;
+  compact?: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      {slides.map((s, i) => {
+        const active = i === index;
+        return (
+          <button
+            key={s.id}
+            type="button"
+            onClick={() => onSelect(i)}
+            aria-label={`Ir para o destaque ${i + 1}: ${s.title}`}
+            aria-current={active ? "true" : undefined}
+            className="group flex h-8 items-center gap-3 text-[0.6875rem] font-semibold tabular-nums tracking-[0.08em]"
+          >
+            <span className={cn("transition-colors", active ? "text-ink" : "text-ink/40 group-hover:text-ink/70")}>{String(i + 1).padStart(2, "0")}</span>
+            {active ? (
+              <span className={cn("relative block h-px overflow-hidden bg-ink/15", compact ? "w-8" : "w-12")}>
+                {/* the bar's end advances to the next slide */}
+                <span
+                  key={index}
+                  className="absolute inset-0 origin-left animate-hero-progress bg-ink motion-reduce:animate-none"
+                  style={{ animationPlayState: autoplay ? "running" : "paused" }}
+                  onAnimationEnd={onEnd}
+                />
+              </span>
+            ) : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function Arrows({ onPrev, onNext }: { onPrev: () => void; onNext: () => void }) {
+  const cls = "flex h-9 w-9 items-center justify-center rounded-full text-ink/80 transition hover:bg-ink/5 hover:text-ink";
+  return (
+    <div className="flex items-center">
+      <button type="button" onClick={onPrev} aria-label="Destaque anterior" className={cls}>
+        <ArrowLeft className="h-4 w-4" strokeWidth={1.5} />
+      </button>
+      <button type="button" onClick={onNext} aria-label="Próximo destaque" className={cls}>
+        <ArrowRight className="h-4 w-4" strokeWidth={1.5} />
+      </button>
+    </div>
+  );
+}
+
+function PauseButton({ playing, onToggle }: { playing: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-label={playing ? "Pausar a troca automática" : "Retomar a troca automática"}
+      className="flex h-8 w-8 items-center justify-center rounded-full border border-ink/15 text-ink/70 transition hover:border-ink/40 hover:text-ink"
+    >
+      {playing ? <Pause className="h-3 w-3" strokeWidth={1.75} /> : <Play className="h-3 w-3" strokeWidth={1.75} />}
+    </button>
   );
 }

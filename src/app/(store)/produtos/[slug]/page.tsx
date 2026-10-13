@@ -8,9 +8,10 @@ import { JsonLd } from "@/components/store/json-ld";
 import { ProductGrid } from "@/components/store/product-card";
 import { BuyBox } from "@/components/store/product/buy-box";
 import { ProductGallery } from "@/components/store/product/product-gallery";
+import { ProductTabs } from "@/components/store/product/product-tabs";
 import { SectionHeading } from "@/components/store/section";
 import { Badge } from "@/components/ui/badge";
-import { getCategories, getProductBySlug, getRecommendations } from "@/lib/catalog/queries";
+import { getCategories, getHomeContent, getProductBySlug, getRecommendations } from "@/lib/catalog/queries";
 import { SITE_URL } from "@/lib/env";
 import { SKIN_TYPE_LABEL, type ProductDetail } from "@/lib/types";
 
@@ -62,14 +63,6 @@ function productJsonLd(p: ProductDetail) {
   };
 }
 
-function DetailBlock({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="grid gap-4 border-t border-line py-10 md:grid-cols-[14rem_1fr] md:gap-12">
-      <h2 className="eyebrow text-ink">{title}</h2>
-      <div className="max-w-3xl text-[0.9375rem] leading-relaxed text-ink-soft">{children}</div>
-    </section>
-  );
-}
 
 async function Recommendations({ productId }: { productId: string }) {
   const rec = await getRecommendations(productId);
@@ -114,6 +107,8 @@ async function ProductContent({ params }: { params: PageProps<"/produtos/[slug]"
   const typeGroup = productType?.parent_id ? await getCategories().then((all) => all.find((c) => c.id === productType.parent_id && c.productCount > 0)) : undefined;
   const concerns = product.categories.filter((c) => c.kind === "concern");
   const skinTypes = product.skinTypes.map((s) => SKIN_TYPE_LABEL[s] ?? s);
+  // product questions first; otherwise the general questions the store highlights
+  const faqs = product.faqs.length > 0 ? product.faqs : (await getHomeContent()).faqs;
 
   return (
     <>
@@ -165,75 +160,109 @@ async function ProductContent({ params }: { params: PageProps<"/produtos/[slug]"
         </div>
       </div>
 
-      <div className="container-page mt-20 sm:mt-28">
-        {product.description ? (
-          <DetailBlock title="Sobre o produto">
-            <p className="whitespace-pre-line">{product.description}</p>
-          </DetailBlock>
-        ) : null}
-        {product.benefits.length > 0 ? (
-          <DetailBlock title="Benefícios cosméticos">
-            <ul className="grid gap-3 sm:grid-cols-2">
-              {product.benefits.map((b) => (
-                <li key={b} className="border border-line p-4">
-                  {b}
-                </li>
-              ))}
-            </ul>
-          </DetailBlock>
-        ) : null}
-        {product.keyIngredients.length > 0 ? (
-          <DetailBlock title="Ativos em destaque">
-            <ul className="flex flex-wrap gap-2">
-              {product.keyIngredients.map((i) => (
-                <li key={i} className="rounded-full bg-ivory px-4 py-2 text-sm text-ink">
-                  {i}
-                </li>
-              ))}
-            </ul>
-            {product.ingredientsFull ? (
-              <details className="mt-5">
-                <summary className="cursor-pointer text-xs font-semibold uppercase tracking-[0.16em]">Composição completa</summary>
-                <p className="mt-3 text-xs leading-relaxed text-muted">{product.ingredientsFull}</p>
-              </details>
-            ) : null}
-          </DetailBlock>
-        ) : null}
-        {skinTypes.length > 0 || concerns.length > 0 ? (
-          <DetailBlock title="Indicação">
-            {skinTypes.length ? <p>{skinTypes.join(" · ")}</p> : null}
-            {concerns.length ? (
-              <div className="mt-4 flex flex-wrap gap-2">
-                {concerns.map((c) => (
-                  <Link key={c.id} href={`/categorias/${c.slug}`} className="rounded-full border border-line px-3.5 py-1.5 text-xs hover:border-ink">
-                    {c.name}
-                  </Link>
-                ))}
-              </div>
-            ) : null}
-          </DetailBlock>
-        ) : null}
-        {product.howToUse ? (
-          <DetailBlock title="Como usar">
-            <p className="whitespace-pre-line">{product.howToUse}</p>
-          </DetailBlock>
-        ) : null}
-        {product.warnings ? (
-          <DetailBlock title="Cuidados e precauções">
-            <p className="whitespace-pre-line">{product.warnings}</p>
-          </DetailBlock>
-        ) : null}
-        <DetailBlock title="Importante">
-          <p className="text-sm text-muted">
-            Informações de caráter cosmético, baseadas nos dados do fabricante. Não substituem orientação médica. Leia a embalagem antes de usar e, em caso de condição de pele específica, consulte um dermatologista.
-          </p>
-        </DetailBlock>
-        {product.faqs.length > 0 ? (
-          <section className="grid gap-6 border-t border-line py-10 md:grid-cols-[14rem_1fr] md:gap-12">
-            <h2 className="eyebrow text-ink">Dúvidas frequentes</h2>
-            <FaqList faqs={product.faqs} />
-          </section>
-        ) : null}
+      <div className="container-page mt-16 sm:mt-20">
+        <ProductTabs
+          tabs={[
+            ...(product.description || skinTypes.length > 0 || concerns.length > 0
+              ? [
+                  {
+                    id: "descricao",
+                    label: "Descrição",
+                    content: (
+                      <>
+                        {product.description ? <p className="whitespace-pre-line">{product.description}</p> : null}
+                        {skinTypes.length > 0 || concerns.length > 0 ? (
+                          <div className={product.description ? "mt-7" : undefined}>
+                            <h3 className="text-[0.8125rem] font-semibold text-ink">Indicação</h3>
+                            {skinTypes.length ? <p className="mt-2">{skinTypes.join(" · ")}</p> : null}
+                            {concerns.length ? (
+                              <div className="mt-3 flex flex-wrap gap-2">
+                                {concerns.map((c) => (
+                                  <Link key={c.id} href={`/categorias/${c.slug}`} className="rounded-full border border-line px-3.5 py-1.5 text-xs hover:border-ink">
+                                    {c.name}
+                                  </Link>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                      </>
+                    ),
+                  },
+                ]
+              : []),
+            ...(product.benefits.length > 0
+              ? [
+                  {
+                    id: "beneficios",
+                    label: "Benefícios",
+                    content: (
+                      <ul className="grid gap-3 sm:grid-cols-2">
+                        {product.benefits.map((b) => (
+                          <li key={b} className="border border-line p-4">
+                            {b}
+                          </li>
+                        ))}
+                      </ul>
+                    ),
+                  },
+                ]
+              : []),
+            ...(product.keyIngredients.length > 0 || product.ingredientsFull
+              ? [
+                  {
+                    id: "ingredientes",
+                    label: "Ingredientes",
+                    content: (
+                      <>
+                        {product.keyIngredients.length > 0 ? (
+                          <>
+                            <h3 className="text-[0.8125rem] font-semibold text-ink">Ativos em destaque</h3>
+                            <ul className="mt-3 flex flex-wrap gap-2">
+                              {product.keyIngredients.map((i) => (
+                                <li key={i} className="rounded-full bg-ivory px-4 py-2 text-sm text-ink">
+                                  {i}
+                                </li>
+                              ))}
+                            </ul>
+                          </>
+                        ) : null}
+                        {product.ingredientsFull ? (
+                          <div className={product.keyIngredients.length > 0 ? "mt-7" : undefined}>
+                            <h3 className="text-[0.8125rem] font-semibold text-ink">Composição completa</h3>
+                            <p className="mt-2 text-xs leading-relaxed text-muted">{product.ingredientsFull}</p>
+                          </div>
+                        ) : null}
+                      </>
+                    ),
+                  },
+                ]
+              : []),
+            ...(product.howToUse || product.warnings
+              ? [
+                  {
+                    id: "como-usar",
+                    label: "Como usar",
+                    content: (
+                      <>
+                        {product.howToUse ? <p className="whitespace-pre-line">{product.howToUse}</p> : null}
+                        {product.warnings ? (
+                          <div className={product.howToUse ? "mt-7" : undefined}>
+                            <h3 className="text-[0.8125rem] font-semibold text-ink">Cuidados e precauções</h3>
+                            <p className="mt-2 whitespace-pre-line">{product.warnings}</p>
+                          </div>
+                        ) : null}
+                      </>
+                    ),
+                  },
+                ]
+              : []),
+            ...(faqs.length > 0 ? [{ id: "perguntas", label: "Perguntas frequentes", content: <FaqList faqs={faqs} /> }] : []),
+          ]}
+        />
+        <p className="max-w-3xl border-t border-line pt-6 text-xs leading-relaxed text-muted">
+          Informações de caráter cosmético, baseadas nos dados do fabricante. Não substituem orientação médica. Leia a embalagem antes de usar e, em caso de condição de pele específica, consulte um dermatologista.
+        </p>
       </div>
 
       <Suspense fallback={null}>

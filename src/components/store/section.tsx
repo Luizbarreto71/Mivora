@@ -21,16 +21,16 @@ export function SectionHeading({
   className?: string;
 }) {
   return (
-    <div className={cn("mb-10 flex flex-col gap-5 sm:mb-12", align === "center" ? "items-center text-center" : "sm:flex-row sm:items-end sm:justify-between", className)}>
-      <div className={cn("max-w-2xl", align === "center" && "mx-auto")}>
-        {eyebrow ? <p className="eyebrow mb-3">{eyebrow}</p> : null}
-        <h2 className="heading-display text-[1.625rem] sm:text-[2rem]">{title}</h2>
-        {description ? <p className="mt-4 text-[0.9375rem] leading-relaxed text-muted">{description}</p> : null}
+    <div className={cn("mb-6 flex gap-4 sm:mb-8", align === "center" ? "flex-col items-center text-center" : "items-end justify-between", className)}>
+      <div className={cn("min-w-0 max-w-2xl", align === "center" && "mx-auto")}>
+        {eyebrow ? <p className="eyebrow mb-2.5">{eyebrow}</p> : null}
+        <h2 className="heading-display text-[1.375rem] sm:text-[1.625rem]">{title}</h2>
+        {description ? <p className="mt-1.5 text-[0.875rem] leading-relaxed text-muted">{description}</p> : null}
       </div>
       {href ? (
-        <Link href={href} className="group inline-flex shrink-0 items-center gap-2 text-[0.6875rem] font-semibold uppercase tracking-[0.2em]">
-          <span className="border-b border-ink pb-1">{hrefLabel}</span>
-          <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-1" />
+        <Link href={href} className="group inline-flex shrink-0 items-center gap-1.5 pb-1 text-[0.8125rem] font-medium text-ink/80 hover:text-ink">
+          {hrefLabel}
+          <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" strokeWidth={1.75} />
         </Link>
       ) : null}
     </div>

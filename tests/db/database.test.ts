@@ -577,32 +577,126 @@ describe("home carousel", () => {
     "/banners/home-medicube-zero-pore-pad.webp",
     "/banners/home-medicube-collagen-jelly-cream.webp",
   ];
+  type Slide = {
+    title: string;
+    image_desktop_url: string | null;
+    image_alt: string | null;
+    cta_label: string | null;
+    cta_href: string | null;
+    cta2_label: string | null;
+    product_slug: string | null;
+    background_color: string | null;
+  };
   const slides = () =>
     asRole(db, "anon", null, () =>
-      all<{ title: string; image_desktop_url: string; image_alt: string | null; cta_label: string | null; cta_href: string | null; cta2_label: string | null }>(
-        `select title, image_desktop_url, image_alt, cta_label, cta_href, cta2_label from banners where placement = 'hero' order by sort_order`,
+      all<Slide>(
+        `select b.title, b.image_desktop_url, b.image_alt, b.cta_label, b.cta_href, b.cta2_label, p.slug as product_slug, b.background_color
+           from banners b left join products p on p.id = b.product_id
+          where b.placement = 'hero' order by b.sort_order`,
       ),
     );
 
-  it("shows four photo slides, in order, each with copy, alt text and a link to a published page", async () => {
+  it("opens with the mockup slide (real serum photo on rosé), then the four campaign photos, each with copy and a link", async () => {
     const rows = await slides();
-    expect(rows.map((r) => r.image_desktop_url)).toEqual(PHOTOS);
-    expect(rows[0]).toMatchObject({ title: "Sua pele, seu ritual.", cta_href: "/produtos", cta2_label: null });
+    expect(rows[0]).toMatchObject({
+      title: "Sua pele, seu ritual.",
+      product_slug: "medicube-pdrn-pink-peptide-serum",
+      image_desktop_url: null,
+      cta_href: "/produtos",
+      background_color: "#F6E4E1",
+    });
+    expect(rows.slice(1).map((r) => r.image_desktop_url)).toEqual(PHOTOS);
+    expect(rows[1]).toMatchObject({ title: "Seu momento de autocuidado", cta2_label: null });
+    expect(new Set(rows.map((r) => r.title)).size).toBe(rows.length);
     for (const r of rows) {
-      expect(r.image_alt).toBeTruthy();
       expect(r.cta_label).toBeTruthy();
       expect(r.cta_href).toMatch(/^\//);
-      expect(existsSync(path.join(process.cwd(), "public", r.image_desktop_url))).toBe(true);
+      expect(r.background_color).toMatch(/^#[0-9A-F]{6}$/);
+      if (r.image_desktop_url) {
+        expect(r.image_alt).toBeTruthy();
+        expect(existsSync(path.join(process.cwd(), "public", r.image_desktop_url))).toBe(true);
+      }
       const slug = r.cta_href!.match(/^\/produtos\/(.+)$/)?.[1];
       if (slug) expect(await one(`select status from products where slug = $1`, [slug])).toEqual({ status: "published" });
     }
   });
 
-  it("re-running the carousel migration changes nothing (idempotent)", async () => {
+  it("re-running the carousel and premium home migrations changes nothing (idempotent)", async () => {
     const before = await slides();
-    const file = readdirSync(path.join(process.cwd(), "supabase", "migrations")).find((f) => f.includes("home_carousel"))!;
-    await db.exec(readFileSync(path.join(process.cwd(), "supabase", "migrations", file), "utf8"));
+    const banners = await all(`select placement, title, sort_order from banners order by placement, sort_order`);
+    for (const name of ["home_carousel", "premium_home"]) {
+      const file = readdirSync(path.join(process.cwd(), "supabase", "migrations")).find((f) => f.includes(name))!;
+      await db.exec(readFileSync(path.join(process.cwd(), "supabase", "migrations", file), "utf8"));
+    }
     expect(await slides()).toEqual(before);
-    expect((await one<{ n: number }>(`select count(*)::int as n from banners where placement = 'hero'`)).n).toBe(4);
+    expect(await all(`select placement, title, sort_order from banners order by placement, sort_order`)).toEqual(banners);
+    expect((await one<{ n: number }>(`select count(*)::int as n from banners where placement = 'hero'`)).n).toBe(5);
+  });
+});
+
+describe("premium home", () => {
+  it("has one banner for routines and one for upcoming launches, with the mockup copy", async () => {
+    const rows = await all<{ placement: string; title: string; cta_href: string }>(
+      `select placement, title, cta_href from banners where placement in ('routines', 'coming_soon') order by placement`,
+    );
+    expect(rows).toEqual([
+      { placement: "coming_soon", title: "Em breve na MIVORA", cta_href: "/produtos?disponibilidade=em-breve" },
+      { placement: "routines", title: "Rotinas de Skincare", cta_href: "/ritual" },
+    ]);
+    await expect(db.query(`insert into banners (placement, title) values ('popup', 'x')`)).rejects.toThrow(/placement_check/);
+    await expect(db.query(`update banners set background_color = 'pink' where placement = 'routines'`)).rejects.toThrow(/check/);
+  });
+
+  it("features the five needs of the mockup, in order", async () => {
+    const rows = await all<{ name: string }>(`select name from categories where kind = 'concern' and show_on_home order by sort_order, name`);
+    expect(rows.map((r) => r.name)).toEqual(["Hidratação", "Luminosidade", "Poros e textura", "Anti-idade", "Pele sensível"]);
+  });
+
+  it("keeps the top bar and benefits editable, without claiming nationwide delivery", async () => {
+    const s = await one<{ top_bar_messages: string[]; home_benefits: { title: string; text: string }[]; newsletter_enabled: boolean }>(
+      `select top_bar_messages, home_benefits, newsletter_enabled from store_settings where id = 1`,
+    );
+    expect(s.top_bar_messages).toHaveLength(3);
+    expect(s.home_benefits.map((b) => b.title)).toEqual(["Produtos originais", "Atendimento especializado", "Entrega para sua região"]);
+    expect(JSON.stringify(s)).not.toMatch(/todo o Brasil/i);
+    expect(s.newsletter_enabled).toBe(true);
+    await expect(db.query(`update store_settings set top_bar_messages = array['a','b','c','d','e'] where id = 1`)).rejects.toThrow(/top_bar_valid/);
+  });
+
+  it("publishes testimonials only with the customer's authorisation and shows visitors only published ones", async () => {
+    expect(await asRole(db, "anon", null, () => all(`select * from testimonials`))).toHaveLength(0);
+    await expect(
+      db.query(`insert into testimonials (author_name, body, is_published) values ('Ana', 'Gostei muito do atendimento.', true)`),
+    ).rejects.toThrow(/publish_requires_consent/);
+    await asRole(db, "authenticated", outsiderId, () =>
+      expect(db.query(`insert into testimonials (author_name, body) values ('Ana', 'Gostei muito do atendimento.')`)).rejects.toThrow(/row-level security/),
+    );
+    await asRole(db, "authenticated", adminId, () =>
+      db.query(
+        `insert into testimonials (author_name, body, rating, consent_confirmed, is_published)
+         values ('Ana S.', 'Gostei muito do atendimento.', 5, true, true), ('Bia', 'Rascunho ainda não publicado.', null, false, false)`,
+      ),
+    );
+    const visible = await asRole(db, "anon", null, () => all<{ author_name: string }>(`select author_name from testimonials`));
+    expect(visible.map((t) => t.author_name)).toEqual(["Ana S."]);
+    await db.query(`delete from testimonials`);
+  });
+
+  it("subscribes to the newsletter only with consent and a valid e-mail, without revealing who is subscribed", async () => {
+    const sub = (email: string, consent = true) =>
+      asRole(db, "anon", null, () => one<{ r: string }>(`select subscribe_newsletter($1, $2) as r`, [email, consent]));
+    await expect(sub("Cliente@Exemplo.com.br")).resolves.toEqual({ r: "ok" });
+    await expect(sub("cliente@exemplo.com.br")).resolves.toEqual({ r: "ok" });
+    await expect(sub("sem-arroba")).rejects.toThrow(/invalid_email/);
+    await expect(sub("outra@exemplo.com", false)).rejects.toThrow(/consent_required/);
+    expect(await asRole(db, "anon", null, () => all(`select * from newsletter_subscribers`))).toHaveLength(0);
+    await expect(asRole(db, "anon", null, () => db.query(`insert into newsletter_subscribers (email) values ('x@y.com')`))).rejects.toThrow(
+      /row-level security/,
+    );
+    const rows = await asRole(db, "authenticated", adminId, () => all<{ email: string }>(`select email from newsletter_subscribers`));
+    expect(rows).toEqual([{ email: "cliente@exemplo.com.br" }]);
+    await db.query(`update store_settings set newsletter_enabled = false where id = 1`);
+    await expect(sub("nova@exemplo.com")).rejects.toThrow(/newsletter_disabled/);
+    await db.query(`update store_settings set newsletter_enabled = true where id = 1`);
   });
 });

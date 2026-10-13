@@ -86,6 +86,7 @@ export async function saveCategory(_: ActionState, fd: FormData): Promise<Action
     name,
     slug,
     kind,
+    show_on_home: kind === "concern" && formBool(fd, "show_on_home"),
     description: formNullable(fd, "description"),
     image_url: safeImage(formNullable(fd, "image_url")),
     is_published: formBool(fd, "is_published"),
@@ -180,13 +181,29 @@ export async function deleteKit(id: string) {
 // ---------------------------------------------------------------------------
 // Banners & ritual
 // ---------------------------------------------------------------------------
+const BANNER_PLACEMENTS = ["hero", "editorial", "routines", "coming_soon"];
+
+/** "2026-11-20T09:00" (Brasília, from datetime-local) → ISO with offset; "" → null; invalid → undefined */
+function brasiliaDateTime(value: string) {
+  if (!value) return null;
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value) ? `${value}:00-03:00` : undefined;
+}
+
 export async function saveBanner(_: ActionState, fd: FormData): Promise<ActionState> {
   const { supabase } = await requireAdminAction();
   const id = formNullable(fd, "id");
   const title = formString(fd, "title");
   const placement = formString(fd, "placement");
   if (title.length < 2) return fail("Informe o título.");
-  if (placement !== "hero" && placement !== "editorial") return fail("Posição inválida.");
+  if (!BANNER_PLACEMENTS.includes(placement)) return fail("Posição inválida.");
+  const color = formString(fd, "background_color");
+  if (color && !/^#[0-9a-fA-F]{6}$/.test(color)) return fail("Cor de fundo inválida.");
+  const productId = formNullable(fd, "product_id");
+  if (productId && !uuid.safeParse(productId).success) return fail("Produto inválido.");
+  const startsAt = brasiliaDateTime(formString(fd, "starts_at"));
+  const endsAt = brasiliaDateTime(formString(fd, "ends_at"));
+  if (startsAt === undefined || endsAt === undefined) return fail("Data da campanha inválida.");
+  if (startsAt && endsAt && new Date(startsAt) >= new Date(endsAt)) return fail("O fim da campanha deve ser depois do início.");
   const row = {
     placement,
     eyebrow: formNullable(fd, "eyebrow"),
@@ -199,6 +216,10 @@ export async function saveBanner(_: ActionState, fd: FormData): Promise<ActionSt
     image_desktop_url: safeImage(formNullable(fd, "image_desktop_url")),
     image_mobile_url: safeImage(formNullable(fd, "image_mobile_url")),
     image_alt: formNullable(fd, "image_alt"),
+    background_color: color ? color.toUpperCase() : null,
+    product_id: productId,
+    starts_at: startsAt,
+    ends_at: endsAt,
     is_active: formBool(fd, "is_active"),
     sort_order: formInt(fd, "sort_order"),
   };
@@ -335,6 +356,14 @@ export async function saveSettings(_: ActionState, fd: FormData): Promise<Action
     formInt(fd, "shipping_default_length_cm", 16),
   ];
   if ([defaultHeight, defaultWidth, defaultLength].some((d) => d < 1 || d > 100)) return fail("As medidas padrão devem ficar entre 1 e 100 cm.");
+  const topBar = formString(fd, "top_bar_messages")
+    .split(/\r?\n/)
+    .map((m) => m.trim())
+    .filter(Boolean);
+  if (topBar.length > 4) return fail("Use no máximo 4 mensagens na barra superior.");
+  if (topBar.some((m) => m.length > 90)) return fail("Cada mensagem da barra superior deve ter até 90 caracteres.");
+  const benefits = [1, 2, 3].map((i) => ({ title: formString(fd, `benefit_title_${i}`), text: formString(fd, `benefit_text_${i}`) })).filter((b) => b.title);
+  if (benefits.some((b) => b.title.length > 40 || b.text.length > 80)) return fail("Benefícios: título com até 40 e texto com até 80 caracteres.");
 
   const { error } = await supabase
     .from("store_settings")
@@ -376,6 +405,9 @@ export async function saveSettings(_: ActionState, fd: FormData): Promise<Action
       shipping_default_height_cm: defaultHeight,
       shipping_default_width_cm: defaultWidth,
       shipping_default_length_cm: defaultLength,
+      top_bar_messages: topBar,
+      home_benefits: benefits,
+      newsletter_enabled: formBool(fd, "newsletter_enabled"),
       about_headline: formNullable(fd, "about_headline"),
       about_text: formNullable(fd, "about_text"),
       whatsapp_section_title: formNullable(fd, "whatsapp_section_title"),

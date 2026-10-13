@@ -122,10 +122,10 @@ export default async function SettingsPage() {
             <Field label="E-mail de contato" htmlFor="contact_email">
               <Input id="contact_email" name="contact_email" type="email" defaultValue={v.contact_email ?? ""} />
             </Field>
-            <Field label="Bloco de WhatsApp na home — título" htmlFor="whatsapp_section_title">
+            <Field label="Bloco de atendimento na home — título" htmlFor="whatsapp_section_title" hint="Aparece no lugar dos depoimentos enquanto não houver depoimentos publicados">
               <Input id="whatsapp_section_title" name="whatsapp_section_title" defaultValue={v.whatsapp_section_title ?? ""} />
             </Field>
-            <Field label="Bloco de WhatsApp na home — texto" htmlFor="whatsapp_section_text" className="sm:col-span-2">
+            <Field label="Bloco de atendimento na home — texto" htmlFor="whatsapp_section_text" className="sm:col-span-2">
               <Textarea id="whatsapp_section_text" name="whatsapp_section_text" rows={2} defaultValue={v.whatsapp_section_text ?? ""} />
             </Field>
           </div>
@@ -184,7 +184,34 @@ export default async function SettingsPage() {
           />
         </Card>
 
-        <Card title="Aviso no topo do site">
+        <Card
+          title="Barra superior e benefícios da home"
+          description="Textos da faixa preta acima do cabeçalho e da faixa de benefícios abaixo do banner. Publique apenas o que a loja cumpre (por exemplo, não anuncie entrega para todo o Brasil sem confirmar)."
+        >
+          <div className="grid gap-5">
+            <Field label="Mensagens da barra superior" htmlFor="top_bar_messages" hint="Uma por linha, até 4 (até 90 caracteres cada). A oferta de boas-vindas ativa entra automaticamente como primeira mensagem.">
+              <Textarea id="top_bar_messages" name="top_bar_messages" rows={3} defaultValue={(v.top_bar_messages ?? []).join("\n")} />
+            </Field>
+            <div className="grid gap-4 sm:grid-cols-3">
+              {[0, 1, 2].map((i) => {
+                const b = ((v.home_benefits ?? []) as { title: string; text: string }[])[i];
+                return (
+                  <div key={i} className="space-y-3 rounded-md border border-line p-4">
+                    <Field label={`Benefício ${i + 1} — título`} htmlFor={`benefit_title_${i + 1}`}>
+                      <Input id={`benefit_title_${i + 1}`} name={`benefit_title_${i + 1}`} defaultValue={b?.title ?? ""} maxLength={40} />
+                    </Field>
+                    <Field label="Texto" htmlFor={`benefit_text_${i + 1}`}>
+                      <Input id={`benefit_text_${i + 1}`} name={`benefit_text_${i + 1}`} defaultValue={b?.text ?? ""} maxLength={80} />
+                    </Field>
+                  </div>
+                );
+              })}
+            </div>
+            <Checkbox name="newsletter_enabled" label="Mostrar a inscrição na newsletter no rodapé" defaultChecked={v.newsletter_enabled ?? true} />
+          </div>
+        </Card>
+
+        <Card title="Aviso no topo do site" description="Quando ativo, substitui as mensagens da barra superior (use para campanhas).">
           <div className="grid gap-5 sm:grid-cols-2">
             <Field label="Texto do aviso" htmlFor="announcement_text">
               <Input id="announcement_text" name="announcement_text" defaultValue={v.announcement_text ?? ""} />
@@ -261,7 +288,7 @@ export default async function SettingsPage() {
             <Field label="Frase da loja (rodapé)" htmlFor="tagline">
               <Input id="tagline" name="tagline" defaultValue={v.tagline ?? ""} />
             </Field>
-            <Field label="“Conheça a MIVORA” — título" htmlFor="about_headline">
+            <Field label="“Conheça a MIVORA” — título" htmlFor="about_headline" hint="Guardado, mas não aparece no layout atual da home (a página Sobre é editada em Páginas)">
               <Input id="about_headline" name="about_headline" defaultValue={v.about_headline ?? ""} />
             </Field>
             <Field label="“Conheça a MIVORA” — texto" htmlFor="about_text">

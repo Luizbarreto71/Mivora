@@ -146,6 +146,7 @@ test("Testes 3, 4, 5 e 13 — carrinho, subtotal, WhatsApp e intenção de pedid
   await increase.nth(2).click(); // celimax ×3
   const expected = 2 * 11990 + 15900 + 3 * 8990;
   await expect(page.getByText(brl(expected)).first()).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Seu carrinho (6 itens)");
 
   // Teste 13: survives reloads
   await page.reload();
@@ -167,6 +168,11 @@ test("Testes 3, 4, 5 e 13 — carrinho, subtotal, WhatsApp e intenção de pedid
   expect(message).toMatch(/Código: MV\d{4}/);
   const code = message.match(/MIV-\d{6}/)?.[0];
   expect(code).toBeTruthy();
+
+  // "Minha conta" lists the order sent from this device
+  await page.goto("/minha-conta");
+  await expect(page.getByText(code!)).toBeVisible();
+  await expect(page.getByRole("link", { name: /Abrir conversa do pedido/ })).toHaveAttribute("href", /wa\.me/);
 
   // Teste 5: registered as an intent, never as a completed sale
   await admin.goto(`/admin/pedidos?q=${code}`);
@@ -216,7 +222,7 @@ test("Teste 14 — páginas públicas têm título, descrição, Open Graph e da
 test("Teste 11 — experiência mobile sem rolagem horizontal", async ({ browser }) => {
   const ctx = await browser.newContext({ viewport: { width: 375, height: 812 }, isMobile: true, hasTouch: true, storageState: RETURNING_VISITOR });
   const page = await ctx.newPage();
-  for (const url of ["/", "/produtos", "/produtos/dr-althea-345-relief-cream", "/carrinho", "/ritual"]) {
+  for (const url of ["/", "/produtos", "/produtos/dr-althea-345-relief-cream", "/carrinho", "/ritual", "/minha-conta", "/finalizar"]) {
     await page.goto(url);
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     expect(overflow, url).toBeLessThanOrEqual(0);
@@ -335,7 +341,7 @@ test("Boas-vindas — apresentação na primeira visita e cupom de 10% aplicado 
   await expect(intro).toBeHidden();
   await page.reload();
   await expect(page.getByRole("dialog", { name: "Bem-vinda à MIVORA" })).toHaveCount(0);
-  await expect(page.getByText(/Novas clientes ganham 10% OFF/)).toBeVisible();
+  await expect(page.getByText("10% OFF na primeira compra · cupom BEMVINDA10").first()).toBeVisible();
 
   await page.goto("/produtos/skin1004-madagascar-centella-ampoule");
   await page.getByRole("button", { name: "Adicionar ao carrinho" }).click();
@@ -447,26 +453,99 @@ test("Frete — admin configura origem e zona por CEP; cliente calcula no produt
 // ---------------------------------------------------------------------------
 // Home — carrossel de fotos
 // ---------------------------------------------------------------------------
-test("Home — carrossel de fotos com a frase ao lado, setas, indicadores e pausa", async ({ page }) => {
+test("Home — carrossel: banner do mockup, fotos de campanha, setas, indicadores e pausa", async ({ page }) => {
   await page.goto("/");
   const carousel = page.getByRole("region", { name: "Destaques da MIVORA" });
   await expect(carousel.getByRole("heading", { level: 1, name: "Sua pele, seu ritual." })).toBeVisible();
-  await expect(carousel.getByRole("img", { name: /aparelho facial de luz/ })).toBeVisible();
+  await expect(carousel.getByText("Beleza que cuida de você")).toBeVisible();
+  await expect(carousel.getByRole("link", { name: /Explorar produtos/ })).toHaveAttribute("href", "/produtos");
+  await expect(carousel.getByRole("img", { name: /PDRN Pink Peptide/i })).toBeVisible();
 
   await carousel.getByRole("button", { name: "Pausar a troca automática" }).click();
   await expect(carousel.getByRole("button", { name: "Retomar a troca automática" })).toBeVisible();
   await carousel.getByRole("button", { name: "Próximo destaque" }).click();
+  await expect(carousel.getByRole("heading", { name: "Seu momento de autocuidado" })).toBeVisible();
+  await expect(carousel.getByRole("img", { name: /aparelho facial de luz/ })).toBeVisible();
+
+  await carousel.getByRole("button", { name: /Ir para o destaque 3/ }).click();
   await expect(carousel.getByRole("heading", { name: "Desperte seu glow com o cuidado noturno" })).toBeVisible();
   await expect(carousel.getByRole("link", { name: "Ver produto" })).toHaveAttribute("href", "/produtos/medicube-collagen-night-wrapping-mask");
 
-  await carousel.getByRole("button", { name: /Ir para o destaque 3/ }).click();
+  await carousel.getByRole("button", { name: /Ir para o destaque 4/ }).click();
   await expect(carousel.getByRole("heading", { name: "Poros limpos, pele lisa" })).toBeVisible();
-  await carousel.getByRole("button", { name: "Destaque anterior" }).click();
-  await carousel.getByRole("button", { name: "Destaque anterior" }).click();
-  await carousel.getByRole("button", { name: "Destaque anterior" }).click();
+  for (let i = 0; i < 4; i++) await carousel.getByRole("button", { name: "Destaque anterior" }).click();
   await expect(carousel.getByRole("heading", { name: "Glow de pele de vidro o dia todo" })).toBeVisible();
 
-  await carousel.getByRole("button", { name: /Ir para o destaque 3/ }).click();
+  await carousel.getByRole("button", { name: /Ir para o destaque 4/ }).click();
   await carousel.getByRole("link", { name: "Comprar agora" }).click();
   await expect(page).toHaveURL(/\/produtos\/medicube-zero-pore-pad$/);
+});
+
+test("Home premium — cabeçalho, busca, seções do mockup, produto em abas, newsletter e depoimentos reais", async ({ page }) => {
+  await page.goto("/");
+  // header: thin bar, search in the middle, account / favourites / cart, compact navigation
+  await expect(page.getByText("Atendimento via WhatsApp").first()).toBeVisible();
+  const nav = page.getByRole("navigation", { name: "Principal" });
+  for (const label of ["Início", "Todos os produtos", "Marcas", "Cuidados com a pele", "Novidades", "Contato"]) await expect(nav.getByRole("link", { name: label, exact: true })).toBeVisible();
+  await page.getByRole("combobox", { name: "Buscar produtos" }).fill("centella");
+  await expect(page.getByRole("link", { name: /Madagascar Centella Ampoule/ }).first()).toBeVisible();
+  await page.getByRole("combobox", { name: "Buscar produtos" }).press("Enter");
+  await expect(page).toHaveURL(/\/produtos\?q=centella/);
+  await page.getByRole("link", { name: "Minha conta" }).first().click();
+  await expect(page.getByRole("heading", { level: 1, name: "Minha conta" })).toBeVisible();
+
+  // home sections in the order of the mockup, with real data
+  await page.goto("/");
+  await expect(page.getByRole("region", { name: "Diferenciais da MIVORA" }).getByText("Produtos originais")).toBeVisible();
+  const headings = await page.locator("main h2").filter({ visible: true }).allTextContents();
+  const order = ["Novidades MIVORA", "Descubra por marca", "Rotinas de Skincare", "Cuidados para cada necessidade"].map((t) => headings.findIndex((h) => h.includes(t)));
+  expect(order.every((i) => i >= 0)).toBe(true);
+  expect([...order].sort((a, b) => a - b)).toEqual(order);
+  expect(await page.getByRole("list", { name: "Novidades MIVORA" }).locator("article").count()).toBe(4);
+  await expect(page.getByRole("link", { name: "Medicube", exact: true }).first()).toHaveAttribute("href", "/marcas/medicube");
+  await expect(page.getByRole("link", { name: /Ver rotinas/ })).toHaveAttribute("href", "/ritual");
+  await expect(page.getByRole("heading", { name: "O que nossos clientes dizem" })).toHaveCount(0);
+  await page.getByRole("link", { name: "Poros e textura" }).click();
+  await expect(page).toHaveURL(/\/categorias\/poros-e-oleosidade$/);
+  await expect(page.getByRole("heading", { level: 1, name: "Poros e textura" })).toBeVisible();
+  expect(await page.locator("main article").count()).toBeGreaterThan(0);
+
+  // product page: information in tabs, only from the product's own data
+  await page.goto("/produtos/dr-althea-345-relief-cream");
+  await expect(page.getByRole("tab", { name: "Descrição" })).toHaveAttribute("aria-selected", "true");
+  await page.getByRole("tab", { name: "Como usar" }).click();
+  await expect(page.getByRole("tabpanel")).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Como usar" })).toHaveAttribute("aria-selected", "true");
+
+  // newsletter in the footer (stored only through the database function)
+  const email = `e2e-${Date.now()}@exemplo.com.br`;
+  await page.getByLabel("Receba novidades e lançamentos").fill(email);
+  await page.getByRole("button", { name: "Inscrever-se" }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Inscrição confirmada" })).toBeVisible();
+  await admin.goto("/admin/newsletter");
+  await expect(admin.getByText(email)).toBeVisible();
+
+  // testimonials: never published without the customer's authorisation, shown once published
+  await admin.goto("/admin/depoimentos");
+  const form = admin.locator("form").filter({ has: admin.getByRole("button", { name: "Cadastrar depoimento" }) });
+  await form.getByLabel("Nome ou identificação autorizada").fill("Cliente E2E");
+  await form.getByLabel("Depoimento", { exact: true }).fill("Atendimento atencioso e entrega combinada certinho.");
+  await form.getByLabel("Publicar na home (seção “O que nossos clientes dizem”)").check();
+  await form.getByRole("button", { name: "Cadastrar depoimento" }).click();
+  await expect(admin.getByText(/confirme que o depoimento é real/)).toBeVisible();
+  await form.getByLabel(/Confirmo que este depoimento é real/).check();
+  await form.getByRole("button", { name: "Cadastrar depoimento" }).click();
+  await expect(admin.getByText("Depoimento cadastrado.")).toBeVisible();
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "O que nossos clientes dizem" })).toBeVisible();
+  await expect(page.getByText("“Atendimento atencioso e entrega combinada certinho.”")).toBeVisible();
+
+  // campaign banners are managed in the admin: deactivating "Em breve" hides it
+  await admin.goto("/admin/conteudo");
+  const soon = admin.locator("form").filter({ has: admin.locator('input[name="title"][value="Em breve na MIVORA"]') });
+  await soon.getByLabel("Ativo").uncheck();
+  await soon.getByRole("button", { name: "Salvar banner" }).click();
+  await expect(admin.getByText("Banner salvo.").first()).toBeVisible();
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "Em breve na MIVORA" })).toHaveCount(0);
 });

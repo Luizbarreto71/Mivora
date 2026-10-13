@@ -14,7 +14,7 @@ export default async function PanelLayout({ children }: { children: React.ReactN
   }
   const session = await requireAdmin();
   return (
-    <div className="lg:flex">
+    <div className="min-h-dvh bg-[#f6f6f4] lg:flex">
       <AdminSidebar email={session.user.email} signOut={signOut} />
       <main className="min-w-0 flex-1">{children}</main>
     </div>

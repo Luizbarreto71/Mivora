@@ -50,6 +50,25 @@ Cada produto tem **visibilidade** (rascunho/publicado/arquivado) e **disponibili
 - **Segurança:** o navegador envia só o CEP e a opção escolhida. Ao finalizar, o servidor **refaz a cotação** com os preços do banco, e a função `create_order_intent` confere o formato do CEP e se a zona atende o destino. CEP, cidade, serviço e prazo ficam no pedido (painel e CSV) e vão na mensagem do WhatsApp, sempre como **estimativa** confirmada no atendimento.
 - O token do Melhor Envio fica **só na variável de ambiente**, porque as configurações da loja são públicas (RLS). Há limite de 20 cotações por minuto por IP e cache de 10 minutos para cotações iguais.
 
+### Visual premium (13/10/2026)
+Reprodução do mockup enviado pela dona da loja, sem trocar a stack nem apagar dados:
+
+- **Tipografia e cores:** Inter em todo o site (texto 400, destaques 500/600, títulos 600), texto `#121212` sobre branco, rosé e bege nas faixas de campanha, cards com borda discreta.
+- **Cabeçalho:** barra preta fina com mensagens (Configurações → Barra superior; a oferta de boas-vindas entra sozinha), logo à esquerda, busca central com sugestões, conta, favoritos e carrinho, e menu compacto (Início, Todos os produtos, Marcas, Cuidados com a pele, Novidades, Contato). No celular: menu lateral, busca, conta e carrinho.
+- **Home, na ordem do mockup:** banner principal em carrossel → faixa de benefícios → Novidades MIVORA → Descubra por marca → Rotinas de Skincare → Cuidados para cada necessidade → Em breve na MIVORA → depoimentos → rodapé.
+  - **Banners** (Admin → Banners e home): principal, rotinas, em breve e vitrines extras, com título, subtítulo, botões, foto desktop/celular, **cor de fundo**, **produto em destaque** (para banners sem foto) e **período da campanha**. Sem foto, o banner usa fotos reais dos produtos.
+  - **Necessidades:** categorias com “Mostrar na home” (Admin → Categorias). Sem imagem própria, cada quadro usa a foto de um produto diferente da categoria.
+  - **Marcas:** as cinco primeiras marcas com produtos, pela ordem de Admin → Marcas. Sem imagem da marca, usa a foto de um produto. O nome aparece no tipo do site, nunca como logotipo imitado.
+  - **Em breve:** aparece quando há produtos “Em breve” publicados (o botão abre a lista) ou, sem eles, quando o WhatsApp está configurado (o botão pergunta dos próximos lançamentos). Pode ser desativado no painel.
+  - **Depoimentos** (Admin → Depoimentos): só aparecem depoimentos reais, e para publicar é obrigatório confirmar a autorização da cliente. Sem depoimentos publicados, a seção some e, com o WhatsApp configurado, entra um bloco institucional de atendimento no lugar. Nada de prova social inventada.
+- **Rodapé:** faixa escura (logo, redes configuradas, newsletter, frase da loja) e colunas de links.
+- **Newsletter:** e-mail e data da inscrição gravados pela função `subscribe_newsletter` (consentimento, validação, limite por minuto, mesma resposta para e-mail novo ou repetido). Lista, exclusão e CSV em Admin → Newsletter. A política de privacidade ganhou um parágrafo sobre isso.
+- **Produto:** galeria com miniaturas, compra à direita (preço real, estoque, frete pelo CEP, entrega/pagamento) e abas Descrição, Benefícios, Ingredientes, Como usar e Perguntas frequentes, só com dados do cadastro.
+- **Carrinho:** “Seu carrinho (N itens)”, lista com quantidade e remoção, resumo com frete pelo CEP e finalização pelo WhatsApp.
+- **Minha conta:** a loja não tem cadastro de cliente. A página mostra os pedidos enviados deste aparelho (código e link da conversa, guardados só no navegador) e os favoritos.
+- **Painel:** barra lateral escura, área clara, e os formulários não perdem mais o que foi digitado quando o servidor recusa um envio.
+- **Fotos:** a home usa as fotos de campanha enviadas e fotos reais dos produtos. Três fotos de produto com fundo cinza de estúdio ganharam fundo branco (originais em `assets/originals/products/`).
+
 ## 2. Estrutura
 
 ```
@@ -61,6 +80,7 @@ src/lib/catalog/          leituras públicas com cache ('use cache' + cacheTag)
 src/lib/admin/            autenticação, schemas e Server Actions do admin
 src/lib/store/actions.ts  carrinho e finalização (Server Actions)
 src/lib/whatsapp.ts       montagem da mensagem e do link
+src/components/store/home/ seções da home (banner, benefícios, marcas, campanhas, necessidades, depoimentos)
 src/lib/shipping/         calculadora de frete: CEP, zonas por CEP/cidade e cotação no Melhor Envio (servidor)
 src/proxy.ts              renova a sessão do admin (o antigo middleware)
 public/products/          fotos enviadas (WebP otimizado); originais em assets/originals/
@@ -148,5 +168,8 @@ O checklist também aparece no painel (`/admin`, card “Preparação para o lan
 8. **Páginas institucionais:** revisar privacidade, termos, envio e trocas com a assessoria e desmarcar “pendente de revisão”.
 9. **Entrega e frete:** informar o CEP de origem e criar as opções reais (faixas de CEP ou cidades, taxa, prazo) em Configurações. Para cotar Correios e transportadoras, gerar o token no Melhor Envio e cadastrar `MELHOR_ENVIO_TOKEN` na Vercel/Hostinger. Revisar as políticas de envio e de privacidade, que ganharam um parágrafo sobre a calculadora.
 10. **Domínio** e `NEXT_PUBLIC_SITE_URL`.
+11. **Fotos editoriais da home:** para chegar ao nível do mockup, envie fotos licenciadas para o banner principal (horizontal, com espaço livre à esquerda, ou vertical com o produto no centro), “Rotinas de Skincare”, “Em breve”, cada necessidade e cada marca. Hoje essas áreas usam as fotos de campanha enviadas e fotos dos produtos.
+12. **Textos de confiança:** confirme que pode afirmar “Produtos originais — qualidade e procedência” (notas e fornecedores) e só troque a barra superior para “Enviamos para todo o Brasil” depois de confirmar a cobertura (Configurações → Barra superior e benefícios).
+13. **Redes sociais:** preencha Instagram/TikTok/Facebook em Configurações para o “Siga a gente” do rodapé.
 11. **Símbolo ®:** fica desligado; só ative em Configurações se o registro da marca estiver confirmado.
 12. **Analytics e Meta Pixel:** não instalados. Se forem adicionados, incluir aviso de consentimento e atualizar a política de privacidade.

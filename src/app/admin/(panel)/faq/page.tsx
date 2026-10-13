@@ -34,7 +34,7 @@ function FaqForm({ faq, products }: { faq?: FaqRow; products: { id: string; name
         <Field label="Ordem" className="w-24">
           <Input name="sort_order" inputMode="numeric" defaultValue={faq?.sort_order ?? 0} />
         </Field>
-        <Checkbox name="show_on_home" label="Mostrar na home" defaultChecked={faq?.show_on_home ?? true} />
+        <Checkbox name="show_on_home" label="Destacar (aparece nas páginas de produto que não têm perguntas próprias)" defaultChecked={faq?.show_on_home ?? true} />
         <Checkbox name="is_published" label="Publicada" defaultChecked={faq?.is_published ?? true} />
         <SubmitButton variant={faq ? "outline" : "primary"}>{faq ? "Salvar" : "Adicionar pergunta"}</SubmitButton>
       </div>

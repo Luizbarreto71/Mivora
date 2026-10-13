@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { Suspense } from "react";
 import { CartDrawer } from "@/components/store/cart-drawer";
 import { CartProvider } from "@/components/store/cart-context";
@@ -6,6 +5,7 @@ import { FloatingWhatsApp } from "@/components/store/floating-whatsapp";
 import { Footer } from "@/components/store/footer";
 import { Header, type NavData } from "@/components/store/header";
 import { StoreConfigProvider } from "@/components/store/store-config";
+import { TopBar } from "@/components/store/top-bar";
 import { WelcomeIntro } from "@/components/store/welcome-intro";
 import { getBrands, getCategories, getKits, getStoreSettings } from "@/lib/catalog/queries";
 import { SITE_URL } from "@/lib/env";
@@ -38,29 +38,20 @@ export default async function StoreLayout({ children }: { children: React.ReactN
         <a href="#conteudo" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[100] focus:bg-ink focus:px-4 focus:py-2 focus:text-paper">
           Pular para o conteúdo
         </a>
-        {!(settings.announcement_enabled && settings.announcement_text) && settings.welcome_offer_enabled ? (
-          <div className="bg-ink text-paper">
-            <p className="container-page flex min-h-9 items-center justify-center py-2 text-center text-[0.6875rem] font-medium uppercase tracking-[0.18em]">
-              Novas clientes ganham {settings.welcome_offer_percent}% OFF na primeira compra · cupom {settings.welcome_offer_code}
-            </p>
-          </div>
-        ) : null}
         {settings.announcement_enabled && settings.announcement_text ? (
-          <div className="bg-ink text-paper">
-            <div className="container-page flex min-h-9 items-center justify-center py-2 text-center text-[0.6875rem] font-medium uppercase tracking-[0.18em]">
-              {settings.announcement_href ? (
-                <Link href={settings.announcement_href} className="hover:underline">
-                  {settings.announcement_text}
-                </Link>
-              ) : (
-                settings.announcement_text
-              )}
-            </div>
-          </div>
-        ) : null}
+          // a campaign notice replaces the regular messages while it is active
+          <TopBar messages={[settings.announcement_text]} href={settings.announcement_href} />
+        ) : (
+          <TopBar
+            messages={[
+              ...(settings.welcome_offer_enabled ? [`${settings.welcome_offer_percent}% OFF na primeira compra · cupom ${settings.welcome_offer_code}`] : []),
+              ...settings.top_bar_messages,
+            ]}
+          />
+        )}
         <Header nav={nav} registered={settings.show_registered_mark} />
         <main id="conteudo">{children}</main>
-        <Footer settings={settings} />
+        <Footer settings={settings} nav={nav} />
         <CartDrawer />
         <WelcomeIntro />
         <Suspense fallback={null}>

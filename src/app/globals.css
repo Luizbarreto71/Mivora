@@ -10,6 +10,12 @@
   --color-line: #eaeaea;
   --color-muted: #737373;
   --color-blush: #eadddd;
+  /* rosé and beige of the campaign bands; card is the light stage behind product photos */
+  --color-rose: #f6e4e1;
+  --color-rose-soft: #fbf3f1;
+  --color-rose-ink: #8a4b51;
+  --color-beige: #f3ece4;
+  --color-card: #faf8f6;
   --color-success: #2f6b4f;
   --color-danger: #a33a3a;
   --color-warning: #8a6a1f;

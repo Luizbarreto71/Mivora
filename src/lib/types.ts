@@ -29,6 +29,8 @@ export type Category = {
   description: string | null;
   image_url: string | null;
   is_featured: boolean;
+  /** Needs shown in "Cuidados para cada necessidade" on the home */
+  show_on_home?: boolean;
   sort_order: number;
   seo_title: string | null;
   seo_description: string | null;
@@ -125,6 +127,11 @@ export type StoreSettings = {
   shipping_default_height_cm: number;
   shipping_default_width_cm: number;
   shipping_default_length_cm: number;
+  /** Thin black bar above the header (up to 4 short messages) */
+  top_bar_messages: string[];
+  /** Strip below the home banner */
+  home_benefits: { title: string; text: string }[];
+  newsletter_enabled: boolean;
   about_headline: string | null;
   about_text: string | null;
   whatsapp_section_title: string | null;
@@ -148,8 +155,15 @@ export type DeliveryZone = {
   cities: string[];
 };
 
+export type BannerPlacement = "hero" | "editorial" | "routines" | "coming_soon";
+
 export type Banner = {
   id: string;
+  placement?: BannerPlacement;
+  /** Banner background (hex). Photos dissolve into it. */
+  background_color?: string | null;
+  /** Product shown on the banner when there is no campaign photo */
+  product?: { slug: string; name: string; image: ImageRef | null } | null;
   eyebrow: string | null;
   title: string;
   subtitle: string | null;
@@ -171,6 +185,9 @@ export type RitualStep = {
 };
 
 export type Faq = { id: string; question: string; answer: string };
+
+/** Real, authorised customer testimonial (never invented). */
+export type Testimonial = { id: string; author_name: string; author_detail: string | null; body: string; rating: number | null };
 
 export type Kit = {
   id: string;

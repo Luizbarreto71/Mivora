@@ -9,11 +9,13 @@ import type {
   CategoryKind,
   DeliveryZone,
   Faq,
+  ImageRef,
   Kit,
   ProductDetail,
   ProductSummary,
   RitualStep,
   StoreSettings,
+  Testimonial,
 } from "@/lib/types";
 import { NEW_ARRIVAL_DAYS, PAGE_SIZE, type CatalogFilters } from "./filters";
 import { PRODUCT_SUMMARY_SELECT, sortImages, toProductSummary, toVariant, validCompareAt, type Row } from "./mappers";
@@ -62,6 +64,13 @@ export const DEFAULT_SETTINGS: StoreSettings = {
   shipping_default_height_cm: 6,
   shipping_default_width_cm: 11,
   shipping_default_length_cm: 16,
+  top_bar_messages: ["Skincare coreano e cosméticos importados", "Frete e prazo calculados pelo CEP", "Atendimento via WhatsApp"],
+  home_benefits: [
+    { title: "Produtos originais", text: "Qualidade e procedência" },
+    { title: "Atendimento especializado", text: "Suporte via WhatsApp" },
+    { title: "Entrega para sua região", text: "Frete e prazo calculados pelo CEP" },
+  ],
+  newsletter_enabled: true,
   about_headline: null,
   about_text: null,
   whatsapp_section_title: null,
@@ -100,27 +109,89 @@ export async function getDeliveryZones(): Promise<DeliveryZone[]> {
   return (data ?? []) as DeliveryZone[];
 }
 
-export async function getHomeContent(): Promise<{ hero: Banner[]; editorial: Banner[]; ritual: RitualStep[]; faqs: Faq[] }> {
+type HomeContent = {
+  hero: Banner[];
+  editorial: Banner[];
+  routines: Banner | null;
+  comingSoon: Banner | null;
+  ritual: RitualStep[];
+  faqs: Faq[];
+};
+
+export async function getHomeContent(): Promise<HomeContent> {
   "use cache";
   cacheLife("hours");
   cacheTag(TAGS.content);
   const sb = getPublicSupabase();
-  if (!sb) return { hero: [], editorial: [], ritual: [], faqs: [] };
+  if (!sb) return { hero: [], editorial: [], routines: null, comingSoon: null, ritual: [], faqs: [] };
   const [banners, ritual, faqs] = await Promise.all([
-    sb.from("banners").select("*").order("sort_order"),
+    // RLS hides inactive banners, campaigns outside their period and unpublished products
+    sb.from("banners").select("*, product:products(slug, name, images:product_images(url, alt, is_primary, sort_order))").order("sort_order"),
     sb.from("ritual_steps").select("id, step_number, title, description, category:categories(slug, name)").order("sort_order"),
     sb.from("faqs").select("id, question, answer").is("product_id", null).eq("show_on_home", true).order("sort_order"),
   ]);
   if (banners.error) fail("banners", banners.error);
   if (ritual.error) fail("ritual", ritual.error);
   if (faqs.error) fail("faqs", faqs.error);
-  const all = (banners.data ?? []) as (Banner & { placement: string })[];
+  const all = ((banners.data ?? []) as Row[]).map((b) => {
+    const product = b.product as Row | null;
+    return {
+      ...(b as Banner),
+      product: product ? { slug: product.slug as string, name: product.name as string, image: sortImages(product.images)[0] ?? null } : null,
+    };
+  });
   return {
     hero: all.filter((b) => b.placement === "hero"),
     editorial: all.filter((b) => b.placement === "editorial"),
+    routines: all.find((b) => b.placement === "routines") ?? null,
+    comingSoon: all.find((b) => b.placement === "coming_soon") ?? null,
     ritual: (ritual.data ?? []) as unknown as RitualStep[],
     faqs: (faqs.data ?? []) as Faq[],
   };
+}
+
+export type HomeNeed = { slug: string; name: string; productCount: number; categoryImage: ImageRef | null; productImages: ImageRef[] };
+
+/** "Cuidados para cada necessidade": needs marked for the home, with their own photo or a product photo. */
+export async function getHomeNeeds(): Promise<HomeNeed[]> {
+  "use cache";
+  cacheLife("hours");
+  cacheTag(TAGS.catalog);
+  const sb = getPublicSupabase();
+  if (!sb) return [];
+  const { data, error } = await sb
+    .from("categories")
+    .select("slug, name, image_url, sort_order, links:product_categories(product:products(status, sort_order, is_featured, images:product_images(url, alt, is_primary, sort_order)))")
+    .eq("kind", "concern")
+    .eq("show_on_home", true)
+    .order("sort_order")
+    .order("name");
+  if (error) fail("home needs", error);
+  return ((data ?? []) as Row[]).map((c) => {
+    const products = ((c.links ?? []) as Row[])
+      .map((l) => l.product as Row | null)
+      .filter((p): p is Row => Boolean(p && p.status === "published"))
+      .sort((a, b) => Number(b.is_featured) - Number(a.is_featured) || a.sort_order - b.sort_order);
+    return {
+      slug: c.slug as string,
+      name: c.name as string,
+      productCount: products.length,
+      categoryImage: c.image_url ? { url: c.image_url as string, alt: null } : null,
+      productImages: products.map((p) => sortImages(p.images)[0]).filter((i): i is ImageRef => Boolean(i)).slice(0, 8),
+    };
+  });
+}
+
+/** Published testimonials (real and authorised; the section is hidden while there are none). */
+export async function getTestimonials(): Promise<Testimonial[]> {
+  "use cache";
+  cacheLife("hours");
+  cacheTag(TAGS.content);
+  const sb = getPublicSupabase();
+  if (!sb) return [];
+  const { data, error } = await sb.from("testimonials").select("id, author_name, author_detail, body, rating").order("sort_order").order("created_at", { ascending: false }).limit(8);
+  if (error) fail("testimonials", error);
+  return (data ?? []) as Testimonial[];
 }
 
 export async function getFaqs(): Promise<Faq[]> {
@@ -195,7 +266,7 @@ export async function getCategories(kind?: CategoryKind): Promise<CategoryWithCo
   if (!sb) return [];
   const { data, error } = await sb
     .from("categories")
-    .select("id, parent_id, slug, name, kind, description, image_url, is_featured, sort_order, seo_title, seo_description, links:product_categories(product_id)")
+    .select("id, parent_id, slug, name, kind, description, image_url, is_featured, show_on_home, sort_order, seo_title, seo_description, links:product_categories(product_id)")
     .order("sort_order")
     .order("name");
   if (error) fail("categories", error);

@@ -5,14 +5,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import type { ProductSummary } from "@/lib/types";
 import { Price } from "./price";
-
-type Suggestions = {
-  products: ProductSummary[];
-  brands: { slug: string; name: string }[];
-  categories: { slug: string; name: string }[];
-};
+import { useSearchSuggestions } from "./use-search-suggestions";
 
 const POPULAR = ["Centella", "Vitamina C", "Niacinamida", "Retinal", "Poros", "Pele sensível"];
 
@@ -20,8 +14,7 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [q, setQ] = useState("");
-  const [data, setData] = useState<Suggestions | null>(null);
-  const [loading, setLoading] = useState(false);
+  const { data, loading, empty } = useSearchSuggestions(q);
 
   useEffect(() => {
     if (!open) return;
@@ -36,31 +29,6 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
     };
   }, [open, onClose]);
 
-  useEffect(() => {
-    const term = q.trim();
-    if (term.length < 2) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setData(null);
-      return;
-    }
-    const controller = new AbortController();
-    setLoading(true);
-    const t = setTimeout(async () => {
-      try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(term)}`, { signal: controller.signal });
-        if (res.ok) setData(await res.json());
-      } catch {
-        /* aborted or offline */
-      } finally {
-        if (!controller.signal.aborted) setLoading(false);
-      }
-    }, 180);
-    return () => {
-      clearTimeout(t);
-      controller.abort();
-    };
-  }, [q]);
-
   if (!open) return null;
 
   const submit = (term: string) => {
@@ -69,7 +37,6 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
     router.push(`/produtos?q=${encodeURIComponent(term.trim())}`);
   };
 
-  const empty = data && !data.products.length && !data.brands.length && !data.categories.length;
 
   return (
     <div className="fixed inset-0 z-[70]" role="dialog" aria-modal="true" aria-label="Buscar produtos">

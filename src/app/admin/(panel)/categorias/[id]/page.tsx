@@ -51,11 +51,12 @@ export default async function CategoryEditPage({ params }: PageProps<"/admin/cat
             <Textarea id="description" name="description" defaultValue={c?.description ?? ""} rows={3} />
           </Field>
           <div className="sm:col-span-2">
-            <MediaField name="image_url" label="Imagem (opcional)" defaultValue={c?.image_url ?? null} folder="categories" />
+            <MediaField name="image_url" label="Imagem (opcional)" defaultValue={c?.image_url ?? null} folder="categories" hint="Usada no quadro da home. Sem imagem, aparece a foto de um produto desta categoria." />
           </div>
           <div className="flex flex-wrap gap-6 sm:col-span-2">
             <Checkbox name="is_published" label="Publicada" defaultChecked={c?.is_published ?? true} />
             <Checkbox name="is_featured" label="Destaque na navegação" defaultChecked={c?.is_featured ?? false} />
+            <Checkbox name="show_on_home" label="Mostrar na home em “Cuidados para cada necessidade” (só necessidades)" defaultChecked={c?.show_on_home ?? false} />
           </div>
           <Field label="Título SEO" htmlFor="seo_title">
             <Input id="seo_title" name="seo_title" defaultValue={c?.seo_title ?? ""} maxLength={70} />
