@@ -1,0 +1,350 @@
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { beforeAll, describe, expect, it } from "vitest";
+import { asRole, createTestDb, type TestDb } from "./harness";
+
+let db: TestDb;
+
+/** Seoul Beauty catalogue cash price minus R$ 20 (owner's request, 2026-10-12). */
+const CATALOG_PRICES: Record<string, number> = {
+  "skin1004-madagascar-centella-ampoule-foam": 12999,
+  "skin1004-madagascar-centella-light-cleansing-oil": 13999,
+  "skin1004-madagascar-centella-ampoule": 17999,
+  "skin1004-madagascar-centella-tone-brightening-capsule-ampoule": 17999,
+  "medicube-zero-pore-pad": 17999,
+  "dr-althea-345-relief-cream": 17999,
+  "celimax-the-vita-a-retinal-shot": 16499,
+  "numbuzin-no9-volumetox-eye-cream": 14999,
+  "celimax-pore-dark-spot-brightening-cream": 12999,
+  "medicube-pdrn-pink-peptide-serum": 15999,
+  "medicube-pdrn-pink-collagen-gel-mask": 2499,
+};
+let adminId: string;
+let outsiderId: string;
+
+const one = async <T>(sql: string, params: unknown[] = []) => (await db.query<T>(sql, params)).rows[0];
+const all = async <T>(sql: string, params: unknown[] = []) => (await db.query<T>(sql, params)).rows;
+const productId = async (slug: string) => (await one<{ id: string }>(`select id from products where slug = $1`, [slug])).id;
+
+beforeAll(async () => {
+  db = await createTestDb();
+  adminId = (await one<{ id: string }>(`insert into auth.users (email) values ('owner@mivora.test') returning id`)).id;
+  outsiderId = (await one<{ id: string }>(`insert into auth.users (email) values ('someone@mivora.test') returning id`)).id;
+  await db.query(`select public.grant_admin_by_email('owner@mivora.test', 'owner')`);
+}, 60_000);
+
+describe("initial catalogue (Teste 10 / 12)", () => {
+  it("has the nine stock products, published, with brand and categories", async () => {
+    const rows = await all<{ slug: string; brand: string; types: number; price_cents: number | null; stock_quantity: number | null }>(`
+      select p.slug, b.name as brand, p.price_cents, p.stock_quantity,
+             (select count(*)::int from product_categories pc join categories c on c.id = pc.category_id
+               where pc.product_id = p.id and c.kind = 'product_type') as types
+        from products p join brands b on b.id = p.brand_id
+       where p.status = 'published' order by p.sort_order`);
+    expect(rows).toHaveLength(9);
+    expect(new Set(rows.map((r) => r.brand))).toEqual(new Set(["Medicube", "SKIN1004", "Celimax", "Dr. Althea", "Numbuzin"]));
+    for (const r of rows) {
+      expect(r.types, r.slug).toBeGreaterThanOrEqual(1);
+      expect(r.price_cents, `${r.slug} price must come from the supplier catalogue`).toBe(CATALOG_PRICES[r.slug] ?? null);
+      expect(r.stock_quantity, `${r.slug} must not have an invented stock`).toBeNull();
+    }
+  });
+
+  it("maps each supplied photo to the right product and flags missing media", async () => {
+    const rows = await all<{ slug: string; url: string | null; media_pending: boolean }>(`
+      select p.slug, i.url, p.media_pending from products p
+      left join product_images i on i.product_id = p.id and i.is_primary order by p.slug`);
+    const bySlug = Object.fromEntries(rows.map((r) => [r.slug, r]));
+    expect(bySlug["skin1004-madagascar-centella-ampoule"].url).toBe("/products/skin1004-madagascar-centella-ampoule.webp");
+    expect(bySlug["skin1004-madagascar-centella-tone-brightening-capsule-ampoule"].url).toBe(
+      "/products/skin1004-madagascar-centella-tone-brightening-capsule-ampoule.webp",
+    );
+    expect(bySlug["dr-althea-345-relief-cream"].url).toBe("/products/dr-althea-345-relief-cream.webp");
+    expect(bySlug["celimax-pore-dark-spot-brightening-cream"].url).toBe("/products/celimax-pore-dark-spot-brightening-cream.webp");
+    expect(bySlug["medicube-deep-vita-c-pad"].url).toBe("/products/medicube-deep-vita-c-pad.webp");
+    for (const slug of ["medicube-pdrn-pink-peptide-serum", "medicube-zero-pore-pad", "celimax-the-vita-a-retinal-shot"]) {
+      expect(bySlug[slug].url).toBeNull();
+      expect(bySlug[slug].media_pending).toBe(true);
+    }
+  });
+
+  it("keeps planned products out of the public catalogue", async () => {
+    const n = await one<{ n: number }>(`select count(*)::int as n from products where (name ilike '%Collagen Jelly%' or name ilike '%Anua%') and status = 'published'`);
+    expect(n.n).toBe(0);
+    const s = await one<{ n: number }>(`select count(*)::int as n from product_suggestions`);
+    expect(s.n).toBe(6);
+  });
+});
+
+describe("search document", () => {
+  const search = (term: string) =>
+    all<{ slug: string }>(`select slug from products where status = 'published' and search_text like '%' || normalize_search($1) || '%' order by slug`, [term]);
+
+  it("finds by ingredient, brand, need and ignores accents/case", async () => {
+    expect((await search("CENTELLA")).length).toBeGreaterThanOrEqual(3);
+    expect((await search("medicube")).map((r) => r.slug)).toHaveLength(3);
+    expect((await search("vitamina c")).map((r) => r.slug)).toContain("medicube-deep-vita-c-pad");
+    expect((await search("poros")).map((r) => r.slug)).toContain("medicube-zero-pore-pad");
+    expect((await search("pele sensivel")).map((r) => r.slug)).toContain("dr-althea-345-relief-cream");
+    expect((await search("ácido tranexâmico")).map((r) => r.slug)).toEqual(["celimax-pore-dark-spot-brightening-cream"]);
+  });
+});
+
+describe("row level security (Teste 9)", () => {
+  it("anon sees published catalogue but never private or order data", async () => {
+    await asRole(db, "anon", null, async () => {
+      expect((await all(`select id from products`)).length).toBe(9);
+      expect(await all(`select * from product_private`)).toHaveLength(0);
+      expect(await all(`select * from order_intents`)).toHaveLength(0);
+      expect(await all(`select * from audit_log`)).toHaveLength(0);
+      expect(await all(`select * from product_suggestions`)).toHaveLength(0);
+      await expect(db.query(`update products set price_cents = 1 where true`)).resolves.toMatchObject({ affectedRows: 0 });
+      await expect(db.query(`insert into brands (slug, name) values ('x', 'X')`)).rejects.toThrow(/row-level security/);
+      await expect(db.query(`select public.admin_dashboard_stats()`)).rejects.toThrow(/permission denied|not_authorized/);
+      await expect(db.query(`select public.grant_admin_by_email('someone@mivora.test')`)).rejects.toThrow(/permission denied/);
+    });
+  });
+
+  it("authenticated non-admin users have no admin powers", async () => {
+    await asRole(db, "authenticated", outsiderId, async () => {
+      expect(await all(`select * from product_private`)).toHaveLength(0);
+      await expect(db.query(`insert into admin_users (user_id, role) values ($1, 'owner')`, [outsiderId])).rejects.toThrow(/row-level security/);
+      const pid = (await one<{ id: string }>(`select id from products limit 1`)).id;
+      await expect(db.query(`select admin_adjust_stock($1, null, 'in', 5, 'x')`, [pid])).rejects.toThrow(/not_authorized/);
+    });
+  });
+});
+
+describe("admin catalogue management (Testes 1, 2, 7)", () => {
+  it("admin creates, prices, publishes and unpublishes a product", async () => {
+    const brandId = (await one<{ id: string }>(`select id from brands where slug = 'medicube'`)).id;
+    await asRole(db, "authenticated", adminId, async () => {
+      const p = await one<{ id: string }>(
+        `insert into products (slug, name, brand_id, status, price_cents) values ('teste-produto', 'Produto Teste', $1, 'draft', 12990) returning id`,
+        [brandId],
+      );
+      await db.query(`insert into product_private (product_id, cost_cents, sku, regulatory_status) values ($1, 5000, 'SKU-TESTE', 'verified')`, [p.id]);
+      await db.query(`insert into product_images (product_id, url, is_primary) values ($1, 'https://x/y.webp', true)`, [p.id]);
+      await db.query(`update products set status = 'published' where id = $1`, [p.id]);
+    });
+    await asRole(db, "anon", null, async () => {
+      const row = await one<{ price_cents: number; published_at: string }>(`select price_cents, published_at from products where slug = 'teste-produto'`);
+      expect(row.price_cents).toBe(12990);
+      expect(row.published_at).not.toBeNull();
+      expect(await all(`select * from product_images where url = 'https://x/y.webp'`)).toHaveLength(1);
+    });
+    await asRole(db, "authenticated", adminId, () => db.query(`update products set price_cents = 9990 where slug = 'teste-produto'`));
+    await asRole(db, "anon", null, async () => {
+      expect((await one<{ price_cents: number }>(`select price_cents from products where slug = 'teste-produto'`)).price_cents).toBe(9990);
+    });
+    await asRole(db, "authenticated", adminId, () => db.query(`update products set status = 'draft' where slug = 'teste-produto'`));
+    await asRole(db, "anon", null, async () => {
+      expect(await all(`select * from products where slug = 'teste-produto'`)).toHaveLength(0);
+      expect(await all(`select * from product_images where url = 'https://x/y.webp'`)).toHaveLength(0);
+    });
+    const audit = await all<{ action: string }>(`select action from audit_log where entity = 'products' and actor_id = $1`, [adminId]);
+    expect(audit.length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("order intents (Testes 4, 5, 6, 8)", () => {
+  it("computes subtotals on the server and never prices unpriced items", async () => {
+    const centella = await productId("skin1004-madagascar-centella-ampoule");
+    const cream = await productId("dr-althea-345-relief-cream");
+    const vitac = await productId("medicube-deep-vita-c-pad");
+    await db.query(`update products set price_cents = 11990 where id = $1`, [centella]);
+    await db.query(`update products set price_cents = 15900 where id = $1`, [cream]);
+
+    const res = await asRole(db, "anon", null, () =>
+      one<{ r: { code: string; subtotal_cents: number; has_unpriced_items: boolean; items: { unit_price_cents: number | null }[] } }>(
+        `select create_order_intent($1::jsonb) as r`,
+        [JSON.stringify([
+          { product_id: centella, quantity: 2 },
+          { product_id: cream, quantity: 1 },
+          { product_id: vitac, quantity: 3 },
+        ])],
+      ),
+    );
+    expect(res.r.code).toMatch(/^MIV-\d{6}$/);
+    expect(res.r.subtotal_cents).toBe(2 * 11990 + 15900);
+    expect(res.r.has_unpriced_items).toBe(true);
+    expect(res.r.items[2].unit_price_cents).toBeNull();
+    expect((res.r.items as unknown as { code: string }[]).every((i) => /^MV[0-9]{4}$/.test(i.code))).toBe(true);
+
+    const order = await one<{ status: string; inventory_state: string }>(`select status, inventory_state from order_intents where code = $1`, [res.r.code]);
+    expect(order.status).toBe("started");
+    expect(order.inventory_state).toBe("none");
+    const stats = await asRole(db, "authenticated", adminId, () => one<{ s: Record<string, number> }>(`select admin_dashboard_stats() as s`));
+    expect(stats.s.orders_started).toBeGreaterThanOrEqual(1);
+    expect(stats.s.orders_completed).toBe(0);
+    expect(stats.s.sales_completed_cents).toBe(0);
+  });
+
+  it("rejects out-of-stock tracked products and tampered quantities", async () => {
+    const pid = await productId("celimax-pore-dark-spot-brightening-cream");
+    await db.query(`update products set track_inventory = true, stock_quantity = 0 where id = $1`, [pid]);
+    await asRole(db, "anon", null, async () => {
+      await expect(db.query(`select create_order_intent($1::jsonb)`, [JSON.stringify([{ product_id: pid, quantity: 1 }])])).rejects.toThrow(/item_unavailable/);
+      await expect(db.query(`select create_order_intent($1::jsonb)`, [JSON.stringify([{ product_id: pid, quantity: 500 }])])).rejects.toThrow(/invalid_quantity/);
+      await expect(db.query(`select create_order_intent('[]'::jsonb)`)).rejects.toThrow(/empty_cart/);
+    });
+    await db.query(`update products set stock_quantity = 2 where id = $1`, [pid]);
+    await asRole(db, "anon", null, async () => {
+      await expect(db.query(`select create_order_intent($1::jsonb)`, [JSON.stringify([{ product_id: pid, quantity: 3 }])])).rejects.toThrow(/insufficient_stock/);
+    });
+  });
+
+  it("moves stock only on manual confirmation / completion / cancellation", async () => {
+    const pid = await productId("celimax-pore-dark-spot-brightening-cream");
+    await db.query(`update products set track_inventory = true, stock_quantity = 5, reserved_quantity = 0, price_cents = 8990 where id = $1`, [pid]);
+    const r = await asRole(db, "anon", null, () =>
+      one<{ r: { id: string } }>(`select create_order_intent($1::jsonb) as r`, [JSON.stringify([{ product_id: pid, quantity: 2 }])]),
+    );
+    const stock = () => one<{ stock_quantity: number; reserved_quantity: number }>(`select stock_quantity, reserved_quantity from products where id = $1`, [pid]);
+    expect(await stock()).toEqual({ stock_quantity: 5, reserved_quantity: 0 });
+
+    await asRole(db, "authenticated", adminId, () => db.query(`select admin_set_order_status($1, 'confirmed', 'Cliente confirmou')`, [r.r.id]));
+    expect(await stock()).toEqual({ stock_quantity: 5, reserved_quantity: 2 });
+
+    await asRole(db, "authenticated", adminId, () => db.query(`select admin_set_order_status($1, 'completed')`, [r.r.id]));
+    expect(await stock()).toEqual({ stock_quantity: 3, reserved_quantity: 0 });
+
+    await asRole(db, "authenticated", adminId, () => db.query(`select admin_set_order_status($1, 'cancelled', 'Devolução')`, [r.r.id]));
+    expect(await stock()).toEqual({ stock_quantity: 5, reserved_quantity: 0 });
+
+    const moves = await all<{ movement_type: string }>(`select movement_type from inventory_movements where order_id = $1 order by id`, [r.r.id]);
+    expect(moves.map((m) => m.movement_type)).toEqual(["reservation", "sale", "return"]);
+    const history = await all<{ from_status: string | null; to_status: string }>(`select from_status, to_status from order_status_history where order_id = $1 order by id`, [r.r.id]);
+    expect(history.map((h) => `${h.from_status}->${h.to_status}`)).toEqual(["null->started", "started->confirmed", "confirmed->completed", "completed->cancelled"]);
+  });
+
+  it("supports manual stock entry and blocks negative stock", async () => {
+    const pid = await productId("medicube-zero-pore-pad");
+    await asRole(db, "authenticated", adminId, async () => {
+      await db.query(`select admin_adjust_stock($1, null, 'in', 10, 'Entrada de mercadoria')`, [pid]);
+      await expect(db.query(`select admin_adjust_stock($1, null, 'out', 11, 'x')`, [pid])).rejects.toThrow(/insufficient_stock/);
+    });
+    const p = await one<{ stock_quantity: number; track_inventory: boolean; is_available: boolean }>(
+      `select stock_quantity, track_inventory, is_available from products where id = $1`, [pid]);
+    expect(p).toEqual({ stock_quantity: 10, track_inventory: true, is_available: true });
+  });
+});
+
+describe("catalogue expansion (29 products)", () => {
+  const counts = async () =>
+    one<{ products: number; brands: number; slugs: number; links: number; categories: number }>(`
+      select (select count(*)::int from products where slug <> 'teste-produto') as products,
+             (select count(*)::int from brands) as brands,
+             (select count(distinct slug)::int from products) as slugs,
+             (select count(*)::int from product_categories) as links,
+             (select count(*)::int from categories) as categories`);
+
+  it("has 29 records, 16 brands and every product in at least one product type", async () => {
+    const c = await counts();
+    expect(c.products).toBe(29);
+    expect(c.brands).toBe(16);
+    const orphans = await all<{ slug: string }>(`
+      select p.slug from products p where p.slug <> 'teste-produto' and not exists (
+        select 1 from product_categories pc join categories c on c.id = pc.category_id
+         where pc.product_id = p.id and c.kind = 'product_type')`);
+    expect(orphans).toEqual([]);
+  });
+
+  it("keeps the 20 new products as drafts with no invented price, stock or photos", async () => {
+    const rows = await all<{ slug: string; status: string; availability: string; price_cents: number | null; stock_quantity: number | null; sourcing_status: string; images: number }>(`
+      select p.slug, p.status, p.availability, p.price_cents, p.stock_quantity, pp.sourcing_status,
+             (select count(*)::int from product_images i where i.product_id = p.id) as images
+        from products p join product_private pp on pp.product_id = p.id
+       where p.sort_order >= 10 and p.slug <> 'teste-produto'`);
+    expect(rows).toHaveLength(20);
+    for (const r of rows) {
+      expect(r).toMatchObject({ status: "draft", availability: "coming_soon", price_cents: CATALOG_PRICES[r.slug] ?? null, stock_quantity: null, images: 0 });
+    }
+    expect(rows.filter((r) => r.sourcing_status === "planned")).toHaveLength(12);
+    expect(rows.filter((r) => r.sourcing_status === "evaluating")).toHaveLength(8);
+  });
+
+  it("re-running the data migration changes nothing (idempotent)", async () => {
+    const before = await counts();
+    const file = readdirSync(path.join(process.cwd(), "supabase", "migrations")).find((f) => f.includes("catalog_expansion_data"))!;
+    await db.exec(readFileSync(path.join(process.cwd(), "supabase", "migrations", file), "utf8"));
+    expect(await counts()).toEqual(before);
+  });
+
+  it("hides drafts from visitors and never lets 'Em breve' products be ordered", async () => {
+    const pid = await productId("anua-heartleaf-77-soothing-toner");
+    await asRole(db, "anon", null, async () => {
+      expect(await all(`select id from products where id = $1`, [pid])).toHaveLength(0);
+    });
+    await db.query(`update products set status = 'published' where id = $1`, [pid]);
+    await asRole(db, "anon", null, async () => {
+      expect(await all(`select id from products where id = $1`, [pid])).toHaveLength(1);
+      await expect(db.query(`select create_order_intent($1::jsonb)`, [JSON.stringify([{ product_id: pid, quantity: 1 }])])).rejects.toThrow(/item_unavailable/);
+    });
+    await db.query(`update products set status = 'draft' where id = $1`, [pid]);
+  });
+
+  it("blocks sales of new products until documentation is verified", async () => {
+    const pid = await productId("torriden-dive-in-low-molecular-hyaluronic-acid-serum");
+    await asRole(db, "authenticated", adminId, async () => {
+      await expect(db.query(`update products set status = 'published', availability = 'in_stock' where id = $1`, [pid])).rejects.toThrow(/compliance_required/);
+      await db.query(`update product_private set regulatory_status = 'verified', regulatory_reference = 'teste' where product_id = $1`, [pid]);
+      await db.query(`update products set status = 'published', availability = 'in_stock' where id = $1`, [pid]);
+      await expect(db.query(`update product_private set regulatory_status = 'in_progress' where product_id = $1`, [pid])).rejects.toThrow(/compliance_required/);
+    });
+    const priv = await one<{ regulatory_verified_by: string }>(`select regulatory_verified_by from product_private where product_id = $1`, [pid]);
+    expect(priv.regulatory_verified_by).toBe(adminId);
+    // Originals (confirmed stock) keep selling
+    const original = await productId("dr-althea-345-relief-cream");
+    await db.query(`update products set availability = 'out_of_stock' where id = $1`, [original]);
+    await db.query(`update products set availability = 'in_stock' where id = $1`, [original]);
+  });
+
+  it("exposes manual related products only between published items", async () => {
+    const a = await productId("skin1004-madagascar-centella-ampoule");
+    const draft = await productId("skin1004-madagascar-centella-light-cleansing-oil");
+    const pub = await productId("dr-althea-345-relief-cream");
+    await db.query(`insert into product_relations (product_id, related_product_id) values ($1, $2), ($1, $3)`, [a, draft, pub]);
+    await asRole(db, "anon", null, async () => {
+      const rows = await all<{ related_product_id: string }>(`select related_product_id from product_relations where product_id = $1`, [a]);
+      expect(rows.map((r) => r.related_product_id)).toEqual([pub]);
+    });
+  });
+});
+
+describe("welcome offer (first purchase coupon)", () => {
+  const order = (items: unknown, coupon: string | null, phone: string | null = null) =>
+    asRole(db, "anon", null, () =>
+      one<{ r: { id: string; subtotal_cents: number; discount_cents: number; coupon_code: string | null; discount_percent: number | null } }>(
+        `select create_order_intent($1::jsonb, null, $3, null, null, $2) as r`,
+        [JSON.stringify(items), coupon, phone],
+      ),
+    );
+
+  it("applies the configured percentage on priced items only, computed on the server", async () => {
+    const ampoule = await productId("skin1004-madagascar-centella-ampoule");
+    const vitac = await productId("medicube-deep-vita-c-pad"); // no price
+    await db.query(`update products set price_cents = 17999 where id = $1`, [ampoule]);
+    const res = await order([{ product_id: ampoule, quantity: 2 }, { product_id: vitac, quantity: 1 }], "bemvinda10");
+    expect(res.r.subtotal_cents).toBe(35998);
+    expect(res.r.discount_cents).toBe(3599);
+    expect(res.r).toMatchObject({ coupon_code: "BEMVINDA10", discount_percent: 10 });
+    const stored = await one<{ discount_cents: number; coupon_code: string }>(`select discount_cents, coupon_code from order_intents where id = $1`, [res.r.id]);
+    expect(stored).toEqual({ discount_cents: 3599, coupon_code: "BEMVINDA10" });
+  });
+
+  it("rejects unknown codes, disabled offers and repeat customers (by phone)", async () => {
+    const ampoule = await productId("skin1004-madagascar-centella-ampoule");
+    await expect(order([{ product_id: ampoule, quantity: 1 }], "DESCONTO50")).rejects.toThrow(/coupon_invalid/);
+
+    const first = await order([{ product_id: ampoule, quantity: 1 }], null, "(11) 98888-7777");
+    await asRole(db, "authenticated", adminId, () => db.query(`select admin_set_order_status($1, 'confirmed')`, [first.r.id]));
+    await expect(order([{ product_id: ampoule, quantity: 1 }], "BEMVINDA10", "11988887777")).rejects.toThrow(/coupon_not_first_purchase/);
+
+    await db.query(`update store_settings set welcome_offer_enabled = false`);
+    await expect(order([{ product_id: ampoule, quantity: 1 }], "BEMVINDA10")).rejects.toThrow(/coupon_invalid/);
+    await db.query(`update store_settings set welcome_offer_enabled = true`);
+    const none = await order([{ product_id: ampoule, quantity: 1 }], null);
+    expect(none.r.discount_cents).toBe(0);
+  });
+});

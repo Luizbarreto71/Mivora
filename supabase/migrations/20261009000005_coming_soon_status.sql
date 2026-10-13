@@ -1,0 +1,13 @@
+-- MIVORA — "Em breve" availability.
+-- Kept alone in its own migration: a new enum value cannot be used in the same
+-- transaction that creates it.
+--
+-- Commercial status = visibility (products.status) + availability:
+--   Rascunho   → status 'draft'                          (admin only)
+--   Em breve   → status 'published' + 'coming_soon'      (visible, never purchasable)
+--   Disponível → status 'published' + 'in_stock'
+--   Esgotado   → status 'published' + 'out_of_stock'
+--   Arquivado  → status 'archived'
+-- products.is_available is only true for 'in_stock', so 'coming_soon' can never
+-- be added to an order (create_order_intent checks it).
+alter type public.availability_status add value if not exists 'coming_soon';
