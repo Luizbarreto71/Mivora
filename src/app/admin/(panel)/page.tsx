@@ -39,6 +39,7 @@ export default async function DashboardPage() {
         <StatCard label="Produtos cadastrados" value={s.products_total ?? 0} hint={`${s.products_published ?? 0} publicados · ${s.products_draft ?? 0} rascunhos`} href="/admin/produtos" />
         <StatCard label="Disponíveis para compra" value={s.products_available ?? 0} hint="Publicados e em estoque" href="/admin/produtos?filtro=disponiveis" tone="success" />
         <StatCard label="Em breve" value={s.products_coming_soon ?? 0} hint="Planejados (sem venda)" href="/admin/produtos?filtro=em-breve" />
+        <StatCard label="Sob consulta" value={s.products_on_request ?? 0} hint="Visíveis, preço pelo WhatsApp" href="/admin/produtos?filtro=sob-consulta" />
         <StatCard label="Esgotados" value={s.products_unavailable ?? 0} hint="Publicados sem estoque" href="/admin/produtos?filtro=indisponiveis" tone={(s.products_unavailable ?? 0) > 0 ? "warning" : "default"} />
         <StatCard label="Estoque baixo" value={s.products_low_stock ?? 0} hint="Com controle numérico" href="/admin/estoque" tone={(s.products_low_stock ?? 0) > 0 ? "warning" : "default"} />
         <StatCard label="Pedidos em aberto" value={s.orders_started ?? 0} hint={`${s.orders_started_30d ?? 0} iniciados nos últimos 30 dias`} href="/admin/pedidos" />

@@ -126,7 +126,15 @@ export function BuyBox({ product }: { product: ProductDetail }) {
         ) : null}
         {whatsappHref ? (
           <a href={whatsappHref} target="_blank" rel="noopener noreferrer" className={buttonClasses(isAvailable ? "outline" : "primary", "lg", "w-full")}>
-            <WhatsAppIcon className="h-4 w-4" /> {comingSoon ? "Consultar previsão de chegada" : isAvailable ? "Comprar pelo WhatsApp" : "Consultar disponibilidade"}
+            <WhatsAppIcon className="h-4 w-4" /> {comingSoon
+              ? "Consultar previsão de chegada"
+              : isAvailable
+                ? "Comprar pelo WhatsApp"
+                : product.availability === "on_request"
+                  ? priceCents == null
+                    ? "Consultar preço pelo WhatsApp"
+                    : "Consultar disponibilidade"
+                  : "Consultar disponibilidade"}
           </a>
         ) : null}
       </div>

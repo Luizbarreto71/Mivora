@@ -5,6 +5,20 @@ import { asRole, createTestDb, type TestDb } from "./harness";
 
 let db: TestDb;
 
+/** Expansion drafts that appear in the Catálogo MIVORA 2026 and became visible as "Sob consulta". */
+const CATALOGUE_DRAFTS = [
+  "cosrx-advanced-snail-96-mucin-power-essence",
+  "anua-heartleaf-77-soothing-toner",
+  "laneige-lip-sleeping-mask",
+  "biodance-bio-collagen-real-deep-mask",
+  "skin1004-madagascar-centella-light-cleansing-oil",
+  "medicube-collagen-jelly-cream",
+  "medicube-collagen-night-wrapping-mask",
+  "dr-althea-147-barrier-cream",
+  "torriden-dive-in-low-molecular-hyaluronic-acid-serum",
+  "round-lab-1025-dokdo-toner",
+];
+
 /** Seoul Beauty catalogue cash price minus R$ 20 (owner's request, 2026-10-12). */
 const CATALOG_PRICES: Record<string, number> = {
   "skin1004-madagascar-centella-ampoule-foam": 12999,
@@ -39,8 +53,8 @@ describe("initial catalogue (Teste 10 / 12)", () => {
       select p.slug, b.name as brand, p.price_cents, p.stock_quantity,
              (select count(*)::int from product_categories pc join categories c on c.id = pc.category_id
                where pc.product_id = p.id and c.kind = 'product_type') as types
-        from products p join brands b on b.id = p.brand_id
-       where p.status = 'published' order by p.sort_order`);
+        from products p join brands b on b.id = p.brand_id join product_private pp on pp.product_id = p.id
+       where pp.sourcing_status = 'stock_confirmed' and p.status = 'published' order by p.sort_order`);
     expect(rows).toHaveLength(9);
     expect(new Set(rows.map((r) => r.brand))).toEqual(new Set(["Medicube", "SKIN1004", "Celimax", "Dr. Althea", "Numbuzin"]));
     for (const r of rows) {
@@ -50,7 +64,7 @@ describe("initial catalogue (Teste 10 / 12)", () => {
     }
   });
 
-  it("maps each supplied photo to the right product and flags missing media", async () => {
+  it("maps each supplied photo to the right product (catalogue photos fill the gaps)", async () => {
     const rows = await all<{ slug: string; url: string | null; media_pending: boolean }>(`
       select p.slug, i.url, p.media_pending from products p
       left join product_images i on i.product_id = p.id and i.is_primary order by p.slug`);
@@ -62,17 +76,106 @@ describe("initial catalogue (Teste 10 / 12)", () => {
     expect(bySlug["dr-althea-345-relief-cream"].url).toBe("/products/dr-althea-345-relief-cream.webp");
     expect(bySlug["celimax-pore-dark-spot-brightening-cream"].url).toBe("/products/celimax-pore-dark-spot-brightening-cream.webp");
     expect(bySlug["medicube-deep-vita-c-pad"].url).toBe("/products/medicube-deep-vita-c-pad.webp");
+    // These three had no photo; the Catálogo MIVORA 2026 provides them
     for (const slug of ["medicube-pdrn-pink-peptide-serum", "medicube-zero-pore-pad", "celimax-the-vita-a-retinal-shot"]) {
-      expect(bySlug[slug].url).toBeNull();
-      expect(bySlug[slug].media_pending).toBe(true);
+      expect(bySlug[slug].url).toBe(`/products/${slug}.webp`);
+      expect(bySlug[slug].media_pending).toBe(false);
     }
   });
 
   it("keeps planned products out of the public catalogue", async () => {
-    const n = await one<{ n: number }>(`select count(*)::int as n from products where (name ilike '%Collagen Jelly%' or name ilike '%Anua%') and status = 'published'`);
+    const n = await one<{ n: number }>(`select count(*)::int as n from products where (name ilike '%Atobarrier%' or name ilike '%Banila%' or name ilike '%EGF%') and status = 'published'`);
     expect(n.n).toBe(0);
     const s = await one<{ n: number }>(`select count(*)::int as n from product_suggestions`);
     expect(s.n).toBe(6);
+  });
+});
+
+describe("Catálogo MIVORA 2026 (50 produtos)", () => {
+  const catalogueCounts = async () =>
+    one<{ products: number; images: number; brands: number; categories: number; links: number }>(`
+      select (select count(*)::int from products) as products,
+             (select count(*)::int from product_images) as images,
+             (select count(*)::int from brands) as brands,
+             (select count(*)::int from categories) as categories,
+             (select count(*)::int from product_categories) as links`);
+
+  it("adds the 34 missing products as 'Sob consulta', without price or stock, each with its photo", async () => {
+    const rows = await all<{ slug: string; status: string; availability: string; price_cents: number | null; track_inventory: boolean; url: string | null; sourcing_status: string; regulatory_status: string; content_verified: boolean; types: number }>(`
+      select p.slug, p.status, p.availability, p.price_cents, p.track_inventory, i.url,
+             pp.sourcing_status, pp.regulatory_status, pp.content_verified,
+             (select count(*)::int from product_categories pc join categories c on c.id = pc.category_id
+               where pc.product_id = p.id and c.kind = 'product_type') as types
+        from products p
+        join product_private pp on pp.product_id = p.id
+        left join product_images i on i.product_id = p.id and i.is_primary
+       where p.sort_order between 101 and 150`);
+    expect(rows).toHaveLength(34);
+    for (const r of rows) {
+      expect(r, r.slug).toMatchObject({
+        status: "published",
+        availability: "on_request",
+        price_cents: null,
+        track_inventory: false,
+        url: `/products/${r.slug}.webp`,
+        sourcing_status: "planned",
+        regulatory_status: "not_verified",
+        content_verified: false,
+      });
+      expect(r.types, r.slug).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it("creates the new brands and categories and links sunscreen to the ritual", async () => {
+    const brands = await all<{ slug: string }>(`select slug from brands where slug in ('victorias-secret', 'olaplex', 'k18', 'kerastase', 'lilyeve')`);
+    expect(brands).toHaveLength(5);
+    const tree = await all<{ slug: string; parent: string | null }>(`
+      select c.slug, p.slug as parent from categories c left join categories p on p.id = c.parent_id
+       where c.slug in ('protecao-solar', 'cuidados-capilares', 'shampoos', 'fragrancias', 'body-splash', 'bases-e-cushions') order by c.slug`);
+    expect(Object.fromEntries(tree.map((t) => [t.slug, t.parent]))).toEqual({
+      "bases-e-cushions": "maquiagem",
+      "body-splash": "fragrancias",
+      "cuidados-capilares": null,
+      fragrancias: null,
+      "protecao-solar": null,
+      shampoos: "cuidados-capilares",
+    });
+    const step = await one<{ slug: string }>(`select c.slug from ritual_steps r join categories c on c.id = r.category_id where r.step_number = 6`);
+    expect(step.slug).toBe("protecao-solar");
+  });
+
+  it("never replaces existing photos, prices or the owner's photos", async () => {
+    const rows = await all<{ slug: string; images: number; url: string; price_cents: number | null }>(`
+      select p.slug, count(i.*)::int as images, min(i.url) as url, p.price_cents
+        from products p join product_images i on i.product_id = p.id
+       where p.slug in ('dr-althea-345-relief-cream', 'celimax-pore-dark-spot-brightening-cream', 'skin1004-madagascar-centella-ampoule')
+       group by p.slug, p.price_cents order by p.slug`);
+    expect(rows.map((r) => [r.slug, r.images, r.url, r.price_cents])).toEqual([
+      ["celimax-pore-dark-spot-brightening-cream", 1, "/products/celimax-pore-dark-spot-brightening-cream.webp", 12999],
+      ["dr-althea-345-relief-cream", 1, "/products/dr-althea-345-relief-cream.webp", 17999],
+      ["skin1004-madagascar-centella-ampoule", 1, "/products/skin1004-madagascar-centella-ampoule.webp", 17999],
+    ]);
+    const jelly = await one<{ volume: string }>(`select volume from products where slug = 'medicube-collagen-jelly-cream'`);
+    expect(jelly.volume).toBe("50 ml");
+  });
+
+  it("shows 'Sob consulta' products to visitors but never accepts them in an order", async () => {
+    const pid = await productId("olaplex-no3-hair-perfector");
+    await asRole(db, "anon", null, async () => {
+      expect(await all(`select id from products where id = $1`, [pid])).toHaveLength(1);
+      await expect(db.query(`select create_order_intent($1::jsonb)`, [JSON.stringify([{ product_id: pid, quantity: 1 }])])).rejects.toThrow(/item_unavailable/);
+    });
+    // and they still cannot be put on sale without the documentation check
+    await asRole(db, "authenticated", adminId, async () => {
+      await expect(db.query(`update products set availability = 'in_stock' where id = $1`, [pid])).rejects.toThrow(/compliance_required/);
+    });
+  });
+
+  it("re-running the catalogue migration changes nothing (idempotent)", async () => {
+    const before = await catalogueCounts();
+    const file = readdirSync(path.join(process.cwd(), "supabase", "migrations")).find((f) => f.includes("catalogo_mivora_2026"))!;
+    await db.exec(readFileSync(path.join(process.cwd(), "supabase", "migrations", file), "utf8"));
+    expect(await catalogueCounts()).toEqual(before);
   });
 });
 
@@ -82,18 +185,31 @@ describe("search document", () => {
 
   it("finds by ingredient, brand, need and ignores accents/case", async () => {
     expect((await search("CENTELLA")).length).toBeGreaterThanOrEqual(3);
-    expect((await search("medicube")).map((r) => r.slug)).toHaveLength(3);
+    const medicube = (await search("medicube")).map((r) => r.slug);
+    expect(medicube).toHaveLength(10);
+    expect(medicube.every((slug) => slug.startsWith("medicube-"))).toBe(true);
+    expect(await search("body splash")).toHaveLength(10);
+    expect((await search("olaplex")).map((r) => r.slug)).toEqual(["olaplex-no3-hair-perfector"]);
+    // the cleansing oil also matches ("remove maquiagem e protetor solar")
+    expect((await search("protetor solar")).map((r) => r.slug)).toEqual(
+      expect.arrayContaining(["beauty-of-joseon-relief-sun-rice-probiotics", "skin1004-madagascar-centella-hyalu-cica-water-fit-sun-serum"]),
+    );
     expect((await search("vitamina c")).map((r) => r.slug)).toContain("medicube-deep-vita-c-pad");
     expect((await search("poros")).map((r) => r.slug)).toContain("medicube-zero-pore-pad");
     expect((await search("pele sensivel")).map((r) => r.slug)).toContain("dr-althea-345-relief-cream");
-    expect((await search("ácido tranexâmico")).map((r) => r.slug)).toEqual(["celimax-pore-dark-spot-brightening-cream"]);
+    expect((await search("ácido tranexâmico")).map((r) => r.slug)).toEqual([
+      "anua-niacinamide-10-txa-4-dark-spot-correcting-serum",
+      "celimax-pore-dark-spot-brightening-cream",
+    ]);
   });
 });
 
 describe("row level security (Teste 9)", () => {
   it("anon sees published catalogue but never private or order data", async () => {
+    const published = (await one<{ n: number }>(`select count(*)::int as n from products where status = 'published'`)).n;
+    expect(published).toBe(53);
     await asRole(db, "anon", null, async () => {
-      expect((await all(`select id from products`)).length).toBe(9);
+      expect((await all(`select id from products`)).length).toBe(published);
       expect(await all(`select * from product_private`)).toHaveLength(0);
       expect(await all(`select * from order_intents`)).toHaveLength(0);
       expect(await all(`select * from audit_log`)).toHaveLength(0);
@@ -239,10 +355,10 @@ describe("catalogue expansion (29 products)", () => {
              (select count(*)::int from product_categories) as links,
              (select count(*)::int from categories) as categories`);
 
-  it("has 29 records, 16 brands and every product in at least one product type", async () => {
+  it("has 63 records (29 + 34 from the catalogue), 29 brands and every product in a product type", async () => {
     const c = await counts();
-    expect(c.products).toBe(29);
-    expect(c.brands).toBe(16);
+    expect(c.products).toBe(63);
+    expect(c.brands).toBe(29);
     const orphans = await all<{ slug: string }>(`
       select p.slug from products p where p.slug <> 'teste-produto' and not exists (
         select 1 from product_categories pc join categories c on c.id = pc.category_id
@@ -250,18 +366,25 @@ describe("catalogue expansion (29 products)", () => {
     expect(orphans).toEqual([]);
   });
 
-  it("keeps the 20 new products as drafts with no invented price, stock or photos", async () => {
+  it("keeps the 20 expansion records without invented price or stock (catalogue items visible as 'Sob consulta')", async () => {
     const rows = await all<{ slug: string; status: string; availability: string; price_cents: number | null; stock_quantity: number | null; sourcing_status: string; images: number }>(`
       select p.slug, p.status, p.availability, p.price_cents, p.stock_quantity, pp.sourcing_status,
              (select count(*)::int from product_images i where i.product_id = p.id) as images
         from products p join product_private pp on pp.product_id = p.id
-       where p.sort_order >= 10 and p.slug <> 'teste-produto'`);
+       where p.sort_order between 10 and 29 and p.slug <> 'teste-produto'`);
     expect(rows).toHaveLength(20);
     for (const r of rows) {
-      expect(r).toMatchObject({ status: "draft", availability: "coming_soon", price_cents: CATALOG_PRICES[r.slug] ?? null, stock_quantity: null, images: 0 });
+      const inCatalogue = CATALOGUE_DRAFTS.includes(r.slug);
+      expect(r, r.slug).toMatchObject({
+        status: inCatalogue ? "published" : "draft",
+        availability: inCatalogue ? "on_request" : "coming_soon",
+        price_cents: CATALOG_PRICES[r.slug] ?? null,
+        stock_quantity: null,
+        images: inCatalogue ? 1 : 0,
+      });
     }
-    expect(rows.filter((r) => r.sourcing_status === "planned")).toHaveLength(12);
-    expect(rows.filter((r) => r.sourcing_status === "evaluating")).toHaveLength(8);
+    expect(rows.filter((r) => r.sourcing_status === "planned")).toHaveLength(14);
+    expect(rows.filter((r) => r.sourcing_status === "evaluating")).toHaveLength(6);
   });
 
   it("re-running the data migration changes nothing (idempotent)", async () => {
@@ -272,7 +395,7 @@ describe("catalogue expansion (29 products)", () => {
   });
 
   it("hides drafts from visitors and never lets 'Em breve' products be ordered", async () => {
-    const pid = await productId("anua-heartleaf-77-soothing-toner");
+    const pid = await productId("aestura-atobarrier365-cream");
     await asRole(db, "anon", null, async () => {
       expect(await all(`select id from products where id = $1`, [pid])).toHaveLength(0);
     });
@@ -302,7 +425,7 @@ describe("catalogue expansion (29 products)", () => {
 
   it("exposes manual related products only between published items", async () => {
     const a = await productId("skin1004-madagascar-centella-ampoule");
-    const draft = await productId("skin1004-madagascar-centella-light-cleansing-oil");
+    const draft = await productId("skin1004-madagascar-centella-ampoule-foam");
     const pub = await productId("dr-althea-345-relief-cream");
     await db.query(`insert into product_relations (product_id, related_product_id) values ($1, $2), ($1, $3)`, [a, draft, pub]);
     await asRole(db, "anon", null, async () => {

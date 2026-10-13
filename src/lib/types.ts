@@ -206,7 +206,7 @@ export const AVAILABILITY_LABEL: Record<Availability, string> = {
   coming_soon: "Em breve",
 };
 
-export type CommercialStatus = "draft" | "coming_soon" | "available" | "sold_out" | "archived";
+export type CommercialStatus = "draft" | "coming_soon" | "available" | "on_request" | "sold_out" | "archived";
 
 /** The five explicit statuses shown to the admin, derived from visibility + availability. */
 export function commercialStatus(status: PublishStatus, availability: Availability): CommercialStatus {
@@ -214,6 +214,7 @@ export function commercialStatus(status: PublishStatus, availability: Availabili
   if (status === "draft") return "draft";
   if (availability === "coming_soon") return "coming_soon";
   if (availability === "in_stock") return "available";
+  if (availability === "on_request") return "on_request";
   return "sold_out";
 }
 
@@ -222,5 +223,6 @@ export const COMMERCIAL_STATUS_LABEL: Record<CommercialStatus, string> = {
   coming_soon: "Em breve",
   available: "Disponível",
   sold_out: "Esgotado",
+  on_request: "Sob consulta",
   archived: "Arquivado",
 };

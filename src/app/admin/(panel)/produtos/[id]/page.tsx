@@ -26,7 +26,7 @@ export default async function EditProductPage({ params, searchParams }: PageProp
       title={product.name}
       description={
         <span className="flex items-center gap-2">
-          <StatusPill tone={({ available: "green", coming_soon: "blue", draft: "gray", archived: "red", sold_out: "amber" } as const)[commercialStatus(product.status, product.availability)]}>
+          <StatusPill tone={({ available: "green", coming_soon: "blue", on_request: "dark", draft: "gray", archived: "red", sold_out: "amber" } as const)[commercialStatus(product.status, product.availability)]}>
             {COMMERCIAL_STATUS_LABEL[commercialStatus(product.status, product.availability)]}
           </StatusPill>
           <span className="text-xs text-muted">{product.code}</span>

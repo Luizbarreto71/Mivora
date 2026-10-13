@@ -10,7 +10,7 @@ export async function generateMetadata({ params }: PageProps<"/marcas/[slug]">):
   const brand = await getBrandBySlug(slug);
   if (!brand) return { title: "Marca não encontrada", robots: { index: false } };
   return {
-    title: brand.seo_title ?? `${brand.name} — skincare`,
+    title: brand.seo_title ?? brand.name,
     description: brand.seo_description ?? brand.description ?? `Produtos ${brand.name} na MIVORA.`,
     alternates: { canonical: `/marcas/${brand.slug}` },
     openGraph: { title: `${brand.name} | MIVORA`, url: `/marcas/${brand.slug}` },

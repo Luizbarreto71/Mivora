@@ -16,6 +16,7 @@ const FILTERS = [
   { value: "", label: "Todos" },
   { value: "disponiveis", label: "Disponíveis" },
   { value: "em-breve", label: "Em breve" },
+  { value: "sob-consulta", label: "Sob consulta" },
   { value: "publicados", label: "Publicados" },
   { value: "rascunhos", label: "Rascunhos" },
   { value: "arquivados", label: "Arquivados" },
@@ -23,7 +24,7 @@ const FILTERS = [
   { value: "avaliacao", label: "Em avaliação" },
   { value: "documentacao", label: "Documentação pendente" },
   { value: "sem-preco", label: "Sem preço" },
-  { value: "indisponiveis", label: "Indisponíveis" },
+  { value: "indisponiveis", label: "Esgotados" },
   { value: "midia", label: "Mídia pendente" },
   { value: "revisar", label: "Conteúdo a revisar" },
 ];
@@ -49,7 +50,7 @@ type Row = {
 };
 
 const SOURCING_LABEL: Record<string, string> = { stock_confirmed: "Estoque confirmado", planned: "Aquisição planejada", evaluating: "Em avaliação" };
-const TONE = { available: "green", coming_soon: "blue", draft: "gray", archived: "red", sold_out: "amber" } as const;
+const TONE = { available: "green", coming_soon: "blue", on_request: "dark", draft: "gray", archived: "red", sold_out: "amber" } as const;
 
 export default async function AdminProductsPage({ searchParams }: PageProps<"/admin/produtos">) {
   const { supabase } = await requireAdmin();
@@ -67,7 +68,8 @@ export default async function AdminProductsPage({ searchParams }: PageProps<"/ad
   if (filtro === "arquivados") query = query.eq("status", "archived");
   else if (filtro !== "rascunhos" && filtro !== "publicados") query = query.neq("status", "archived");
   if (filtro === "sem-preco") query = query.is("price_cents", null);
-  if (filtro === "indisponiveis") query = query.eq("status", "published").in("availability", ["out_of_stock", "on_request"]);
+  if (filtro === "indisponiveis") query = query.eq("status", "published").eq("availability", "out_of_stock");
+  if (filtro === "sob-consulta") query = query.eq("availability", "on_request");
   if (filtro === "disponiveis") query = query.eq("status", "published").eq("is_available", true);
   if (filtro === "em-breve") query = query.eq("availability", "coming_soon");
   for (const t of searchTerms(q)) query = query.ilike("search_text", `%${t}%`);

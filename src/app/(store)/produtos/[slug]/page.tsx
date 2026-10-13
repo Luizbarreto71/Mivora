@@ -47,7 +47,7 @@ function productJsonLd(p: ProductDetail) {
     url,
     sku: p.code,
     // An Offer is only published with a real price for a product that is on sale
-    ...(p.priceCents != null && p.availability !== "coming_soon"
+    ...(p.priceCents != null && (p.availability === "in_stock" || p.availability === "out_of_stock")
       ? {
           offers: {
             "@type": "Offer",

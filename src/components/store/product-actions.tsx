@@ -44,6 +44,19 @@ export function QuickAddButton({ product, className }: { product: ProductSummary
     );
   }
 
+  if (product.availability === "on_request") {
+    if (!whatsappNumber) return null;
+    const href = buildWhatsAppUrl(
+      whatsappNumber,
+      buildProductInterestMessage({ greeting: whatsappGreeting, productName: product.name, url: `${siteUrl}/produtos/${product.slug}`, priceCents: product.priceCents }),
+    );
+    return (
+      <a href={href} target="_blank" rel="noopener noreferrer" className={buttonClasses("outline", "sm", cn("w-full", className))}>
+        <WhatsAppIcon className="h-3.5 w-3.5" /> {product.priceCents == null ? "Consultar preço" : "Consultar"}
+      </a>
+    );
+  }
+
   if (!product.isAvailable) {
     if (!whatsappNumber) return null;
     const href = buildWhatsAppUrl(

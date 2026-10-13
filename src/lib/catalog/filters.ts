@@ -10,6 +10,7 @@ export type SortValue = (typeof SORT_OPTIONS)[number]["value"];
 
 export const AVAILABILITY_FILTERS = [
   { value: "disponivel", label: "Disponíveis para compra" },
+  { value: "sob-consulta", label: "Sob consulta" },
   { value: "em-breve", label: "Em breve" },
 ] as const;
 

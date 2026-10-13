@@ -246,6 +246,7 @@ export async function listProducts(filters: CatalogFilters, pageSize = PAGE_SIZE
   if (filters.pele) query = query.or(`skin_types.cs.{${filters.pele}},skin_types.cs.{todos}`);
   if (filters.disponibilidade === "disponivel") query = query.eq("is_available", true);
   if (filters.disponibilidade === "em-breve") query = query.eq("availability", "coming_soon");
+  if (filters.disponibilidade === "sob-consulta") query = query.eq("availability", "on_request");
   if (filters.novidades) {
     const since = new Date(Date.now() - NEW_ARRIVAL_DAYS * 86_400_000).toISOString();
     query = query.or(`is_new.eq.true,published_at.gte.${since}`);

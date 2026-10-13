@@ -232,9 +232,9 @@ test("Teste 11 — experiência mobile sem rolagem horizontal", async ({ browser
 // ---------------------------------------------------------------------------
 
 test("Expansão — produtos em rascunho não aparecem ao público", async ({ page }) => {
-  await page.goto("/produtos/medicube-collagen-jelly-cream");
+  await page.goto("/produtos/aestura-atobarrier365-cream");
   await expect(page.getByText("Página não encontrada").or(page.locator("title", { hasText: "Produto não encontrado" })).first()).toBeAttached();
-  await page.goto("/produtos?q=collagen%20jelly");
+  await page.goto("/produtos?q=atobarrier");
   await expect(page.getByText("Nenhum produto encontrado").filter({ visible: true })).toBeVisible();
 });
 
@@ -262,7 +262,7 @@ test("Expansão — categoria-mãe inclui subcategorias e URL antiga redireciona
 
 test("Expansão — “Em breve”: vitrine sem compra e venda bloqueada sem documentação", async ({ page }) => {
   await admin.goto("/admin/produtos?filtro=em-breve");
-  await admin.locator("tr").filter({ hasText: "Anua Heartleaf 77% Soothing Toner" }).locator('a[href^="/admin/produtos/"]').first().click();
+  await admin.locator("tr").filter({ hasText: "Mediheal Madecassoside Blemish Pad" }).locator('a[href^="/admin/produtos/"]').first().click();
   await expect(admin.getByLabel("Disponibilidade", { exact: true })).toHaveValue("coming_soon");
 
   // Trying to sell it without verified documentation is refused (form + database)
@@ -277,11 +277,11 @@ test("Expansão — “Em breve”: vitrine sem compra e venda bloqueada sem doc
   await expect(admin.getByRole("status").filter({ hasText: "Produto salvo" })).toBeVisible();
 
   await page.goto("/produtos?disponibilidade=em-breve");
-  const card = page.locator("article").filter({ hasText: "Anua Heartleaf", visible: true }).first();
+  const card = page.locator("article").filter({ hasText: "Mediheal Madecassoside", visible: true }).first();
   await expect(card).toContainText("Em breve");
   await expect(card.getByRole("button", { name: /Adicionar/ })).toHaveCount(0);
 
-  await page.goto("/produtos/anua-heartleaf-77-soothing-toner");
+  await page.goto("/produtos/mediheal-madecassoside-blemish-pad");
   await expect(page.getByText("Este produto ainda não está disponível.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Adicionar ao carrinho" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: /Consultar previsão de chegada/ })).toHaveAttribute("href", /ainda%20n%C3%A3o%20est%C3%A1%20dispon%C3%ADvel/);
@@ -306,11 +306,11 @@ test("Expansão — importação de catálogo é simulada sem gravar e é idempo
   await expect(admin.locator("td").filter({ hasText: "marca obrigatória" })).toBeVisible();
 });
 
-test("Expansão — painel mostra status explícitos e os 29 cadastros", async () => {
+test("Expansão — painel mostra status explícitos e todos os cadastros", async () => {
   await admin.goto("/admin/produtos");
-  await expect(admin.locator("tbody tr").filter({ hasText: /MV\d{4}/ })).toHaveCount(30); // 29 + produto criado no Teste 1
+  await expect(admin.locator("tbody tr").filter({ hasText: /MV\d{4}/ })).toHaveCount(64); // 63 + produto criado no Teste 1
   await admin.goto("/admin/produtos?filtro=avaliacao");
-  await expect(admin.locator("tbody tr").filter({ hasText: "Em avaliação" })).toHaveCount(8);
+  await expect(admin.locator("tbody tr").filter({ hasText: "Em avaliação" })).toHaveCount(6);
 });
 
 // ---------------------------------------------------------------------------
@@ -348,4 +348,22 @@ test("Boas-vindas — apresentação na primeira visita e cupom de 10% aplicado 
   expect(message).toContain("*Cupom:* BEMVINDA10 (10% na primeira compra)");
   expect(message).toContain("*Total com desconto:*");
   await ctx.close();
+});
+
+// ---------------------------------------------------------------------------
+// Catálogo MIVORA 2026
+// ---------------------------------------------------------------------------
+test("Catálogo — produto 'Sob consulta' mostra foto e 'Consultar preço', sem carrinho", async ({ page }) => {
+  await page.goto("/produtos/olaplex-no3-hair-perfector");
+  await expect(page.getByRole("heading", { name: "Olaplex Nº 3 Hair Perfector" })).toBeVisible();
+  await expect(page.getByText("Consultar preço").first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "Adicionar ao carrinho" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /Consultar preço pelo WhatsApp/ })).toHaveAttribute("href", /saber%20o%20pre%C3%A7o/);
+  await expect(page.locator('main img[src*="olaplex-no3-hair-perfector"]').first()).toBeVisible();
+
+  await page.goto("/categorias/cuidados-capilares");
+  await expect(page.getByRole("navigation", { name: "Subcategorias" })).toContainText("Shampoos");
+  const card = page.locator("article").filter({ hasText: "Kérastase Elixir Ultime", visible: true }).first();
+  await expect(card).toContainText("Sob consulta");
+  await expect(card).toContainText("Consultar preço");
 });

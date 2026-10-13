@@ -269,7 +269,7 @@ export function ProductForm({
           <div className="space-y-4">
             <p className="flex items-center gap-2 text-xs text-muted">
               Situação na loja:
-              <StatusPill tone={commercial === "available" ? "green" : commercial === "coming_soon" ? "blue" : commercial === "draft" ? "gray" : commercial === "archived" ? "red" : "amber"}>
+              <StatusPill tone={commercial === "available" ? "green" : commercial === "coming_soon" ? "blue" : commercial === "on_request" ? "dark" : commercial === "draft" ? "gray" : commercial === "archived" ? "red" : "amber"}>
                 {COMMERCIAL_STATUS_LABEL[commercial]}
               </StatusPill>
             </p>
@@ -285,7 +285,7 @@ export function ProductForm({
                 <option value="in_stock">Disponível para compra</option>
                 <option value="coming_soon">Em breve — vitrine, sem compra</option>
                 <option value="out_of_stock">Esgotado</option>
-                {initial.availability === "on_request" ? <option value="on_request">Sob consulta (sem carrinho)</option> : null}
+                <option value="on_request">Sob consulta — visível, preço e disponibilidade pelo WhatsApp</option>
               </Select>
             </Field>
             {availability === "coming_soon" ? (
