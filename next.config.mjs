@@ -1,4 +1,5 @@
-import type { NextConfig } from "next";
+// Plain JavaScript on purpose: some hosts (e.g. Hostinger shared/Business) can only run the
+// WebAssembly build of the Next.js compiler, which cannot load a TypeScript config file.
 
 const supabaseUrl = (() => {
   try {
@@ -18,18 +19,11 @@ const securityHeaders = [
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
 ];
 
-const nextConfig: NextConfig = {
+/** @type {import("next").NextConfig} */
+const nextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
   poweredByHeader: false,
-  turbopack: {
-    rules: {
-      "*.css": {
-        loaders: ["@tailwindcss/turbopack"],
-        as: "*.css",
-      },
-    },
-  },
   images: {
     formats: ["image/avif", "image/webp"],
     remotePatterns: [
@@ -37,7 +31,7 @@ const nextConfig: NextConfig = {
       ...(supabaseHost && !supabaseHost.endsWith(".supabase.co")
         ? [
             {
-              protocol: (isLocalSupabase ? "http" : "https") as "http" | "https",
+              protocol: isLocalSupabase ? "http" : "https",
               hostname: supabaseHost,
               ...(supabaseUrl?.port ? { port: supabaseUrl.port } : {}),
               pathname: "/storage/v1/object/public/**",
