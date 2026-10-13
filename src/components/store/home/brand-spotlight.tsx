@@ -32,7 +32,7 @@ export function BrandSpotlight({
           ) : null}
           <div className="relative">
             <p className="eyebrow mb-4">{eyebrow}</p>
-            <h2 className="heading-display text-[2.5rem] leading-[1.02] sm:text-[3rem]">{title}</h2>
+            <h2 className="heading-display text-[2rem] leading-[1.1] sm:text-[2.5rem]">{title}</h2>
             {brand.description ? <p className="mt-5 max-w-sm text-[0.9375rem] leading-relaxed text-muted">{brand.description}</p> : null}
           </div>
           <Link href={`/marcas/${brand.slug}`} className="group relative mt-10 inline-flex items-center gap-2 self-start text-[0.6875rem] font-semibold uppercase tracking-[0.2em]">

@@ -27,7 +27,7 @@ async function BrandContent({ params, searchParams }: PageProps<"/marcas/[slug]"
         <div className="container-page py-12 sm:py-16">
           <Breadcrumbs items={[{ label: "Marcas", href: "/marcas" }, { label: brand.name }]} className="mb-8" />
           <p className="eyebrow mb-3">{brand.origin_country ? `Marca · ${brand.origin_country}` : "Marca"}</p>
-          <h1 className="heading-display text-[3rem] sm:text-[4.25rem]">{brand.name}</h1>
+          <h1 className="heading-display text-[2.25rem] sm:text-[3rem]">{brand.name}</h1>
           {brand.tagline ? <p className="mt-3 text-sm font-medium">{brand.tagline}</p> : null}
           {brand.description ? <p className="mt-4 max-w-2xl text-[0.9375rem] leading-relaxed text-muted">{brand.description}</p> : null}
         </div>

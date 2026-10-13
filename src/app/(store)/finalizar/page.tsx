@@ -13,7 +13,7 @@ export default async function CheckoutPage() {
   return (
     <div className="container-page py-10 sm:py-14">
       <Breadcrumbs items={[{ label: "Carrinho", href: "/carrinho" }, { label: "Finalizar" }]} className="mb-8" />
-      <h1 className="heading-display text-[2.5rem] sm:text-[3.25rem]">Finalizar pelo WhatsApp</h1>
+      <h1 className="heading-display text-[2rem] sm:text-[2.5rem]">Finalizar pelo WhatsApp</h1>
       <p className="mt-3 max-w-2xl text-[0.9375rem] leading-relaxed text-muted">
         Revise o seu pedido. Ao continuar, registramos o pedido com um código e abrimos uma conversa com a MIVORA para confirmar disponibilidade, entrega e pagamento.
       </p>

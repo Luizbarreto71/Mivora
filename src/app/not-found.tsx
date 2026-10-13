@@ -9,7 +9,7 @@ export default function NotFound() {
         <Logo variant="lockup" className="h-full" />
       </Link>
       <p className="eyebrow">Erro 404</p>
-      <h1 className="heading-display mt-4 text-[2.75rem] sm:text-[3.5rem]">Página não encontrada</h1>
+      <h1 className="heading-display mt-4 text-[2.125rem] sm:text-[2.75rem]">Página não encontrada</h1>
       <p className="mt-4 max-w-md text-[0.9375rem] leading-relaxed text-muted">
         O endereço pode ter mudado ou o produto não está mais disponível. Que tal explorar a nossa curadoria?
       </p>

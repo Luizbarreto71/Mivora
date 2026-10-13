@@ -1,19 +1,12 @@
 import type { Metadata, Viewport } from "next";
-import { Cormorant_Garamond, Manrope } from "next/font/google";
+import { Inter } from "next/font/google";
 import { SITE_URL } from "@/lib/env";
 import "./globals.css";
 
-const manrope = Manrope({
+// Official MIVORA typeface (variable font: every weight from 100 to 900)
+const inter = Inter({
   subsets: ["latin"],
-  variable: "--font-manrope",
-  display: "swap",
-});
-
-const cormorant = Cormorant_Garamond({
-  subsets: ["latin"],
-  weight: ["400", "500"],
-  style: ["normal", "italic"],
-  variable: "--font-cormorant",
+  variable: "--font-inter",
   display: "swap",
 });
 
@@ -43,7 +36,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="pt-BR" className={`${manrope.variable} ${cormorant.variable}`}>
+    <html lang="pt-BR" className={inter.variable}>
       <body className="min-h-dvh bg-paper text-ink antialiased">{children}</body>
     </html>
   );

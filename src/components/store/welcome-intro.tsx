@@ -96,7 +96,7 @@ export function WelcomeIntro() {
         </span>
         <span aria-hidden="true" className="mt-7 block h-px w-24 origin-center animate-intro-line bg-ink/25 [animation-delay:1.1s]" />
 
-        <h2 id="welcome-title" className="heading-display mt-7 animate-fade-up text-[2.25rem] leading-tight [animation-delay:1.3s] sm:text-[2.75rem]">
+        <h2 id="welcome-title" className="heading-display mt-7 animate-fade-up text-[1.75rem] leading-tight [animation-delay:1.3s] sm:text-[2.125rem]">
           Bem-vinda à MIVORA
         </h2>
         <p className="mt-3 max-w-sm animate-fade-up text-[0.9375rem] leading-relaxed text-muted [animation-delay:1.45s]">
@@ -106,7 +106,7 @@ export function WelcomeIntro() {
         {welcomeOffer ? (
           <div className="mt-9 w-full animate-fade-up border border-ink/10 bg-paper/80 px-6 py-7 shadow-[0_30px_60px_-40px_rgba(17,17,17,0.35)] backdrop-blur [animation-delay:1.65s] sm:px-10">
             <p className="eyebrow text-ink/70">Presente de boas-vindas</p>
-            <p className="mt-3 font-[family-name:var(--font-display)] text-[3.5rem] leading-none sm:text-[4.25rem]">
+            <p className="mt-3 text-[3rem] font-bold leading-none tracking-[-0.03em] sm:text-[3.5rem]">
               {welcomeOffer.percent}% <span className="text-[0.5em] tracking-[0.12em]">OFF</span>
             </p>
             <p className="mt-2 text-sm text-ink-soft">na sua primeira compra</p>

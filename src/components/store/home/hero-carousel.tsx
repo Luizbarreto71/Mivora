@@ -106,7 +106,7 @@ export function HeroCarousel({ slides, stage }: { slides: Banner[]; stage: React
                       {s.eyebrow}
                     </p>
                   ) : null}
-                  <Heading className={cn("heading-display max-w-[16ch] text-balance text-[2.75rem] leading-[1.02] sm:text-[3.5rem] xl:text-[4.25rem]", reveal)} style={delay(1)}>
+                  <Heading className={cn("heading-display max-w-[17ch] text-balance text-[2.125rem] leading-[1.08] sm:text-[2.75rem] xl:text-[3.25rem]", reveal)} style={delay(1)}>
                     {s.title}
                   </Heading>
                   {s.subtitle ? (

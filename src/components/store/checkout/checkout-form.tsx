@@ -402,7 +402,7 @@ function OrderSent({ order, onNew }: { order: LastOrder; onNew: () => void }) {
         <Check className="h-5 w-5" />
       </span>
       <p className="eyebrow mt-6">Pedido registrado</p>
-      <p className="heading-display mt-2 text-[2.5rem]">{order.code}</p>
+      <p className="heading-display mt-2 text-[2rem] tabular-nums">{order.code}</p>
       <p className="mt-4 text-sm leading-relaxed text-muted">
         Abrimos uma conversa com a MIVORA no WhatsApp com os detalhes do seu pedido. A compra é concluída após a confirmação de disponibilidade, entrega e pagamento pela nossa equipe.
       </p>

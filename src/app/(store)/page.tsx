@@ -72,7 +72,7 @@ export default async function HomePage() {
           <ul className="container-page flex flex-wrap items-center justify-center gap-x-10 gap-y-3 py-7">
             {visibleBrands.map((b) => (
               <li key={b.id}>
-                <Link href={`/marcas/${b.slug}`} className="heading-display text-xl text-ink/70 transition-colors hover:text-ink sm:text-2xl">
+                <Link href={`/marcas/${b.slug}`} className="heading-display text-lg text-ink/70 transition-colors hover:text-ink sm:text-xl">
                   {b.name}
                 </Link>
               </li>
@@ -127,7 +127,7 @@ export default async function HomePage() {
             <div className="mb-12 flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
               <div className="max-w-xl">
                 <p className="eyebrow mb-3">Passo a passo</p>
-                <h2 id="ritual" className="heading-display text-[2.5rem] sm:text-[3.25rem]">
+                <h2 id="ritual" className="heading-display text-[2rem] sm:text-[2.5rem]">
                   Seu ritual de skincare
                 </h2>
                 <p className="mt-4 text-[0.9375rem] leading-relaxed text-muted">
@@ -142,7 +142,7 @@ export default async function HomePage() {
               {ritual.slice(0, 4).map(({ step, product }, i) => (
                 <li key={step.id} className="flex flex-col">
                   <p className="mb-3 flex items-baseline gap-2">
-                    <span className="heading-display text-2xl text-muted">{String(i + 1).padStart(2, "0")}</span>
+                    <span className="heading-display text-xl text-muted">{String(i + 1).padStart(2, "0")}</span>
                     <span className="text-[0.6875rem] font-semibold uppercase tracking-[0.18em]">{step.title}</span>
                   </p>
                   <ProductCard product={product} />
@@ -175,7 +175,7 @@ export default async function HomePage() {
             ) : null}
             <div className="flex flex-col justify-center p-8 sm:p-14">
               {e.eyebrow ? <p className="eyebrow mb-4">{e.eyebrow}</p> : null}
-              <h2 className="heading-display text-[2.25rem] sm:text-[3rem]">{e.title}</h2>
+              <h2 className="heading-display text-[1.75rem] sm:text-[2.25rem]">{e.title}</h2>
               {e.subtitle ? <p className="mt-4 max-w-md leading-relaxed text-muted">{e.subtitle}</p> : null}
               {e.cta_label && e.cta_href ? (
                 <Link href={e.cta_href} className={buttonClasses("outline", "md", "mt-8 self-start")}>
@@ -192,12 +192,12 @@ export default async function HomePage() {
           <div className="relative aspect-[5/4] overflow-hidden bg-blush/50">
             <div className="absolute inset-[12%] flex flex-col items-center justify-center border border-ink/10 bg-paper/70 text-center">
               <p className="eyebrow">Boutique digital</p>
-              <p className="heading-display mt-4 px-6 text-[2rem] italic sm:text-[2.5rem]">Beleza escolhida com cuidado.</p>
+              <p className="heading-display mt-4 px-6 text-[1.5rem] sm:text-[1.875rem]">Beleza escolhida com cuidado.</p>
             </div>
           </div>
           <div>
             <p className="eyebrow mb-3">Conheça a MIVORA</p>
-            <h2 id="sobre" className="heading-display text-[2.5rem] sm:text-[3.25rem]">
+            <h2 id="sobre" className="heading-display text-[2rem] sm:text-[2.5rem]">
               {settings.about_headline ?? "Curadoria com propósito"}
             </h2>
             {settings.about_text ? <p className="mt-6 max-w-xl text-base leading-relaxed text-muted">{settings.about_text}</p> : null}
@@ -213,7 +213,7 @@ export default async function HomePage() {
           <div className="flex flex-col items-start gap-8 bg-ink px-6 py-14 text-paper sm:px-14 sm:py-16 lg:flex-row lg:items-center lg:justify-between">
             <div className="max-w-2xl">
               <p className="mb-3 text-[0.6875rem] font-semibold uppercase tracking-[0.22em] text-paper/60">Atendimento personalizado</p>
-              <h2 id="atendimento" className="heading-display text-[2.25rem] sm:text-[3rem]">
+              <h2 id="atendimento" className="heading-display text-[1.75rem] sm:text-[2.25rem]">
                 {settings.whatsapp_section_title ?? "Fale com a MIVORA"}
               </h2>
               {settings.whatsapp_section_text ? <p className="mt-4 leading-relaxed text-paper/70">{settings.whatsapp_section_text}</p> : null}
@@ -236,7 +236,7 @@ export default async function HomePage() {
           <div className="grid gap-10 lg:grid-cols-[1fr_2fr] lg:gap-20">
             <div>
               <p className="eyebrow mb-3">Dúvidas</p>
-              <h2 id="faq" className="heading-display text-[2.5rem] sm:text-[3.25rem]">
+              <h2 id="faq" className="heading-display text-[2rem] sm:text-[2.5rem]">
                 Perguntas frequentes
               </h2>
               <Link href="/perguntas-frequentes" className="mt-6 inline-flex items-center gap-1.5 text-[0.6875rem] font-semibold uppercase tracking-[0.2em] underline underline-offset-4">

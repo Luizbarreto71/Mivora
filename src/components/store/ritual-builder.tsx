@@ -93,7 +93,7 @@ export function RitualBuilder({
           <div className="flex flex-col gap-4 border-b border-line pb-6 sm:flex-row sm:items-end sm:justify-between">
             <div>
               <p className="eyebrow mb-2">Seu ritual sugerido</p>
-              <h2 className="heading-display text-[2.25rem]">{concerns.find((c) => c.slug === concern)?.name}</h2>
+              <h2 className="heading-display text-[1.75rem]">{concerns.find((c) => c.slug === concern)?.name}</h2>
             </div>
             {picked.length > 1 ? (
               <Button onClick={() => picked.forEach((p) => add(cartLineFromProduct(p), 1))}>
@@ -105,7 +105,7 @@ export function RitualBuilder({
             {plan.map(({ step, product }) => (
               <li key={step.id} className="grid gap-6 py-8 md:grid-cols-[14rem_1fr] md:gap-12">
                 <div>
-                  <span className="heading-display text-[2.25rem] text-muted">{String(step.step_number).padStart(2, "0")}</span>
+                  <span className="heading-display text-[1.75rem] text-muted">{String(step.step_number).padStart(2, "0")}</span>
                   <h3 className="mt-1 font-semibold">{step.title}</h3>
                   {step.description ? <p className="mt-2 text-sm leading-relaxed text-muted">{step.description}</p> : null}
                 </div>

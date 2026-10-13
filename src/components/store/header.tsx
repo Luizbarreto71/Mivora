@@ -209,7 +209,7 @@ function MegaPanel({ nav }: { nav: NavData }) {
         <div className="flex flex-col justify-between bg-ivory p-7">
           <div>
             <p className="eyebrow">Ritual MIVORA</p>
-            <p className="heading-display mt-3 text-[1.75rem]">Descubra a rotina ideal para o seu objetivo.</p>
+            <p className="heading-display mt-3 text-[1.375rem]">Descubra a rotina ideal para o seu objetivo.</p>
           </div>
           <Link href="/ritual" className="mt-6 text-[0.6875rem] font-semibold uppercase tracking-[0.2em] underline underline-offset-4">
             Monte seu ritual

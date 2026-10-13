@@ -41,7 +41,7 @@ export function CartDrawer() {
       {lines.length === 0 ? (
         <div className="flex h-full flex-col items-center justify-center px-8 py-16 text-center">
           <ShoppingBag className="h-8 w-8 text-muted" strokeWidth={1.2} />
-          <p className="heading-display mt-5 text-2xl">Seu carrinho está vazio</p>
+          <p className="heading-display mt-5 text-xl">Seu carrinho está vazio</p>
           <p className="mt-2 text-sm text-muted">Explore a curadoria MIVORA e encontre o cuidado ideal para o seu ritual.</p>
           <Link href="/produtos" onClick={close} className={buttonClasses("outline", "md", "mt-7")}>
             Explorar produtos

@@ -20,7 +20,7 @@ function CategoryList({ title, items, all }: { title: string; items: CategoryWit
         {items.map((c) => (
           <Link key={c.id} href={`/categorias/${c.slug}`} className="group flex min-h-36 flex-col justify-between bg-paper p-6 hover:bg-ivory">
             <div>
-              <p className="heading-display text-[1.75rem]">{c.name}</p>
+              <p className="heading-display text-[1.375rem]">{c.name}</p>
               {c.description ? <p className="mt-2 text-sm leading-relaxed text-muted">{c.description}</p> : null}
               {all.some((s) => s.parent_id === c.id && s.productCount > 0) ? (
                 <p className="mt-3 text-xs leading-relaxed text-ink-soft">

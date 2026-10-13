@@ -36,7 +36,7 @@ async function KitContent({ params }: { params: PageProps<"/kits/[slug]">["param
         </div>
         <div>
           <p className="eyebrow">Kit · {kit.items.length} produtos</p>
-          <h1 className="heading-display mt-3 text-[2.5rem] sm:text-[3rem]">{kit.name}</h1>
+          <h1 className="heading-display mt-3 text-[2rem] sm:text-[2.375rem]">{kit.name}</h1>
           {kit.shortDescription ? <p className="mt-5 leading-relaxed text-ink-soft">{kit.shortDescription}</p> : null}
           <div className="mt-6">
             <Price priceCents={kit.priceCents} compareAtCents={kit.compareAtCents} size="lg" />
@@ -62,7 +62,7 @@ async function KitContent({ params }: { params: PageProps<"/kits/[slug]">["param
         </div>
       </div>
       <section className="pt-20">
-        <h2 className="heading-display mb-10 text-[2.25rem]">Produtos do kit</h2>
+        <h2 className="heading-display mb-10 text-[1.75rem]">Produtos do kit</h2>
         <ProductGrid products={kit.items.map((i) => i.product)} />
       </section>
     </div>

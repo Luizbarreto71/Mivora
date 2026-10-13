@@ -24,7 +24,7 @@ export function SectionHeading({
     <div className={cn("mb-10 flex flex-col gap-5 sm:mb-12", align === "center" ? "items-center text-center" : "sm:flex-row sm:items-end sm:justify-between", className)}>
       <div className={cn("max-w-2xl", align === "center" && "mx-auto")}>
         {eyebrow ? <p className="eyebrow mb-3">{eyebrow}</p> : null}
-        <h2 className="heading-display text-[2.125rem] sm:text-[2.75rem]">{title}</h2>
+        <h2 className="heading-display text-[1.625rem] sm:text-[2rem]">{title}</h2>
         {description ? <p className="mt-4 text-[0.9375rem] leading-relaxed text-muted">{description}</p> : null}
       </div>
       {href ? (
@@ -43,7 +43,7 @@ export function PageHeader({ eyebrow, title, description, children }: { eyebrow?
       <div className="container-page py-12 sm:py-16">
         {children}
         {eyebrow ? <p className="eyebrow mb-3">{eyebrow}</p> : null}
-        <h1 className="heading-display text-[2.5rem] sm:text-[3.5rem]">{title}</h1>
+        <h1 className="heading-display text-[2rem] sm:text-[2.75rem]">{title}</h1>
         {description ? <p className="mt-4 max-w-2xl text-[0.9375rem] leading-relaxed text-muted">{description}</p> : null}
       </div>
     </div>
@@ -53,7 +53,7 @@ export function PageHeader({ eyebrow, title, description, children }: { eyebrow?
 export function EmptyState({ title, description, action }: { title: string; description?: ReactNode; action?: ReactNode }) {
   return (
     <div className="flex flex-col items-center border border-dashed border-line px-6 py-16 text-center">
-      <p className="heading-display text-2xl">{title}</p>
+      <p className="heading-display text-xl">{title}</p>
       {description ? <p className="mt-3 max-w-md text-sm leading-relaxed text-muted">{description}</p> : null}
       {action ? <div className="mt-7">{action}</div> : null}
     </div>

@@ -142,7 +142,7 @@ async function ProductContent({ params }: { params: PageProps<"/produtos/[slug]"
             {product.isNew ? <Badge tone="blush">Novidade</Badge> : null}
             {product.availability === "coming_soon" ? <Badge tone="dark">Em breve</Badge> : null}
           </div>
-          <h1 className="heading-display mt-3 text-[2.25rem] leading-[1.08] sm:text-[2.875rem]">{product.name}</h1>
+          <h1 className="heading-display mt-3 text-[1.75rem] leading-[1.15] sm:text-[2.125rem]">{product.name}</h1>
           <p className="mt-3 text-sm text-muted">
             {[product.productLine && `Linha ${product.productLine}`, product.volume, `Cód. ${product.code}`].filter(Boolean).join(" · ")}
           </p>

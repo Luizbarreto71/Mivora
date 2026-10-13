@@ -31,7 +31,7 @@ export default async function BrandsPage() {
                 </div>
                 <div className="flex min-h-40 flex-col justify-between p-5">
                   <div>
-                    <p className="heading-display text-[1.75rem]">{b.name}</p>
+                    <p className="heading-display text-[1.375rem]">{b.name}</p>
                     {b.tagline ? <p className="mt-1 text-xs leading-relaxed text-muted">{b.tagline}</p> : null}
                   </div>
                   <p className="mt-4 flex items-center justify-between text-[0.6875rem] font-semibold uppercase tracking-[0.18em]">

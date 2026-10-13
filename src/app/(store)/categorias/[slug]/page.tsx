@@ -35,7 +35,7 @@ async function CategoryContent({ params, searchParams }: PageProps<"/categorias/
             className="mb-8"
           />
           <p className="eyebrow mb-3">{category.kind === "concern" ? "Necessidade" : "Tipo de produto"}</p>
-          <h1 className="heading-display text-[2.75rem] sm:text-[3.75rem]">{category.name}</h1>
+          <h1 className="heading-display text-[2.125rem] sm:text-[2.75rem]">{category.name}</h1>
           {category.description ? <p className="mt-4 max-w-2xl text-[0.9375rem] leading-relaxed text-muted">{category.description}</p> : null}
           {children.length > 0 ? (
             <nav aria-label="Subcategorias" className="mt-8 flex flex-wrap gap-2">

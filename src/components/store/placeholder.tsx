@@ -8,7 +8,7 @@ export function ProductImagePlaceholder({ name, brand, className }: { name: stri
         <div className="mx-auto mt-[-0.7rem] h-4 w-6 rounded-t-md border border-ink/15 bg-paper" />
       </div>
       {brand ? <p className="eyebrow text-[0.5625rem]">{brand}</p> : null}
-      <p className="mt-1 line-clamp-2 max-w-[12rem] font-[family-name:var(--font-display)] text-[0.9375rem] leading-snug text-ink/70">{name}</p>
+      <p className="mt-1 line-clamp-2 max-w-[12rem] text-sm font-medium leading-snug text-ink/70">{name}</p>
       <p className="mt-3 text-[0.625rem] uppercase tracking-[0.18em] text-muted">Foto em breve</p>
     </div>
   );

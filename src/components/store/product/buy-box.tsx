@@ -71,7 +71,7 @@ export function BuyBox({ product }: { product: ProductDetail }) {
     <div>
       <div className="flex items-start justify-between gap-4">
         {comingSoon && priceCents == null ? (
-          <span className="heading-display text-2xl">Em breve na MIVORA</span>
+          <span className="heading-display text-xl">Em breve na MIVORA</span>
         ) : (
           <Price priceCents={priceCents} compareAtCents={compareAtCents} size="lg" />
         )}
