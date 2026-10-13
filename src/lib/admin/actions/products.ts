@@ -57,6 +57,10 @@ export async function saveProduct(values: ProductFormValues): Promise<SaveProduc
     sort_order: intOr(v.sortOrder, 0),
     video_url: nullIfEmpty(v.videoUrl),
     media_pending: v.mediaPending,
+    weight_g: v.weightG ? Number.parseInt(v.weightG, 10) : null,
+    height_cm: v.heightCm ? Number.parseInt(v.heightCm, 10) : null,
+    width_cm: v.widthCm ? Number.parseInt(v.widthCm, 10) : null,
+    length_cm: v.lengthCm ? Number.parseInt(v.lengthCm, 10) : null,
     seo_title: nullIfEmpty(v.seoTitle),
     seo_description: nullIfEmpty(v.seoDescription),
   };

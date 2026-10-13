@@ -5,12 +5,17 @@ import { AdminPage, Card } from "@/components/admin/ui";
 import { Checkbox, Field, Input, Select, Textarea } from "@/components/ui/form";
 import { deleteDeliveryZone, saveDeliveryZone, saveSettings } from "@/lib/admin/actions/content";
 import { requireAdmin } from "@/lib/admin/auth";
+import { DEFAULT_SETTINGS } from "@/lib/catalog/queries";
 import { centsToInput } from "@/lib/money";
+import { formatCep } from "@/lib/shipping/cep";
+import { checkMelhorEnvio, melhorEnvioConfig } from "@/lib/shipping/quote";
+import { formatCepRange } from "@/lib/shipping/zones";
 import { DELIVERY_METHOD_LABEL, type DeliveryMethod } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Configurações" };
 
-type Zone = { id: string; name: string; region: string | null; method: DeliveryMethod; fee_cents: number | null; free_over_cents: number | null; min_order_cents: number | null; estimate: string | null; notes: string | null; is_active: boolean; sort_order: number };
+type Zone = { id: string; name: string; region: string | null; method: DeliveryMethod; fee_cents: number | null; free_over_cents: number | null; min_order_cents: number | null; estimate: string | null; notes: string | null; is_active: boolean; sort_order: number; cep_ranges: string[]; cities: string[] };
 
 function ZoneForm({ zone }: { zone?: Zone }) {
   return (
@@ -49,6 +54,13 @@ function ZoneForm({ zone }: { zone?: Zone }) {
       <Field label="Ordem">
         <Input name="sort_order" inputMode="numeric" defaultValue={zone?.sort_order ?? 0} />
       </Field>
+      <Field label="Faixas de CEP atendidas" hint="Uma por linha. Ex.: 29000-000 a 29099-999, ou 290 para todos os CEPs que começam com 290" className="sm:col-span-2">
+        <Textarea name="cep_ranges" rows={3} defaultValue={(zone?.cep_ranges ?? []).map(formatCepRange).join("\n")} placeholder={"29000-000 a 29099-999"} />
+      </Field>
+      <Field label="Cidades atendidas" hint="Uma por linha, com a UF. Ex.: Vitória/ES" className="sm:col-span-2">
+        <Textarea name="cities" rows={3} defaultValue={(zone?.cities ?? []).join("\n")} placeholder={"Vitória/ES"} />
+      </Field>
+      <p className="text-xs text-muted sm:col-span-4">Com as duas listas vazias, a opção aparece para qualquer CEP. Preenchidas, aparece apenas para os CEPs e cidades informados.</p>
       <div className="flex items-center gap-4 sm:col-span-4">
         <Checkbox name="is_active" label="Ativa" defaultChecked={zone?.is_active ?? true} />
         <SubmitButton variant={zone ? "outline" : "primary"}>{zone ? "Salvar" : "Adicionar opção"}</SubmitButton>
@@ -64,6 +76,31 @@ export default async function SettingsPage() {
     supabase.from("delivery_zones").select("*").order("sort_order"),
   ]);
   const v = s ?? {};
+  const me = melhorEnvioConfig({ contact_email: v.contact_email ?? null });
+  // live test quote, so an expired or revoked token shows up here
+  const check = me.ready && v.shipping_origin_cep ? await checkMelhorEnvio({ ...DEFAULT_SETTINGS, ...v }) : null;
+  const carrier = !me.token
+    ? {
+        tone: "text-muted",
+        text: "Para cotar Correios e transportadoras: crie uma conta no Melhor Envio, gere um token em melhorenvio.com.br/painel/gerenciar/tokens (“Novo token”, com as permissões de cotação de frete) e cadastre-o na variável de ambiente MELHOR_ENVIO_TOKEN do servidor (Vercel ou Hostinger). Por segurança, o token nunca é salvo no banco de dados. Sem ele, a calculadora mostra apenas as opções de entrega cadastradas abaixo.",
+      }
+    : !me.email
+      ? { tone: "text-warning", text: "Token encontrado. Informe o e-mail de contato da loja (ou MELHOR_ENVIO_EMAIL): o Melhor Envio exige um e-mail de contato nas consultas." }
+      : !v.shipping_origin_cep
+        ? { tone: "text-warning", text: "Token encontrado. Informe o CEP de origem para ativar as cotações." }
+        : check?.ok && check.services > 0
+          ? {
+              tone: "text-success",
+              text: `Melhor Envio conectado${me.sandbox ? " (ambiente de testes — sandbox)" : ""}: a cotação de teste respondeu com ${check.services} ${check.services === 1 ? "serviço" : "serviços"}.${v.carrier_quotes_enabled ? "" : " Marque a opção acima para mostrar as cotações na loja."}`,
+            }
+          : check?.ok
+            ? { tone: "text-warning", text: "Melhor Envio conectado, mas a cotação de teste não trouxe nenhum serviço. Confira as transportadoras habilitadas na sua conta do Melhor Envio." }
+            : check?.status === 401 || check?.status === 403
+              ? { tone: "text-danger", text: "O Melhor Envio recusou o token: ele pode ter expirado ou estar sem permissão de cotação. Gere um novo token e atualize MELHOR_ENVIO_TOKEN no servidor." }
+              : {
+                  tone: "text-warning",
+                  text: `Não foi possível testar a conexão com o Melhor Envio agora${check?.status ? ` (resposta ${check.status})` : ""}. Enquanto isso, a loja mostra apenas as opções de entrega cadastradas.`,
+                };
 
   return (
     <AdminPage title="Configurações da loja" description="Contato, WhatsApp, dados legais, avisos, textos institucionais e entrega.">
@@ -159,6 +196,47 @@ export default async function SettingsPage() {
           </div>
         </Card>
 
+        <Card
+          title="Calculadora de frete"
+          description="O cliente informa o CEP na página do produto, no carrinho ou na finalização e vê as opções de entrega com valor e prazo. Tudo é estimativa, confirmada no WhatsApp."
+        >
+          <div className="grid gap-5 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <Checkbox name="shipping_calculator_enabled" label="Mostrar a calculadora de frete na loja" defaultChecked={v.shipping_calculator_enabled ?? true} />
+            </div>
+            <Field label="CEP de origem (de onde os pedidos saem)" htmlFor="shipping_origin_cep" hint="Necessário para cotar Correios e transportadoras">
+              <Input id="shipping_origin_cep" name="shipping_origin_cep" inputMode="numeric" placeholder="00000-000" defaultValue={v.shipping_origin_cep ? formatCep(v.shipping_origin_cep) : ""} />
+            </Field>
+            <Field label="Dias para preparar o pedido" htmlFor="shipping_handling_days" hint="Somados ao prazo das transportadoras">
+              <Input id="shipping_handling_days" name="shipping_handling_days" inputMode="numeric" defaultValue={v.shipping_handling_days ?? 1} />
+            </Field>
+            <div className="space-y-2 sm:col-span-2">
+              <Checkbox name="carrier_quotes_enabled" label="Cotar Correios e transportadoras pelo Melhor Envio" defaultChecked={v.carrier_quotes_enabled ?? false} />
+              <p className={cn("text-xs leading-relaxed", carrier.tone)}>{carrier.text}</p>
+            </div>
+            <Field label="Acréscimo sobre o frete cotado (%)" htmlFor="shipping_markup_percent" hint="Opcional">
+              <Input id="shipping_markup_percent" name="shipping_markup_percent" inputMode="decimal" defaultValue={String(v.shipping_markup_percent ?? 0).replace(".", ",")} />
+            </Field>
+            <Field label="Valor fixo por envio (R$)" htmlFor="shipping_extra" hint="Opcional. Ex.: custo da embalagem">
+              <Input id="shipping_extra" name="shipping_extra" inputMode="decimal" defaultValue={v.shipping_extra_cents ? centsToInput(v.shipping_extra_cents) : ""} />
+            </Field>
+            <Field label="Peso padrão por produto, com embalagem (g)" htmlFor="shipping_default_weight_g" hint="Vale para produtos sem peso cadastrado">
+              <Input id="shipping_default_weight_g" name="shipping_default_weight_g" inputMode="numeric" defaultValue={v.shipping_default_weight_g ?? 300} />
+            </Field>
+            <div className="grid grid-cols-3 gap-3">
+              <Field label="Altura (cm)" htmlFor="shipping_default_height_cm">
+                <Input id="shipping_default_height_cm" name="shipping_default_height_cm" inputMode="numeric" defaultValue={v.shipping_default_height_cm ?? 6} />
+              </Field>
+              <Field label="Largura (cm)" htmlFor="shipping_default_width_cm">
+                <Input id="shipping_default_width_cm" name="shipping_default_width_cm" inputMode="numeric" defaultValue={v.shipping_default_width_cm ?? 11} />
+              </Field>
+              <Field label="Compr. (cm)" htmlFor="shipping_default_length_cm">
+                <Input id="shipping_default_length_cm" name="shipping_default_length_cm" inputMode="numeric" defaultValue={v.shipping_default_length_cm ?? 16} />
+              </Field>
+            </div>
+          </div>
+        </Card>
+
         <Card title="Entrega — regras gerais" description="Não anuncie cobertura, prazos ou frete grátis sem confirmação.">
           <div className="grid gap-5 sm:grid-cols-2">
             <Field label="Resumo de entrega (página de produto)" htmlFor="delivery_summary" className="sm:col-span-2">
@@ -206,8 +284,10 @@ export default async function SettingsPage() {
         </div>
       </ActionForm>
 
-      <h2 className="mb-3 mt-12 text-lg font-semibold">Opções de entrega no checkout</h2>
-      <p className="mb-4 text-sm text-muted">O cliente escolhe uma opção ao finalizar. Valores são estimativas e podem ser ajustados no WhatsApp.</p>
+      <h2 className="mb-3 mt-12 text-lg font-semibold">Opções de entrega</h2>
+      <p className="mb-4 text-sm text-muted">
+        Retirada, entrega local e outras opções da loja. Na calculadora de frete, cada opção aparece para os CEPs e cidades que ela atende, junto com as cotações das transportadoras. Valores são estimativas e podem ser ajustados no WhatsApp.
+      </p>
       <div className="space-y-4">
         {(zones as Zone[] | null)?.map((z) => (
           <Card key={z.id} title={z.name} actions={<ActionButton action={deleteDeliveryZone.bind(null, z.id)} variant="danger" confirm="Remover esta opção de entrega?">Remover</ActionButton>}>

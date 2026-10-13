@@ -18,7 +18,8 @@ export type OrderMessageInput = {
   hasUnpricedItems: boolean;
   /** First-purchase coupon applied by the server */
   discount?: { code: string; percent: number; cents: number } | null;
-  delivery?: { label: string; feeCents: number | null; estimate?: string | null } | null;
+  /** label null = "a combinar"; destination e.g. "CEP 01001-000 (São Paulo/SP)" */
+  delivery?: { label: string | null; feeCents: number | null; estimate?: string | null; destination?: string | null } | null;
   customerName?: string | null;
   customerNotes?: string | null;
 };
@@ -66,12 +67,25 @@ function discountLines(input: OrderMessageInput) {
 function deliveryLine(input: OrderMessageInput) {
   const d = input.delivery;
   if (!d) return "*Entrega:* a combinar.";
-  const parts = [d.label];
-  if (d.feeCents === 0) parts.push("frete grátis (sujeito a confirmação)");
-  else if (d.feeCents != null) parts.push(`taxa estimada ${formatBRL(d.feeCents)} (sujeita a confirmação)`);
-  else parts.push("valor a combinar");
-  if (d.estimate) parts.push(`prazo estimado: ${d.estimate}`);
+  const parts: string[] = [];
+  if (!d.label) parts.push("a combinar");
+  else {
+    parts.push(d.label);
+    if (d.feeCents === 0) parts.push("frete grátis (sujeito a confirmação)");
+    else if (d.feeCents != null) parts.push(`taxa estimada ${formatBRL(d.feeCents)} (sujeita a confirmação)`);
+    else parts.push("valor a combinar");
+    if (d.estimate) parts.push(`prazo estimado: ${d.estimate}`);
+  }
+  if (d.destination) parts.push(d.destination);
   return `*Entrega:* ${parts.join(" — ")}.`;
+}
+
+/** Products (minus discount) + delivery, only when every value is known. */
+function estimatedTotalLines(input: OrderMessageInput) {
+  const fee = input.delivery?.label ? input.delivery.feeCents : null;
+  if (fee == null || input.hasUnpricedItems) return [];
+  const total = input.subtotalCents - (input.discount?.cents ?? 0) + fee;
+  return [`*Total estimado com entrega:* ${formatBRL(total)}`];
 }
 
 export function buildOrderMessage(input: OrderMessageInput) {
@@ -84,7 +98,7 @@ export function buildOrderMessage(input: OrderMessageInput) {
     lines.push(`Valor: ${itemValue(item)}`);
     lines.push("");
   });
-  lines.push(subtotalLine(input), ...discountLines(input), "", deliveryLine(input));
+  lines.push(subtotalLine(input), ...discountLines(input), "", deliveryLine(input), ...estimatedTotalLines(input));
   if (input.code) lines.push("", `*Código do pedido:* ${input.code}`);
   if (input.customerName) lines.push("", `*Nome:* ${input.customerName}`);
   if (input.customerNotes) lines.push(`*Observações:* ${input.customerNotes}`);

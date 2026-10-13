@@ -6,9 +6,12 @@ import { buttonClasses } from "@/components/ui/button";
 import { EmptyState } from "../section";
 import { useCart } from "../cart-context";
 import { CartLineItem, CartSummary, useCartRefresh } from "../cart-lines";
+import { ShippingCalculator } from "../shipping-calculator";
+import { useStoreConfig } from "../store-config";
 
 export function CartPageContent() {
   const { lines, totals, hydrated, clear } = useCart();
+  const { shippingCalculator } = useStoreConfig();
   useCartRefresh(true);
 
   if (!hydrated) return <div className="h-64 animate-pulse bg-ivory" aria-busy="true" />;
@@ -49,6 +52,13 @@ export function CartPageContent() {
       <aside className="h-fit bg-ivory p-6 sm:p-8 lg:sticky lg:top-36">
         <p className="eyebrow mb-5 text-ink">Resumo</p>
         <CartSummary />
+        {shippingCalculator && totals.purchasableLines.length > 0 ? (
+          <ShippingCalculator
+            className="mt-6 border-t border-line pt-6"
+            autoQuote
+            items={totals.purchasableLines.map((l) => ({ productId: l.productId, variantId: l.variantId, kitId: l.kitId, quantity: l.quantity }))}
+          />
+        ) : null}
         <div className="mt-7">
           {canCheckout ? (
             <Link href="/finalizar" className={buttonClasses("primary", "lg", "w-full")}>

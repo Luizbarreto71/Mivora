@@ -41,6 +41,15 @@ Cada produto tem **visibilidade** (rascunho/publicado/arquivado) e **disponibili
 - **Configurável** em Admin → Configurações → Oferta de boas-vindas (ativar/desativar, percentual e código).
 - **Preços:** os produtos que aparecem no catálogo do fornecedor (`Seoul Beauty .pdf`) receberam o preço à vista do catálogo menos R$ 20 (migração `…008`, com a página de origem de cada preço comentada).
 
+### Calculadora de frete (13/10/2026)
+- **Onde aparece:** na página do produto, no carrinho e na finalização. A cliente digita o CEP (ele fica lembrado no aparelho) e vê a cidade e as opções de entrega com valor e prazo estimados.
+- **Endereço pelo CEP:** consulta ao ViaCEP, com a BrasilAPI como segunda fonte. CEP inexistente é recusado. Se os dois serviços estiverem fora do ar, a calculadora segue com as opções que dependem só do CEP.
+- **Opções da loja** (Configurações → Opções de entrega): retirada, entrega local etc., cada uma com taxa, prazo, frete grátis acima de um valor e pedido mínimo, e agora com **faixas de CEP** (`29000-000 a 29099-999` ou o prefixo `290`) e **cidades** (`Vitória/ES`) atendidas. Com as duas listas vazias, a opção vale para qualquer CEP.
+- **Correios e transportadoras (Melhor Envio):** com `MELHOR_ENVIO_TOKEN` no servidor, o CEP de origem preenchido e a opção marcada em Configurações → Calculadora de frete, a loja cota PAC, SEDEX e transportadoras em tempo real, com o peso e as medidas de cada produto (cadastro do produto → Envio; em branco vale o padrão da loja). Dá para somar dias de preparação, um acréscimo percentual e um valor fixo por envio. O painel faz uma cotação de teste e avisa se o token for recusado (por exemplo, por ter expirado).
+- **Sempre há uma saída:** quando nenhuma opção atende o CEP, aparece “Combinar a entrega pelo WhatsApp”.
+- **Segurança:** o navegador envia só o CEP e a opção escolhida. Ao finalizar, o servidor **refaz a cotação** com os preços do banco, e a função `create_order_intent` confere o formato do CEP e se a zona atende o destino. CEP, cidade, serviço e prazo ficam no pedido (painel e CSV) e vão na mensagem do WhatsApp, sempre como **estimativa** confirmada no atendimento.
+- O token do Melhor Envio fica **só na variável de ambiente**, porque as configurações da loja são públicas (RLS). Há limite de 20 cotações por minuto por IP e cache de 10 minutos para cotações iguais.
+
 ## 2. Estrutura
 
 ```
@@ -52,6 +61,7 @@ src/lib/catalog/          leituras públicas com cache ('use cache' + cacheTag)
 src/lib/admin/            autenticação, schemas e Server Actions do admin
 src/lib/store/actions.ts  carrinho e finalização (Server Actions)
 src/lib/whatsapp.ts       montagem da mensagem e do link
+src/lib/shipping/         calculadora de frete: CEP, zonas por CEP/cidade e cotação no Melhor Envio (servidor)
 src/proxy.ts              renova a sessão do admin (o antigo middleware)
 public/products/          fotos enviadas (WebP otimizado); originais em assets/originals/
 scripts/local-stack/      stack local compatível com Supabase (só para desenvolvimento e testes)
@@ -76,7 +86,7 @@ tests/                    unit (Vitest), db (PGlite: RLS/RPC/estoque), e2e (Play
 
 ### 3.3 Vercel
 1. Importe o repositório na Vercel (o framework Next.js é detectado sozinho).
-2. Variáveis de ambiente (veja `.env.example`): `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_SITE_URL`.
+2. Variáveis de ambiente (veja `.env.example`): `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_SITE_URL`. Opcionais, para cotar Correios e transportadoras: `MELHOR_ENVIO_TOKEN` (gerado em <https://melhorenvio.com.br/painel/gerenciar/tokens>, botão “Novo token”), `MELHOR_ENVIO_EMAIL` (se vazio, usa o e-mail de contato da loja) e `MELHOR_ENVIO_SANDBOX=true` para o ambiente de testes. Depois de mudar uma variável, faça um novo deploy.
 3. Faça o deploy. **O banco precisa estar acessível durante o build**, porque as páginas públicas são pré-renderizadas com os dados reais.
 4. **Domínio:** em Project → Domains, adicione o domínio e configure o DNS indicado. Atualize `NEXT_PUBLIC_SITE_URL` e faça um novo deploy.
 
@@ -113,7 +123,7 @@ npm run test:e2e                                                                
 npm run test:e2e:fresh
 ```
 
-O script gera o `.env.local` e cria o admin `admin@mivora.local` / `mivora-local-123`. Ele emula apenas o login por senha e o Storage: **não use em produção**.
+O script gera o `.env.local` e cria o admin `admin@mivora.local` / `mivora-local-123`. Ele emula apenas o login por senha e o Storage: **não use em produção**. Para os testes de frete, ele também simula o ViaCEP e o Melhor Envio (CEPs `29055-100`, `29100-010` e `01001-000`), e o `test:e2e:fresh` se recusa a rodar se as cotações apontarem para o serviço real.
 
 ## 6. Pendências antes do lançamento
 
@@ -136,7 +146,7 @@ O checklist também aparece no painel (`/admin`, card “Preparação para o lan
 6. **Revisar o conteúdo técnico** (ativos, volume, modo de uso) de cada produto com a embalagem e marcar “Conteúdo técnico revisado”.
 7. **Dados legais:** razão social, CNPJ, endereço e e-mail em Configurações.
 8. **Páginas institucionais:** revisar privacidade, termos, envio e trocas com a assessoria e desmarcar “pendente de revisão”.
-9. **Entrega:** criar as opções reais (região, taxa, prazo) em Configurações → Opções de entrega.
+9. **Entrega e frete:** informar o CEP de origem e criar as opções reais (faixas de CEP ou cidades, taxa, prazo) em Configurações. Para cotar Correios e transportadoras, gerar o token no Melhor Envio e cadastrar `MELHOR_ENVIO_TOKEN` na Vercel/Hostinger. Revisar as políticas de envio e de privacidade, que ganharam um parágrafo sobre a calculadora.
 10. **Domínio** e `NEXT_PUBLIC_SITE_URL`.
 11. **Símbolo ®:** fica desligado; só ative em Configurações se o registro da marca estiver confirmado.
 12. **Analytics e Meta Pixel:** não instalados. Se forem adicionados, incluir aviso de consentimento e atualizar a política de privacidade.

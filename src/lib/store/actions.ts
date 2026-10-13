@@ -4,6 +4,8 @@ import { z } from "zod";
 import { getKits, getProductsByIds, getStoreSettings } from "@/lib/catalog/queries";
 import { getPublicSupabase } from "@/lib/supabase/public";
 import { lineKey } from "@/lib/cart/math";
+import { destinationLabel, normalizeCep } from "@/lib/shipping/cep";
+import { getShippingQuote } from "@/lib/shipping/quote";
 import { DELIVERY_METHOD_LABEL, type DeliveryMethod } from "@/lib/types";
 import { buildOrderWhatsAppLink, normalizeWhatsAppNumber } from "@/lib/whatsapp";
 
@@ -110,6 +112,11 @@ const checkoutSchema = z.object({
     .default(""),
   customerNotes: z.string().trim().max(1000).optional().default(""),
   deliveryZoneId: z.uuid().nullable().optional(),
+  /** Option chosen in the CEP calculator; quoted again on the server */
+  shipping: z
+    .object({ cep: z.string().max(12), optionId: z.string().max(80) })
+    .nullable()
+    .optional(),
   couponCode: z
     .string()
     .trim()
@@ -142,6 +149,9 @@ const ERROR_MESSAGES: Record<string, string> = {
   rate_limited: "Muitos pedidos ao mesmo tempo. Tente novamente em instantes",
   coupon_invalid: "Este cupom não é válido no momento. Remova-o para continuar",
   coupon_not_first_purchase: "O cupom de boas-vindas vale apenas para a primeira compra. Remova-o para continuar",
+  invalid_cep: "CEP inválido. Confira os números",
+  invalid_shipping: "Não foi possível validar a entrega escolhida. Calcule o frete novamente",
+  delivery_zone_unavailable: "A opção de entrega escolhida não atende este CEP. Calcule o frete novamente",
 };
 
 function describeRpcError(message: string) {
@@ -167,13 +177,29 @@ export async function submitOrder(input: unknown): Promise<CheckoutResult> {
   if (!sb) return { ok: false, error: "A loja ainda não está conectada ao banco de dados.", retryable: false };
   if (!number) return { ok: false, error: "O WhatsApp da loja ainda não foi configurado.", retryable: false };
 
+  // Delivery chosen in the CEP calculator: quoted again here, never trusted from the browser
+  let deliveryZoneId = data.deliveryZoneId ?? null;
+  let shipping: Record<string, unknown> | null = null;
+  if (data.shipping) {
+    const cep = normalizeCep(data.shipping.cep);
+    if (!cep) return { ok: false, error: "CEP inválido. Confira os números.", retryable: false };
+    const quote = await getShippingQuote(cep, data.items);
+    const option = quote.options.find((o) => o.id === data.shipping!.optionId);
+    if (!option) return { ok: false, error: "A opção de entrega escolhida não está mais disponível para este CEP. Calcule o frete novamente.", retryable: false };
+    if (option.unavailableReason) return { ok: false, error: `${option.unavailableReason}.`, retryable: false };
+    const place = { cep, city: quote.address?.city ?? null, uf: quote.address?.uf ?? null };
+    deliveryZoneId = option.kind === "zone" && option.method !== "to_arrange" ? option.zoneId : null;
+    shipping = option.kind === "carrier" ? { ...place, service: option.name, fee_cents: option.feeCents, estimate: option.estimate } : place;
+  }
+
   const { data: result, error } = await sb.rpc("create_order_intent", {
     p_items: data.items.map((i) => ({ product_id: i.productId, variant_id: i.variantId, kit_id: i.kitId, quantity: i.quantity })),
     p_customer_name: data.customerName || null,
     p_customer_phone: data.customerPhone || null,
     p_customer_notes: data.customerNotes || null,
-    p_delivery_zone_id: data.deliveryZoneId ?? null,
+    p_delivery_zone_id: deliveryZoneId,
     p_coupon_code: data.couponCode || null,
+    p_shipping: shipping,
   });
 
   if (error) {
@@ -191,9 +217,11 @@ export async function submitOrder(input: unknown): Promise<CheckoutResult> {
     discount_percent: number | null;
     has_unpriced_items: boolean;
     delivery: { name: string; method: DeliveryMethod; fee_cents: number | null; estimate: string | null } | null;
+    destination: { cep: string; city: string | null; uf: string | null } | null;
     items: { name: string; brand: string | null; code: string | null; quantity: number; unit_price_cents: number | null; line_total_cents: number | null }[];
   };
 
+  const destination = r.destination ? destinationLabel(r.destination) : null;
   const { url, summarized } = buildOrderWhatsAppLink(number, {
     greeting: settings.whatsapp_greeting,
     code: r.code,
@@ -209,8 +237,10 @@ export async function submitOrder(input: unknown): Promise<CheckoutResult> {
     discount: r.coupon_code && r.discount_percent ? { code: r.coupon_code, percent: r.discount_percent, cents: r.discount_cents } : null,
     delivery:
       r.delivery && r.delivery.method !== "to_arrange"
-        ? { label: `${DELIVERY_METHOD_LABEL[r.delivery.method]} (${r.delivery.name})`, feeCents: r.delivery.fee_cents, estimate: r.delivery.estimate }
-        : null,
+        ? { label: `${DELIVERY_METHOD_LABEL[r.delivery.method]} (${r.delivery.name})`, feeCents: r.delivery.fee_cents, estimate: r.delivery.estimate, destination }
+        : destination
+          ? { label: null, feeCents: null, destination }
+          : null,
     customerName: data.customerName || null,
     customerNotes: data.customerNotes || null,
   });

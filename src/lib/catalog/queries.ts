@@ -52,6 +52,16 @@ export const DEFAULT_SETTINGS: StoreSettings = {
   welcome_offer_enabled: false,
   welcome_offer_percent: 10,
   welcome_offer_code: "BEMVINDA10",
+  shipping_calculator_enabled: true,
+  shipping_origin_cep: null,
+  carrier_quotes_enabled: false,
+  shipping_handling_days: 1,
+  shipping_markup_percent: 0,
+  shipping_extra_cents: 0,
+  shipping_default_weight_g: 300,
+  shipping_default_height_cm: 6,
+  shipping_default_width_cm: 11,
+  shipping_default_length_cm: 16,
   about_headline: null,
   about_text: null,
   whatsapp_section_title: null,
@@ -83,7 +93,7 @@ export async function getDeliveryZones(): Promise<DeliveryZone[]> {
   if (!sb) return [];
   const { data, error } = await sb
     .from("delivery_zones")
-    .select("id, name, region, method, fee_cents, free_over_cents, min_order_cents, estimate, notes")
+    .select("id, name, region, method, fee_cents, free_over_cents, min_order_cents, estimate, notes, cep_ranges, cities")
     .eq("is_active", true)
     .order("sort_order");
   if (error) fail("delivery zones", error);

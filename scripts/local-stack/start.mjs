@@ -144,6 +144,25 @@ function session() {
   return { access_token, token_type: "bearer", expires_in: 3600, expires_at: now + 3600, refresh_token: randomUUID(), user: userObject() };
 }
 
+// Test doubles for the shipping calculator (E2E): CEP lookup in the ViaCEP format and
+// carrier quotes in the Melhor Envio format. Deterministic, so tests can assert values.
+const TEST_CEPS = {
+  "29055100": { cep: "29055-100", logradouro: "", bairro: "Praia do Canto", localidade: "Vitória", uf: "ES" },
+  "29100010": { cep: "29100-010", logradouro: "", bairro: "Centro", localidade: "Vila Velha", uf: "ES" },
+  "01001000": { cep: "01001-000", logradouro: "Praça da Sé", bairro: "Sé", localidade: "São Paulo", uf: "SP" },
+};
+const TEST_ME_TOKEN = "local-test";
+function testCarrierQuote(body) {
+  const weight = (body.products ?? []).reduce((sum, p) => sum + Number(p.weight) * Number(p.quantity), 0);
+  const far = !String(body.to?.postal_code ?? "").startsWith("29");
+  const pac = Math.round((18 + weight * 10 + (far ? 6 : 0)) * 100) / 100;
+  return [
+    { id: 1, name: "PAC", price: pac.toFixed(2), custom_price: pac.toFixed(2), delivery_time: 6, custom_delivery_time: 6, custom_delivery_range: { min: 5, max: 7 }, company: { id: 1, name: "Correios" } },
+    { id: 2, name: "SEDEX", price: (pac + 14).toFixed(2), custom_price: (pac + 14).toFixed(2), custom_delivery_time: 2, custom_delivery_range: { min: 1, max: 2 }, company: { id: 1, name: "Correios" } },
+    { id: 3, name: ".Package", error: "Transportadora não atende este trecho.", company: { id: 2, name: "Jadlog" } },
+  ];
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${cfg.gatewayPort}`);
   try {
@@ -180,6 +199,14 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === "/auth/v1/logout") {
       res.writeHead(204);
       return res.end();
+    }
+    // Shipping test doubles
+    const viacep = url.pathname.match(/^\/viacep\/ws\/([0-9]{8})\/json\/?$/);
+    if (viacep) return json(res, 200, TEST_CEPS[viacep[1]] ?? { erro: "true" });
+    if (url.pathname === "/melhor-envio/api/v2/me/shipment/calculate" && req.method === "POST") {
+      if (bearer(req) !== TEST_ME_TOKEN) return json(res, 401, { message: "Unauthenticated." });
+      if (!/@/.test(req.headers["user-agent"] ?? "")) return json(res, 400, { message: "User-Agent must contain a contact e-mail." });
+      return json(res, 200, testCarrierQuote(JSON.parse((await readBody(req)).toString() || "{}")));
     }
     // Storage
     const pub = url.pathname.match(/^\/storage\/v1\/object\/public\/([^/]+)\/(.+)$/);
@@ -225,7 +252,9 @@ server.listen(cfg.gatewayPort, () => {
 // Always written: lets test scripts target the local stack explicitly, whatever .env.local says
 writeFileSync(
   path.join(stateDir, "local.env"),
-  `export NEXT_PUBLIC_SUPABASE_URL=http://localhost:${cfg.gatewayPort}\nexport NEXT_PUBLIC_SUPABASE_ANON_KEY=${anonKey}\nexport NEXT_PUBLIC_SITE_URL=http://localhost:3000\n`,
+  `export NEXT_PUBLIC_SUPABASE_URL=http://localhost:${cfg.gatewayPort}\nexport NEXT_PUBLIC_SUPABASE_ANON_KEY=${anonKey}\nexport NEXT_PUBLIC_SITE_URL=http://localhost:3000\n` +
+    // shipping calculator against the test doubles above (never the real services)
+    `export CEP_API_URL=http://localhost:${cfg.gatewayPort}/viacep\nexport MELHOR_ENVIO_BASE_URL=http://localhost:${cfg.gatewayPort}/melhor-envio\nexport MELHOR_ENVIO_TOKEN=${TEST_ME_TOKEN}\nexport MELHOR_ENVIO_EMAIL=loja@example.com\n`,
 );
 
 // .env.local for the Next.js app

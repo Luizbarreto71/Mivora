@@ -471,3 +471,101 @@ describe("welcome offer (first purchase coupon)", () => {
     expect(none.r.discount_cents).toBe(0);
   });
 });
+
+describe("shipping calculator", () => {
+  type OrderResult = {
+    id: string;
+    delivery: { name: string; method: string; fee_cents: number | null; estimate: string | null } | null;
+    destination: { cep: string; city: string | null; uf: string | null } | null;
+  };
+  const order = (items: unknown, zoneId: string | null, shipping: unknown) =>
+    asRole(db, "anon", null, () =>
+      one<{ r: OrderResult }>(`select create_order_intent($1::jsonb, null, null, null, $2::uuid, null, $3::jsonb) as r`, [
+        JSON.stringify(items),
+        zoneId,
+        shipping == null ? null : JSON.stringify(shipping),
+      ]),
+    );
+  const stored = (id: string) =>
+    one(
+      `select delivery_zone_id, delivery_method, delivery_fee_cents, shipping_cep, shipping_city, shipping_uf, shipping_service, shipping_estimate
+         from order_intents where id = $1`,
+      [id],
+    );
+
+  it("restricts delivery zones by CEP range or city and checks coverage on the server", async () => {
+    const ampoule = await productId("skin1004-madagascar-centella-ampoule");
+    const zone = await one<{ id: string }>(
+      `insert into delivery_zones (name, method, fee_cents, estimate, cep_ranges, cities)
+       values ('Grande Vitória', 'local_delivery', 1500, '1 dia útil', '{29000000-29099999}', '{"Vila Velha/ES"}') returning id`,
+    );
+    await expect(db.query(`insert into delivery_zones (name, method, cep_ranges) values ('x', 'local_delivery', '{29099999-29000000}')`)).rejects.toThrow(/cep_ranges_valid/);
+    await expect(db.query(`insert into delivery_zones (name, method, cities) values ('x', 'local_delivery', '{"Vitória/es"}')`)).rejects.toThrow(/cities_valid/);
+
+    const covers = async (cep: string, city: string | null, uf: string | null) =>
+      (await one<{ c: boolean }>(`select delivery_zone_covers($1, $2, $3, $4) as c`, [zone.id, cep, city, uf])).c;
+    expect(await covers("29055100", "Vitória", "ES")).toBe(true);
+    expect(await covers("29100010", "VILA VELHA", "ES")).toBe(true);
+    expect(await covers("29100010", "Vila Velha", "SP")).toBe(false);
+    expect(await covers("01001000", "São Paulo", "SP")).toBe(false);
+
+    const ok = await order([{ product_id: ampoule, quantity: 1 }], zone.id, { cep: "29055-100", city: "Vitória", uf: "ES" });
+    expect(ok.r.delivery).toMatchObject({ name: "Grande Vitória", method: "local_delivery", fee_cents: 1500 });
+    expect(ok.r.destination).toEqual({ cep: "29055100", city: "Vitória", uf: "ES" });
+    expect(await stored(ok.r.id)).toEqual({
+      delivery_zone_id: zone.id,
+      delivery_method: "local_delivery",
+      delivery_fee_cents: 1500,
+      shipping_cep: "29055100",
+      shipping_city: "Vitória",
+      shipping_uf: "ES",
+      shipping_service: "Grande Vitória",
+      shipping_estimate: "1 dia útil",
+    });
+
+    await expect(order([{ product_id: ampoule, quantity: 1 }], zone.id, { cep: "01001000", city: "São Paulo", uf: "SP" })).rejects.toThrow(/delivery_zone_unavailable/);
+    await expect(order([{ product_id: ampoule, quantity: 1 }], zone.id, { cep: "2905" })).rejects.toThrow(/invalid_cep/);
+    await db.query(`update delivery_zones set is_active = false where id = $1`, [zone.id]);
+  });
+
+  it("records carrier quotes and 'a combinar' orders with the destination", async () => {
+    const ampoule = await productId("skin1004-madagascar-centella-ampoule");
+    const sedex = await order([{ product_id: ampoule, quantity: 1 }], null, {
+      cep: "01001000",
+      city: "São Paulo",
+      uf: "sp",
+      service: "Correios SEDEX",
+      fee_cents: 4379,
+      estimate: "3 dias úteis",
+    });
+    expect(sedex.r.delivery).toEqual({ name: "Correios SEDEX", method: "shipping", fee_cents: 4379, estimate: "3 dias úteis" });
+    expect(sedex.r.destination).toEqual({ cep: "01001000", city: "São Paulo", uf: "SP" });
+    expect(await stored(sedex.r.id)).toMatchObject({ delivery_zone_id: null, delivery_method: "shipping", delivery_fee_cents: 4379, shipping_service: "Correios SEDEX" });
+
+    await expect(order([{ product_id: ampoule, quantity: 1 }], null, { cep: "01001000", service: "PAC", fee_cents: "-5" })).rejects.toThrow(/invalid_shipping/);
+    await expect(order([{ product_id: ampoule, quantity: 1 }], null, { service: "PAC", fee_cents: 100 })).rejects.toThrow(/invalid_cep/);
+    await expect(order([{ product_id: ampoule, quantity: 1 }], null, [1])).rejects.toThrow(/invalid_shipping/);
+
+    const arrange = await order([{ product_id: ampoule, quantity: 1 }], null, { cep: "29055100", city: "Vitória", uf: "ES" });
+    expect(arrange.r.delivery).toBeNull();
+    expect(arrange.r.destination).toEqual({ cep: "29055100", city: "Vitória", uf: "ES" });
+    expect(await stored(arrange.r.id)).toMatchObject({ delivery_method: "to_arrange", delivery_fee_cents: null, shipping_cep: "29055100", shipping_service: null });
+  });
+
+  it("keeps calculator settings and product dimensions within limits; coverage is public, destinations are not", async () => {
+    expect(await one(`select shipping_calculator_enabled, carrier_quotes_enabled, shipping_handling_days, shipping_default_weight_g from store_settings where id = 1`)).toEqual({
+      shipping_calculator_enabled: true,
+      carrier_quotes_enabled: false,
+      shipping_handling_days: 1,
+      shipping_default_weight_g: 300,
+    });
+    await expect(db.query(`update products set weight_g = 0 where slug = 'skin1004-madagascar-centella-ampoule'`)).rejects.toThrow(/check/);
+    await expect(db.query(`update store_settings set shipping_origin_cep = '2905-100' where id = 1`)).rejects.toThrow(/check/);
+    await expect(db.query(`update store_settings set shipping_markup_percent = 150 where id = 1`)).rejects.toThrow(/check/);
+    await asRole(db, "anon", null, async () => {
+      expect((await all<{ cep_ranges: string[] }>(`select cep_ranges, cities from delivery_zones where is_active`)).length).toBeGreaterThan(0);
+      expect(await all(`select weight_g, height_cm from products where status = 'published' limit 1`)).toHaveLength(1);
+      expect(await all(`select shipping_cep from order_intents`)).toHaveLength(0);
+    });
+  });
+});

@@ -78,6 +78,10 @@ export const productSchema = z
       .trim()
       .refine((v) => v === "" || /^https:\/\//.test(v), "Use um link https://"),
     mediaPending: z.boolean(),
+    weightG: z.string().trim().regex(/^\d*$/, "Use números inteiros."),
+    heightCm: z.string().trim().regex(/^\d*$/, "Use números inteiros."),
+    widthCm: z.string().trim().regex(/^\d*$/, "Use números inteiros."),
+    lengthCm: z.string().trim().regex(/^\d*$/, "Use números inteiros."),
     seoTitle: optionalText(70),
     seoDescription: optionalText(170),
     variants: z.array(variantSchema).max(30),
@@ -90,6 +94,10 @@ export const productSchema = z
     if (v.status === "published" && v.categoryIds.length === 0) ctx.addIssue({ code: "custom", path: ["categoryIds"], message: "Selecione ao menos uma categoria para publicar." });
     if (v.status === "published" && v.availability === "in_stock" && v.sourcingStatus !== "stock_confirmed" && v.regulatoryStatus !== "verified")
       ctx.addIssue({ code: "custom", path: ["regulatoryStatus"], message: "Para liberar a venda, marque a documentação e a regularização como verificadas." });
+    if (v.weightG !== "" && (Number(v.weightG) < 1 || Number(v.weightG) > 30000)) ctx.addIssue({ code: "custom", path: ["weightG"], message: "Entre 1 g e 30.000 g." });
+    for (const key of ["heightCm", "widthCm", "lengthCm"] as const) {
+      if (v[key] !== "" && (Number(v[key]) < 1 || Number(v[key]) > 100)) ctx.addIssue({ code: "custom", path: [key], message: "Entre 1 e 100 cm." });
+    }
     if (v.id && v.relatedIds.includes(v.id)) ctx.addIssue({ code: "custom", path: ["relatedIds"], message: "Um produto não pode ser relacionado a ele mesmo." });
   });
 

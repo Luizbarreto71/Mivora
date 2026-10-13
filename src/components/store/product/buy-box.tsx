@@ -12,11 +12,12 @@ import { useCart } from "../cart-context";
 import { Price } from "../price";
 import { cartLineFromProduct, FavoriteButton } from "../product-actions";
 import { QuantityStepper } from "../quantity-stepper";
+import { ShippingCalculator } from "../shipping-calculator";
 import { useStoreConfig } from "../store-config";
 
 export function BuyBox({ product }: { product: ProductDetail }) {
   const { add } = useCart();
-  const { whatsappNumber, whatsappGreeting, deliverySummary, businessHours, siteUrl, comingSoonInquiry, welcomeOffer } = useStoreConfig();
+  const { whatsappNumber, whatsappGreeting, deliverySummary, businessHours, siteUrl, comingSoonInquiry, welcomeOffer, shippingCalculator } = useStoreConfig();
   const [variantId, setVariantId] = useState<string | null>(product.variants[0]?.id ?? null);
   const [quantity, setQuantity] = useState(1);
   const [showSticky, setShowSticky] = useState(false);
@@ -138,6 +139,10 @@ export function BuyBox({ product }: { product: ProductDetail }) {
           </a>
         ) : null}
       </div>
+
+      {shippingCalculator && isAvailable && !comingSoon ? (
+        <ShippingCalculator className="mt-6 border border-line p-4 sm:p-5" items={[{ productId: product.id, variantId, kitId: null, quantity }]} />
+      ) : null}
 
       <ul className={cn("mt-8 space-y-3 border-t border-line pt-6 text-sm text-ink-soft", comingSoon && "hidden")}>
         {welcomeOffer ? (

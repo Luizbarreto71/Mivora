@@ -7,6 +7,8 @@ import { dbErrorMessage, fail, formBool, formInt, formNullable, formString, succ
 import { requireAdminAction } from "@/lib/admin/auth";
 import { TAGS } from "@/lib/catalog/tags";
 import { parseBRLToCents } from "@/lib/money";
+import { normalizeCep } from "@/lib/shipping/cep";
+import { parseCepRanges, parseCities } from "@/lib/shipping/zones";
 import { slugify } from "@/lib/utils";
 import { normalizeWhatsAppNumber } from "@/lib/whatsapp";
 
@@ -313,6 +315,26 @@ export async function saveSettings(_: ActionState, fd: FormData): Promise<Action
   if (!/^[A-Z0-9]{3,20}$/.test(welcomeCode)) return fail("O código do cupom deve ter de 3 a 20 letras ou números.");
   const email = formNullable(fd, "contact_email");
   if (email && !z.email().safeParse(email).success) return fail("E-mail de contato inválido.");
+  const originRaw = formString(fd, "shipping_origin_cep");
+  const originCep = originRaw ? normalizeCep(originRaw) : null;
+  if (originRaw && !originCep) return fail("CEP de origem inválido. Use 8 números, ex.: 29055-100.", { shipping_origin_cep: "Inválido" });
+  const carrierQuotes = formBool(fd, "carrier_quotes_enabled");
+  if (carrierQuotes && !originCep) return fail("Informe o CEP de origem para cotar Correios e transportadoras.", { shipping_origin_cep: "Obrigatório" });
+  const handlingDays = formInt(fd, "shipping_handling_days", 1);
+  if (handlingDays < 0 || handlingDays > 30) return fail("Os dias para preparar o pedido devem ficar entre 0 e 30.");
+  const markupRaw = formString(fd, "shipping_markup_percent").replace(",", ".");
+  const markup = markupRaw === "" ? 0 : Number(markupRaw);
+  if (!Number.isFinite(markup) || markup < 0 || markup > 100) return fail("O acréscimo sobre o frete deve ficar entre 0% e 100%.");
+  const shippingExtra = moneyField(fd, "shipping_extra");
+  if (!shippingExtra.ok || (shippingExtra.value ?? 0) > 100000) return fail("Valor fixo por envio inválido. Ex.: 3,50");
+  const defaultWeight = formInt(fd, "shipping_default_weight_g", 300);
+  if (defaultWeight < 1 || defaultWeight > 30000) return fail("O peso padrão deve ficar entre 1 g e 30.000 g.");
+  const [defaultHeight, defaultWidth, defaultLength] = [
+    formInt(fd, "shipping_default_height_cm", 6),
+    formInt(fd, "shipping_default_width_cm", 11),
+    formInt(fd, "shipping_default_length_cm", 16),
+  ];
+  if ([defaultHeight, defaultWidth, defaultLength].some((d) => d < 1 || d > 100)) return fail("As medidas padrão devem ficar entre 1 e 100 cm.");
 
   const { error } = await supabase
     .from("store_settings")
@@ -344,6 +366,16 @@ export async function saveSettings(_: ActionState, fd: FormData): Promise<Action
       welcome_offer_enabled: formBool(fd, "welcome_offer_enabled"),
       welcome_offer_percent: welcomePercent,
       welcome_offer_code: welcomeCode,
+      shipping_calculator_enabled: formBool(fd, "shipping_calculator_enabled"),
+      shipping_origin_cep: originCep,
+      carrier_quotes_enabled: carrierQuotes,
+      shipping_handling_days: handlingDays,
+      shipping_markup_percent: Math.round(markup * 100) / 100,
+      shipping_extra_cents: shippingExtra.value ?? 0,
+      shipping_default_weight_g: defaultWeight,
+      shipping_default_height_cm: defaultHeight,
+      shipping_default_width_cm: defaultWidth,
+      shipping_default_length_cm: defaultLength,
       about_headline: formNullable(fd, "about_headline"),
       about_text: formNullable(fd, "about_text"),
       whatsapp_section_title: formNullable(fd, "whatsapp_section_title"),
@@ -368,6 +400,11 @@ export async function saveDeliveryZone(_: ActionState, fd: FormData): Promise<Ac
   const freeOver = moneyField(fd, "free_over");
   const minOrder = moneyField(fd, "min_order");
   if (!fee.ok || !freeOver.ok || !minOrder.ok) return fail("Valor inválido. Ex.: 15,00");
+  const ranges = parseCepRanges(formString(fd, "cep_ranges"));
+  const cities = parseCities(formString(fd, "cities"));
+  if (ranges.invalid.length) return fail(`Faixa de CEP inválida: ${ranges.invalid.slice(0, 3).join(", ")}. Use, por exemplo, 29000-000 a 29099-999.`);
+  if (cities.invalid.length) return fail(`Cidade inválida: ${cities.invalid.slice(0, 3).join(", ")}. Use, por exemplo, Vitória/ES.`);
+  if (ranges.ranges.length > 300 || cities.cities.length > 300) return fail("Use no máximo 300 faixas de CEP e 300 cidades por opção.");
   const row = {
     name,
     method,
@@ -379,6 +416,8 @@ export async function saveDeliveryZone(_: ActionState, fd: FormData): Promise<Ac
     notes: formNullable(fd, "notes"),
     is_active: formBool(fd, "is_active"),
     sort_order: formInt(fd, "sort_order"),
+    cep_ranges: ranges.ranges,
+    cities: cities.cities,
   };
   const { error } = id ? await supabase.from("delivery_zones").update(row).eq("id", id) : await supabase.from("delivery_zones").insert(row);
   if (error) return fail(dbErrorMessage(error));

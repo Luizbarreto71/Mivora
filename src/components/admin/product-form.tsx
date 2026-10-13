@@ -346,6 +346,23 @@ export function ProductForm({
           </div>
         </Card>
 
+        <Card title="Envio" description="Opcional. Usado na cotação de frete com transportadoras. Em branco, vale o padrão de Configurações › Calculadora de frete.">
+          <div className="grid grid-cols-3 gap-3">
+            <Field label="Peso com embalagem (g)" htmlFor="weightG" error={err("weightG")} className="col-span-3">
+              <Input id="weightG" inputMode="numeric" {...register("weightG")} placeholder="Ex.: 250" />
+            </Field>
+            <Field label="Altura (cm)" htmlFor="heightCm" error={err("heightCm")}>
+              <Input id="heightCm" inputMode="numeric" {...register("heightCm")} />
+            </Field>
+            <Field label="Largura (cm)" htmlFor="widthCm" error={err("widthCm")}>
+              <Input id="widthCm" inputMode="numeric" {...register("widthCm")} />
+            </Field>
+            <Field label="Compr. (cm)" htmlFor="lengthCm" error={err("lengthCm")}>
+              <Input id="lengthCm" inputMode="numeric" {...register("lengthCm")} />
+            </Field>
+          </div>
+        </Card>
+
         <Card title="Fornecedor e regularização" description="Privado — nunca exibido na loja. Requisito para liberar a venda de novos produtos.">
           <div className="space-y-4">
             <Field label="Situação de compra" htmlFor="sourcingStatus">

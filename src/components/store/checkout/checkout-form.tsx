@@ -9,6 +9,8 @@ import { Button, buttonClasses } from "@/components/ui/button";
 import { Field, Input, Textarea } from "@/components/ui/form";
 import { deliveryQuote, lineTotal } from "@/lib/cart/math";
 import { formatBRL } from "@/lib/money";
+import { destinationLabel } from "@/lib/shipping/cep";
+import type { ShippingOption, ShippingQuote } from "@/lib/shipping/types";
 import { submitOrder } from "@/lib/store/actions";
 import { clearCoupon, saveCoupon, savedCoupon } from "@/lib/store/welcome";
 import { DELIVERY_METHOD_LABEL, type DeliveryZone } from "@/lib/types";
@@ -17,6 +19,7 @@ import { buildOrderMessage, buildWhatsAppUrl } from "@/lib/whatsapp";
 import { useCart } from "../cart-context";
 import { EmptyState } from "../section";
 import { useCartRefresh } from "../cart-lines";
+import { ShippingCalculator } from "../shipping-calculator";
 import { useStoreConfig } from "../store-config";
 
 const LAST_ORDER_KEY = "mivora.lastOrder";
@@ -24,11 +27,14 @@ type LastOrder = { code: string; url: string; summarized: boolean; at: number };
 
 export function CheckoutForm({
   zones,
+  calculatorEnabled,
   pickupDetails,
   minimumOrderCents,
   freeShippingThresholdCents,
 }: {
   zones: DeliveryZone[];
+  /** CEP calculator (zones by CEP/city + carrier quotes) instead of the plain zone list */
+  calculatorEnabled: boolean;
   pickupDetails: string | null;
   minimumOrderCents: number | null;
   freeShippingThresholdCents: number | null;
@@ -38,6 +44,8 @@ export function CheckoutForm({
   useCartRefresh(true);
 
   const [zoneId, setZoneId] = useState<string | null>(zones.length === 1 ? zones[0].id : null);
+  const [shippingQuote, setShippingQuote] = useState<ShippingQuote | null>(null);
+  const [shippingOption, setShippingOption] = useState<ShippingOption | null>(null);
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [notes, setNotes] = useState("");
@@ -90,6 +98,18 @@ export function CheckoutForm({
   const allUnpriced = totals.purchasableLines.length > 0 && totals.purchasableLines.every((l) => l.unitPriceCents == null);
   // Estimate only: the server recalculates the discount when the order is registered
   const discountCents = coupon && welcomeOffer ? Math.floor((totals.subtotalCents * welcomeOffer.percent) / 100) : 0;
+  // Delivery: option chosen in the CEP calculator, or the plain zone list
+  const zoneBelowMinimum = !calculatorEnabled && quote.belowMinimum;
+  const deliveryFeeCents = calculatorEnabled
+    ? shippingOption && shippingOption.method !== "to_arrange"
+      ? shippingOption.feeCents
+      : null
+    : zone && zone.method !== "to_arrange"
+      ? quote.feeCents
+      : null;
+  const needsShippingChoice = calculatorEnabled && shippingQuote != null && shippingOption == null;
+  const deliveryText = deliveryFeeCents == null ? (needsShippingChoice ? "Escolha uma opção" : "A combinar") : deliveryFeeCents === 0 ? "Grátis*" : `${formatBRL(deliveryFeeCents)}*`;
+  const estimatedTotalCents = deliveryFeeCents != null && !totals.hasUnpricedItems ? totals.subtotalCents - discountCents + deliveryFeeCents : null;
 
   if (done) return <OrderSent order={done} onNew={() => { sessionStorage.removeItem(LAST_ORDER_KEY); setDone(null); }} />;
   if (!hydrated) return <div className="h-64 animate-pulse bg-ivory" aria-busy="true" />;
@@ -103,7 +123,7 @@ export function CheckoutForm({
     );
   }
 
-  const blocked = totals.hasUnavailableItems || quote.belowMinimum || belowStoreMinimum || !whatsappNumber;
+  const blocked = totals.hasUnavailableItems || zoneBelowMinimum || belowStoreMinimum || !whatsappNumber || needsShippingChoice;
 
   const submit = () => {
     setError(null);
@@ -113,7 +133,8 @@ export function CheckoutForm({
         customerName: name,
         customerPhone: phone,
         customerNotes: notes,
-        deliveryZoneId: zone && zone.method !== "to_arrange" ? zone.id : null,
+        deliveryZoneId: !calculatorEnabled && zone && zone.method !== "to_arrange" ? zone.id : null,
+        shipping: calculatorEnabled && shippingQuote && shippingOption ? { cep: shippingQuote.cep, optionId: shippingOption.id } : null,
         couponCode: coupon,
       }).catch(() => ({ ok: false as const, error: "Não foi possível registrar o pedido agora.", retryable: true }));
 
@@ -134,6 +155,16 @@ export function CheckoutForm({
     });
   };
 
+  const fallbackDelivery =
+    calculatorEnabled && shippingQuote && shippingOption
+      ? {
+          label: shippingOption.method === "to_arrange" ? null : `${DELIVERY_METHOD_LABEL[shippingOption.method]} (${shippingOption.name})`,
+          feeCents: shippingOption.feeCents,
+          estimate: shippingOption.estimate,
+          destination: destinationLabel({ cep: shippingQuote.cep, city: shippingQuote.address?.city, uf: shippingQuote.address?.uf }),
+        }
+      : null;
+
   // If the order cannot be registered (e.g. connection issue), the visitor can still talk to the store.
   const fallbackUrl =
     whatsappNumber && error?.retryable
@@ -150,6 +181,7 @@ export function CheckoutForm({
             })),
             subtotalCents: totals.subtotalCents,
             hasUnpricedItems: totals.hasUnpricedItems,
+            delivery: fallbackDelivery,
             customerName: name || null,
             customerNotes: notes || null,
           }),
@@ -159,7 +191,21 @@ export function CheckoutForm({
   return (
     <div className="grid gap-12 lg:grid-cols-[1fr_26rem] lg:gap-16">
       <div className="space-y-10">
-        {zones.length > 0 ? (
+        {calculatorEnabled ? (
+          <fieldset>
+            <legend className="eyebrow mb-4 text-ink">Entrega</legend>
+            <ShippingCalculator
+              items={totals.purchasableLines.map((l) => ({ productId: l.productId, variantId: l.variantId, kitId: l.kitId, quantity: l.quantity }))}
+              autoQuote
+              selectedId={shippingOption?.id ?? null}
+              onSelect={setShippingOption}
+              onQuote={setShippingQuote}
+              title="Calcule o frete pelo CEP"
+            />
+            {!shippingQuote ? <p className="mt-3 text-xs text-muted">Opcional: sem o CEP, combinamos a entrega com você pelo WhatsApp.</p> : null}
+            {pickupDetails && shippingQuote?.options.some((o) => o.method === "pickup") ? <p className="mt-3 text-xs text-muted">Retirada: {pickupDetails}</p> : null}
+          </fieldset>
+        ) : zones.length > 0 ? (
           <fieldset>
             <legend className="eyebrow mb-4 text-ink">Entrega</legend>
             <div className="grid gap-3">
@@ -295,13 +341,22 @@ export function CheckoutForm({
               </div>
             </>
           ) : null}
-          <div className="flex justify-between text-muted">
-            <span>Entrega</span>
-            <span>{!zone || zone.method === "to_arrange" ? "A combinar" : quote.feeCents == null ? "A combinar" : quote.feeCents === 0 ? "Grátis*" : `${formatBRL(quote.feeCents)}*`}</span>
+          <div className="flex justify-between gap-3 text-muted">
+            <span className="min-w-0">
+              Entrega
+              {calculatorEnabled && shippingOption && shippingOption.method !== "to_arrange" ? <span className="block text-xs">{shippingOption.name}</span> : null}
+            </span>
+            <span className="shrink-0 tabular-nums">{deliveryText}</span>
           </div>
+          {estimatedTotalCents != null ? (
+            <div className="flex justify-between border-t border-line pt-2 text-base">
+              <span className="font-semibold">Total estimado</span>
+              <span className="font-semibold tabular-nums">{formatBRL(estimatedTotalCents)}</span>
+            </div>
+          ) : null}
           {totals.hasUnpricedItems && !allUnpriced ? <p className="text-xs text-muted">Itens com preço sob consulta não entram no subtotal.</p> : null}
           {freeShippingThresholdCents != null ? <p className="text-xs text-muted">Frete grátis a partir de {formatBRL(freeShippingThresholdCents)} nas regiões participantes, confirmado no atendimento.</p> : null}
-          {zone && zone.method !== "to_arrange" && quote.feeCents != null ? <p className="text-xs text-muted">*Estimativa sujeita a confirmação.</p> : null}
+          {deliveryFeeCents != null ? <p className="text-xs text-muted">*Estimativa sujeita a confirmação no atendimento.</p> : null}
         </div>
 
         <div className="mt-6 space-y-3">
@@ -314,7 +369,8 @@ export function CheckoutForm({
               </Link>
             </p>
           ) : null}
-          {quote.belowMinimum && zone?.min_order_cents != null ? <p className="text-sm text-danger">Pedido mínimo para esta entrega: {formatBRL(zone.min_order_cents)}.</p> : null}
+          {zoneBelowMinimum && zone?.min_order_cents != null ? <p className="text-sm text-danger">Pedido mínimo para esta entrega: {formatBRL(zone.min_order_cents)}.</p> : null}
+          {needsShippingChoice ? <p className="text-sm text-ink-soft">Escolha uma opção de entrega para continuar.</p> : null}
           {belowStoreMinimum ? <p className="text-sm text-danger">Pedido mínimo: {formatBRL(minimumOrderCents!)}.</p> : null}
           {error ? (
             <p className="text-sm text-danger" role="alert">

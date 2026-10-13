@@ -9,6 +9,7 @@ import { changeOrderStatus, saveOrderNotes } from "@/lib/admin/actions/orders";
 import { requireAdmin } from "@/lib/admin/auth";
 import { ORDER_STATUS_TONE } from "@/lib/admin/labels";
 import { formatBRL } from "@/lib/money";
+import { destinationLabel } from "@/lib/shipping/cep";
 import { DELIVERY_METHOD_LABEL, ORDER_STATUS_LABEL, type DeliveryMethod, type OrderStatus } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
 import { buildWhatsAppUrl, normalizeWhatsAppNumber } from "@/lib/whatsapp";
@@ -30,6 +31,7 @@ export default async function OrderDetailPage({ params }: PageProps<"/admin/pedi
   const status = order.status as OrderStatus;
   const phone = normalizeWhatsAppNumber(order.customer_phone);
   const zoneName = (order.zone as { name: string } | null)?.name;
+  const serviceName = zoneName ?? order.shipping_service ?? null;
 
   return (
     <AdminPage
@@ -100,14 +102,21 @@ export default async function OrderDetailPage({ params }: PageProps<"/admin/pedi
                 </>
               ) : null}
               {order.has_unpriced_items ? <p className="text-xs text-warning">Há itens com preço sob consulta (não incluídos no subtotal).</p> : null}
-              <p className="flex justify-between text-muted">
+              <p className="flex justify-between gap-4 text-muted">
                 <span>Entrega</span>
-                <span>
+                <span className="text-right">
                   {order.delivery_method ? DELIVERY_METHOD_LABEL[order.delivery_method as DeliveryMethod] : "A combinar"}
-                  {zoneName ? ` · ${zoneName}` : ""}
+                  {serviceName ? ` · ${serviceName}` : ""}
                   {order.delivery_fee_cents != null ? ` · ${formatBRL(order.delivery_fee_cents)} (estimado)` : ""}
+                  {order.shipping_estimate ? <span className="block text-xs">Prazo estimado: {order.shipping_estimate}</span> : null}
                 </span>
               </p>
+              {order.shipping_cep ? (
+                <p className="flex justify-between gap-4 text-muted">
+                  <span>Destino</span>
+                  <span className="text-right">{destinationLabel({ cep: order.shipping_cep, city: order.shipping_city, uf: order.shipping_uf })}</span>
+                </p>
+              ) : null}
             </div>
           </Card>
 

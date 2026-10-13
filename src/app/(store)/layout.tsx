@@ -31,6 +31,7 @@ export default async function StoreLayout({ children }: { children: React.ReactN
         siteUrl: SITE_URL,
         comingSoonInquiry: settings.coming_soon_inquiry_enabled,
         welcomeOffer: settings.welcome_offer_enabled ? { code: settings.welcome_offer_code, percent: settings.welcome_offer_percent } : null,
+        shippingCalculator: settings.shipping_calculator_enabled,
       }}
     >
       <CartProvider>

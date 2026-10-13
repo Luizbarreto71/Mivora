@@ -367,3 +367,79 @@ test("Catálogo — produto 'Sob consulta' mostra foto e 'Consultar preço', sem
   await expect(card).toContainText("Sob consulta");
   await expect(card).toContainText("Consultar preço");
 });
+
+// ---------------------------------------------------------------------------
+// Calculadora de frete (Melhor Envio e ViaCEP substituídos por dublês locais)
+// ---------------------------------------------------------------------------
+test("Frete — admin configura origem e zona por CEP; cliente calcula no produto e finaliza com o frete escolhido", async ({ browser }) => {
+  await admin.goto("/admin/configuracoes");
+  await admin.getByLabel("CEP de origem (de onde os pedidos saem)").fill("29010-000");
+  await admin.getByLabel("Cotar Correios e transportadoras pelo Melhor Envio").check();
+  await admin.getByRole("button", { name: "Salvar configurações" }).click();
+  await expect(admin.getByText("Configurações salvas.")).toBeVisible();
+  await admin.reload();
+  await expect(admin.getByText(/Melhor Envio conectado.*2 serviços/)).toBeVisible();
+
+  const newZone = admin.locator("form").filter({ has: admin.getByRole("button", { name: "Adicionar opção" }) });
+  await newZone.locator('[name="name"]').fill("Entrega local — Grande Vitória");
+  await newZone.locator('[name="fee"]').fill("12,00");
+  await newZone.locator('[name="estimate"]').fill("1 dia útil");
+  await newZone.locator('[name="cep_ranges"]').fill("29000-000 a 29099-999");
+  await newZone.locator('[name="cities"]').fill("Vila Velha/ES");
+  await newZone.getByRole("button", { name: "Adicionar opção" }).click();
+  await expect(admin.getByText("Opção de entrega criada.")).toBeVisible();
+
+  const ctx = await browser.newContext({ storageState: RETURNING_VISITOR });
+  const page = await ctx.newPage();
+  let whatsappUrl = "";
+  await ctx.route("https://wa.me/**", async (route) => {
+    whatsappUrl = route.request().url();
+    await route.fulfill({ status: 200, body: "whatsapp" });
+  });
+
+  // Product page: São Paulo gets carrier quotes only (the local zone does not cover it)
+  await page.goto("/produtos/skin1004-madagascar-centella-ampoule");
+  const cep = page.getByLabel("Calcular frete e prazo");
+  await cep.fill("01001-000");
+  await expect(page.getByText("Sé · São Paulo/SP · CEP 01001-000")).toBeVisible();
+  await expect(page.getByText("Correios PAC")).toBeVisible();
+  await expect(page.getByText("R$ 27,00")).toBeVisible();
+  await expect(page.getByText("Prazo estimado: 6 a 8 dias úteis")).toBeVisible();
+  await expect(page.getByText("Correios SEDEX")).toBeVisible();
+  await expect(page.getByText(".Package")).toHaveCount(0);
+  await expect(page.getByText("Entrega local — Grande Vitória")).toHaveCount(0);
+
+  // Vitória: the zone restricted to 29000-000…29099-999 appears with its fee
+  await cep.fill("29055-100");
+  await expect(page.getByText("Praia do Canto · Vitória/ES · CEP 29055-100")).toBeVisible();
+  await expect(page.getByText("Entrega local — Grande Vitória")).toBeVisible();
+  await expect(page.getByText("R$ 12,00")).toBeVisible();
+
+  await cep.fill("99999-999");
+  await expect(page.getByText("Não encontramos este CEP. Confira os números e tente de novo.")).toBeVisible();
+
+  await cep.fill("01001-000");
+  await expect(page.getByText("Correios SEDEX")).toBeVisible();
+  await page.getByRole("button", { name: "Adicionar ao carrinho" }).click();
+
+  // Checkout: the remembered CEP is quoted again; the visitor picks SEDEX
+  await page.goto("/finalizar");
+  const sedex = page.getByRole("radio", { name: /Correios SEDEX/ });
+  await expect(sedex).toBeVisible();
+  await expect(page.getByRole("button", { name: "Finalizar pelo WhatsApp" })).toBeDisabled();
+  await sedex.check();
+  await expect(page.getByText("Total estimado", { exact: true })).toBeVisible();
+  await expect(page.getByText(brl(11990 + 4100)).first()).toBeVisible();
+  await page.getByRole("button", { name: "Finalizar pelo WhatsApp" }).click();
+  await expect.poll(() => whatsappUrl, { timeout: 15_000 }).toContain("https://wa.me/");
+  const message = decodeURIComponent(whatsappUrl.split("text=")[1]);
+  expect(message).toContain("*Entrega:* Envio (Correios SEDEX) — taxa estimada R$ 41,00 (sujeita a confirmação) — prazo estimado: 2 a 3 dias úteis — CEP 01001-000 (São Paulo/SP).");
+  expect(message).toContain(`*Total estimado com entrega:* ${brl(11990 + 4100)}`);
+
+  const code = message.match(/MIV-\d{6}/)![0];
+  await admin.goto(`/admin/pedidos?q=${code}`);
+  await admin.getByRole("link", { name: code }).click();
+  await expect(admin.getByText("CEP 01001-000 (São Paulo/SP)")).toBeVisible();
+  await expect(admin.getByText(/Envio · Correios SEDEX · R\$ 41,00 \(estimado\)/)).toBeVisible();
+  await ctx.close();
+});

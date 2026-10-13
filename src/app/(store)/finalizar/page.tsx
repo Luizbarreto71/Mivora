@@ -20,6 +20,7 @@ export default async function CheckoutPage() {
       <div className="mt-10">
         <CheckoutForm
           zones={zones}
+          calculatorEnabled={settings.shipping_calculator_enabled}
           pickupDetails={settings.pickup_enabled ? settings.pickup_details : null}
           minimumOrderCents={settings.minimum_order_cents}
           freeShippingThresholdCents={settings.free_shipping_enabled ? settings.free_shipping_threshold_cents : null}

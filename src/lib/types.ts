@@ -114,6 +114,17 @@ export type StoreSettings = {
   welcome_offer_enabled: boolean;
   welcome_offer_percent: number;
   welcome_offer_code: string;
+  shipping_calculator_enabled: boolean;
+  /** 8 digits; required for carrier quotes */
+  shipping_origin_cep: string | null;
+  carrier_quotes_enabled: boolean;
+  shipping_handling_days: number;
+  shipping_markup_percent: number;
+  shipping_extra_cents: number;
+  shipping_default_weight_g: number;
+  shipping_default_height_cm: number;
+  shipping_default_width_cm: number;
+  shipping_default_length_cm: number;
   about_headline: string | null;
   about_text: string | null;
   whatsapp_section_title: string | null;
@@ -132,6 +143,9 @@ export type DeliveryZone = {
   min_order_cents: number | null;
   estimate: string | null;
   notes: string | null;
+  /** Coverage: "29000000-29099999" ranges and "Cidade/UF" entries. Both empty = anywhere. */
+  cep_ranges: string[];
+  cities: string[];
 };
 
 export type Banner = {

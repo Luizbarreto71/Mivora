@@ -13,6 +13,8 @@ export type StoreConfig = {
   comingSoonInquiry: boolean;
   /** First-purchase offer, when enabled in the admin */
   welcomeOffer: { code: string; percent: number } | null;
+  /** CEP shipping calculator (product page, cart, checkout) */
+  shippingCalculator: boolean;
 };
 
 const StoreConfigContext = createContext<StoreConfig>({
@@ -23,6 +25,7 @@ const StoreConfigContext = createContext<StoreConfig>({
   siteUrl: "",
   comingSoonInquiry: false,
   welcomeOffer: null,
+  shippingCalculator: false,
 });
 
 export function StoreConfigProvider({ value, children }: { value: StoreConfig; children: ReactNode }) {
