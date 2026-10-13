@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { asRole, createTestDb, type TestDb } from "./harness";
@@ -567,5 +567,42 @@ describe("shipping calculator", () => {
       expect(await all(`select weight_g, height_cm from products where status = 'published' limit 1`)).toHaveLength(1);
       expect(await all(`select shipping_cep from order_intents`)).toHaveLength(0);
     });
+  });
+});
+
+describe("home carousel", () => {
+  const PHOTOS = [
+    "/banners/home-ritual-aparelho-luz.webp",
+    "/banners/home-medicube-collagen-night-wrapping-mask.webp",
+    "/banners/home-medicube-zero-pore-pad.webp",
+    "/banners/home-medicube-collagen-jelly-cream.webp",
+  ];
+  const slides = () =>
+    asRole(db, "anon", null, () =>
+      all<{ title: string; image_desktop_url: string; image_alt: string | null; cta_label: string | null; cta_href: string | null; cta2_label: string | null }>(
+        `select title, image_desktop_url, image_alt, cta_label, cta_href, cta2_label from banners where placement = 'hero' order by sort_order`,
+      ),
+    );
+
+  it("shows four photo slides, in order, each with copy, alt text and a link to a published page", async () => {
+    const rows = await slides();
+    expect(rows.map((r) => r.image_desktop_url)).toEqual(PHOTOS);
+    expect(rows[0]).toMatchObject({ title: "Sua pele, seu ritual.", cta_href: "/produtos", cta2_label: null });
+    for (const r of rows) {
+      expect(r.image_alt).toBeTruthy();
+      expect(r.cta_label).toBeTruthy();
+      expect(r.cta_href).toMatch(/^\//);
+      expect(existsSync(path.join(process.cwd(), "public", r.image_desktop_url))).toBe(true);
+      const slug = r.cta_href!.match(/^\/produtos\/(.+)$/)?.[1];
+      if (slug) expect(await one(`select status from products where slug = $1`, [slug])).toEqual({ status: "published" });
+    }
+  });
+
+  it("re-running the carousel migration changes nothing (idempotent)", async () => {
+    const before = await slides();
+    const file = readdirSync(path.join(process.cwd(), "supabase", "migrations")).find((f) => f.includes("home_carousel"))!;
+    await db.exec(readFileSync(path.join(process.cwd(), "supabase", "migrations", file), "utf8"));
+    expect(await slides()).toEqual(before);
+    expect((await one<{ n: number }>(`select count(*)::int as n from banners where placement = 'hero'`)).n).toBe(4);
   });
 });

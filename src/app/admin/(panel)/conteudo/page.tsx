@@ -61,7 +61,7 @@ function BannerForm({ banner }: { banner?: BannerRow }) {
       <Field label="Botão secundário — link">
         <Input name="cta2_href" defaultValue={banner?.cta2_href ?? ""} />
       </Field>
-      <MediaField name="image_desktop_url" label="Imagem (desktop)" defaultValue={banner?.image_desktop_url ?? null} folder="banners" hint="Sem imagem, a home compõe fotos reais dos produtos." />
+      <MediaField name="image_desktop_url" label="Imagem (desktop)" defaultValue={banner?.image_desktop_url ?? null} folder="banners" hint="Foto vertical (retrato, ex.: 4:5) funciona melhor; o enquadramento é pelo centro. Sem imagem, a home compõe fotos reais dos produtos." />
       <MediaField name="image_mobile_url" label="Imagem (celular, opcional)" defaultValue={banner?.image_mobile_url ?? null} folder="banners" />
       <Field label="Descrição da imagem (acessibilidade)" className="sm:col-span-2">
         <Input name="image_alt" defaultValue={banner?.image_alt ?? ""} />
@@ -86,6 +86,10 @@ export default async function ContentPage() {
   return (
     <AdminPage title="Conteúdo da home" description="Textos, banners e seções da página inicial. As alterações aparecem na loja ao salvar.">
       <div className="space-y-6">
+        <p className="text-sm text-muted">
+          Os <strong className="text-ink">banners principais ativos</strong> formam o carrossel do topo da home, na ordem do campo “Ordem”: a frase fica ao lado da foto e os
+          slides trocam sozinhos a cada 6,5 segundos (a troca pausa quando a cliente passa o mouse ou toca nos controles). Para tirar um slide sem apagar, desmarque “Ativo”.
+        </p>
         {(banners as BannerRow[] | null)?.map((b) => (
           <Card
             key={b.id}

@@ -57,7 +57,7 @@ export default async function HomePage() {
 
   return (
     <>
-      <Hero banner={content.hero[0]} products={stage} />
+      <Hero banners={content.hero} products={stage} />
 
       {!isSupabaseConfigured ? (
         <div className="container-page mt-10">
