@@ -14,12 +14,14 @@ type Stats = Record<string, number> & { top_cart_products: { id: string; name: s
 
 export default async function DashboardPage() {
   const { supabase } = await requireAdmin();
-  const [stats, orders, movements, settings, pages] = await Promise.all([
+  const [stats, orders, movements, settings, pages, customers, optIn] = await Promise.all([
     supabase.rpc("admin_dashboard_stats"),
     supabase.from("order_intents").select("id, code, status, subtotal_cents, has_unpriced_items, item_count, created_at").order("created_at", { ascending: false }).limit(6),
     supabase.from("inventory_movements").select("id, movement_type, quantity, reason, created_at, product:products(id, name)").order("created_at", { ascending: false }).limit(6),
     supabase.from("store_settings").select("whatsapp_number, legal_name, cnpj, contact_email").eq("id", 1).maybeSingle(),
     supabase.from("pages").select("slug").eq("needs_review", true),
+    supabase.from("customers").select("id", { count: "exact", head: true }),
+    supabase.from("customers").select("id", { count: "exact", head: true }).eq("marketing_consent", true),
   ]);
   const s = (stats.data ?? {}) as Stats;
 
@@ -46,6 +48,7 @@ export default async function DashboardPage() {
         <StatCard label="Pedidos confirmados" value={s.orders_confirmed ?? 0} hint="Aguardando conclusão" href="/admin/pedidos?status=confirmed" />
         <StatCard label="Vendas concluídas" value={s.orders_completed ?? 0} hint="Confirmadas manualmente" href="/admin/pedidos?status=completed" tone="success" />
         <StatCard label="Receita confirmada (30 dias)" value={formatBRL(s.sales_completed_30d_cents ?? 0)} hint={`Total: ${formatBRL(s.sales_completed_cents ?? 0)}`} />
+        <StatCard label="Clientes cadastrados" value={customers.count ?? 0} hint={`${optIn.count ?? 0} aceitam novidades e ofertas`} href="/admin/clientes" />
         <StatCard label="Sem preço" value={s.products_without_price ?? 0} hint="Exibidos como “Consultar preço”" href="/admin/produtos?filtro=sem-preco" tone={(s.products_without_price ?? 0) > 0 ? "warning" : "default"} />
       </div>
 

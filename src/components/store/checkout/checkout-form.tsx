@@ -1,17 +1,18 @@
 "use client";
 
-import { Check, Loader2, Tag, X } from "lucide-react";
+import { Check, Loader2, Tag, UserRound, X } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
 import { WhatsAppIcon } from "@/components/brand/social-icons";
 import { Button, buttonClasses } from "@/components/ui/button";
-import { Field, Input, Textarea } from "@/components/ui/form";
+import { Field, Textarea } from "@/components/ui/form";
 import { deliveryQuote, lineTotal } from "@/lib/cart/math";
 import { formatBRL } from "@/lib/money";
 import { destinationLabel } from "@/lib/shipping/cep";
 import type { ShippingOption, ShippingQuote } from "@/lib/shipping/types";
 import { submitOrder } from "@/lib/store/actions";
+import { formatBrPhone, readDeviceCustomer, type CustomerProfile } from "@/lib/store/customer";
 import { rememberDeviceOrder } from "@/lib/store/order-history";
 import { clearCoupon, saveCoupon, savedCoupon } from "@/lib/store/welcome";
 import { DELIVERY_METHOD_LABEL, type DeliveryZone } from "@/lib/types";
@@ -20,6 +21,7 @@ import { buildOrderMessage, buildWhatsAppUrl } from "@/lib/whatsapp";
 import { useCart } from "../cart-context";
 import { EmptyState } from "../section";
 import { useCartRefresh } from "../cart-lines";
+import { CustomerForm } from "../customer-form";
 import { ShippingCalculator } from "../shipping-calculator";
 import { useStoreConfig } from "../store-config";
 
@@ -47,12 +49,20 @@ export function CheckoutForm({
   const [zoneId, setZoneId] = useState<string | null>(zones.length === 1 ? zones[0].id : null);
   const [shippingQuote, setShippingQuote] = useState<ShippingQuote | null>(null);
   const [shippingOption, setShippingOption] = useState<ShippingOption | null>(null);
-  const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
+  // mandatory registration (lead): remembered on this device after the first time
+  const [customer, setCustomer] = useState<CustomerProfile | null>(null);
+  const [customerChecked, setCustomerChecked] = useState(false);
+  const [editingCustomer, setEditingCustomer] = useState(false);
   const [notes, setNotes] = useState("");
   const [coupon, setCoupon] = useState("");
   const [couponDraft, setCouponDraft] = useState("");
   const [couponError, setCouponError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCustomer(readDeviceCustomer());
+    setCustomerChecked(true);
+  }, []);
 
   // Coupon accepted in the welcome intro is pre-applied
   useEffect(() => {
@@ -113,7 +123,7 @@ export function CheckoutForm({
   const estimatedTotalCents = deliveryFeeCents != null && !totals.hasUnpricedItems ? totals.subtotalCents - discountCents + deliveryFeeCents : null;
 
   if (done) return <OrderSent order={done} onNew={() => { sessionStorage.removeItem(LAST_ORDER_KEY); setDone(null); }} />;
-  if (!hydrated) return <div className="h-64 animate-pulse bg-ivory" aria-busy="true" />;
+  if (!hydrated || !customerChecked) return <div className="h-64 animate-pulse bg-ivory" aria-busy="true" />;
   if (lines.length === 0) {
     return (
       <EmptyState
@@ -124,15 +134,15 @@ export function CheckoutForm({
     );
   }
 
-  const blocked = totals.hasUnavailableItems || zoneBelowMinimum || belowStoreMinimum || !whatsappNumber || needsShippingChoice;
+  const needsRegistration = !customer || editingCustomer;
+  const blocked = needsRegistration || totals.hasUnavailableItems || zoneBelowMinimum || belowStoreMinimum || !whatsappNumber || needsShippingChoice;
 
   const submit = () => {
     setError(null);
     startTransition(async () => {
       const result = await submitOrder({
         items: totals.purchasableLines.map((l) => ({ productId: l.productId, variantId: l.variantId, kitId: l.kitId, quantity: l.quantity })),
-        customerName: name,
-        customerPhone: phone,
+        customer,
         customerNotes: notes,
         deliveryZoneId: !calculatorEnabled && zone && zone.method !== "to_arrange" ? zone.id : null,
         shipping: calculatorEnabled && shippingQuote && shippingOption ? { cep: shippingQuote.cep, optionId: shippingOption.id } : null,
@@ -184,7 +194,7 @@ export function CheckoutForm({
             subtotalCents: totals.subtotalCents,
             hasUnpricedItems: totals.hasUnpricedItems,
             delivery: fallbackDelivery,
-            customerName: name || null,
+            customerName: customer?.name ?? null,
             customerNotes: notes || null,
           }),
         )
@@ -193,7 +203,44 @@ export function CheckoutForm({
   return (
     <div className="grid gap-12 lg:grid-cols-[1fr_26rem] lg:gap-16">
       <div className="space-y-10">
-        {calculatorEnabled ? (
+        {needsRegistration ? (
+          <section aria-labelledby="cadastro" className="border border-line p-5 sm:p-8">
+            <p className="eyebrow mb-2">Etapa 1 de 2</p>
+            <h2 id="cadastro" className="heading-display text-[1.5rem] sm:text-[1.75rem]">
+              {customer ? "Alterar cadastro" : "Seu cadastro"}
+            </h2>
+            <p className="mb-6 mt-2 text-sm leading-relaxed text-muted">
+              Para finalizar a compra, precisamos do seu nome, WhatsApp e e-mail. É rápido, sem senha, e fica lembrado neste aparelho para as próximas compras.
+            </p>
+            <CustomerForm
+              initial={customer}
+              source="checkout"
+              submitLabel="Continuar para a entrega"
+              onDone={(c) => {
+                setCustomer(c);
+                setEditingCustomer(false);
+              }}
+              onCancel={customer ? () => setEditingCustomer(false) : undefined}
+            />
+          </section>
+        ) : (
+          <section aria-label="Seus dados" className="flex flex-wrap items-start justify-between gap-4 border border-line p-5">
+            <div className="flex min-w-0 gap-3">
+              <UserRound className="mt-0.5 h-5 w-5 shrink-0 text-ink/70" strokeWidth={1.5} />
+              <div className="min-w-0 text-sm">
+                <p className="font-semibold">{customer!.name}</p>
+                <p className="mt-0.5 break-words text-muted">
+                  {formatBrPhone(customer!.phone)} · {customer!.email}
+                </p>
+              </div>
+            </div>
+            <button type="button" onClick={() => setEditingCustomer(true)} className="text-xs font-semibold underline underline-offset-4">
+              Alterar dados
+            </button>
+          </section>
+        )}
+
+        {needsRegistration ? null : calculatorEnabled ? (
           <fieldset>
             <legend className="eyebrow mb-4 text-ink">Entrega</legend>
             <ShippingCalculator
@@ -236,28 +283,11 @@ export function CheckoutForm({
           </fieldset>
         ) : null}
 
-        <fieldset>
-          <legend className="eyebrow mb-1 text-ink">Seus dados (opcional)</legend>
-          <p className="mb-5 text-xs text-muted">Não é necessário criar conta. Se preferir, informe seu nome para agilizar o atendimento.</p>
-          <div className="grid gap-5 sm:grid-cols-2">
-            <Field label="Nome" htmlFor="name">
-              <Input id="name" value={name} onChange={(e) => setName(e.target.value)} autoComplete="given-name" maxLength={120} />
-            </Field>
-            <Field label="WhatsApp para contato" htmlFor="phone" hint="Opcional">
-              <Input id="phone" value={phone} onChange={(e) => setPhone(e.target.value.replace(/[^0-9+() -]/g, ""))} inputMode="tel" autoComplete="tel" maxLength={30} />
-            </Field>
-            <Field label="Observações" htmlFor="notes" className="sm:col-span-2">
-              <Textarea id="notes" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={1000} placeholder="Ex.: bairro para entrega, melhor horário para contato" />
-            </Field>
-          </div>
-          <p className="mt-4 text-xs text-muted">
-            Usamos estes dados apenas para atender o seu pedido. Saiba mais na{" "}
-            <Link href="/politica-de-privacidade" className="underline">
-              Política de Privacidade
-            </Link>
-            .
-          </p>
-        </fieldset>
+        {needsRegistration ? null : (
+          <Field label="Observações (opcional)" htmlFor="notes">
+            <Textarea id="notes" value={notes} onChange={(e) => setNotes(e.target.value)} maxLength={1000} placeholder="Ex.: bairro para entrega, melhor horário para contato" />
+          </Field>
+        )}
       </div>
 
       <aside className="h-fit bg-ivory p-6 sm:p-8 lg:sticky lg:top-36">
@@ -362,6 +392,7 @@ export function CheckoutForm({
         </div>
 
         <div className="mt-6 space-y-3">
+          {needsRegistration ? <p className="text-sm text-ink-soft">Faça seu cadastro para escolher a entrega e finalizar.</p> : null}
           {!whatsappNumber ? <p className="text-sm text-danger">O WhatsApp da loja ainda não foi configurado. Tente novamente mais tarde.</p> : null}
           {totals.hasUnavailableItems ? (
             <p className="text-sm text-danger">

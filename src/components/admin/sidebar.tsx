@@ -17,6 +17,7 @@ import {
   Settings,
   ShoppingBag,
   Tags,
+  Users,
   Warehouse,
   X,
 } from "lucide-react";
@@ -29,6 +30,7 @@ import { cn } from "@/lib/utils";
 const NAV = [
   { href: "/admin", label: "Painel", Icon: LayoutDashboard, exact: true },
   { href: "/admin/pedidos", label: "Pedidos", Icon: ClipboardList },
+  { href: "/admin/clientes", label: "Clientes", Icon: Users },
   { href: "/admin/produtos", label: "Produtos", Icon: Package },
   { href: "/admin/estoque", label: "Estoque", Icon: Warehouse },
   { href: "/admin/kits", label: "Kits", Icon: Boxes },

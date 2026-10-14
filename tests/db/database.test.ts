@@ -39,6 +39,15 @@ let outsiderId: string;
 const one = async <T>(sql: string, params: unknown[] = []) => (await db.query<T>(sql, params)).rows[0];
 const all = async <T>(sql: string, params: unknown[] = []) => (await db.query<T>(sql, params)).rows;
 const productId = async (slug: string) => (await one<{ id: string }>(`select id from products where slug = $1`, [slug])).id;
+/** Every order needs a registered customer (migration 014). */
+const CUSTOMER = JSON.stringify({ name: "Cliente Teste", email: "cliente@teste.com", phone: "11999990000" });
+const WITH_CUSTOMER = `p_customer => '${CUSTOMER}'::jsonb`;
+let customerSeq = 0;
+/** A distinct customer (e.g. for first-purchase checks). */
+const newCustomer = (phone?: string) => {
+  customerSeq += 1;
+  return JSON.stringify({ name: `Cliente ${customerSeq}`, email: `cliente${customerSeq}@teste.com`, phone: phone ?? `1197777${String(customerSeq).padStart(4, "0")}` });
+};
 
 beforeAll(async () => {
   db = await createTestDb();
@@ -163,7 +172,7 @@ describe("Catálogo MIVORA 2026 (50 produtos)", () => {
     const pid = await productId("olaplex-no3-hair-perfector");
     await asRole(db, "anon", null, async () => {
       expect(await all(`select id from products where id = $1`, [pid])).toHaveLength(1);
-      await expect(db.query(`select create_order_intent($1::jsonb)`, [JSON.stringify([{ product_id: pid, quantity: 1 }])])).rejects.toThrow(/item_unavailable/);
+      await expect(db.query(`select create_order_intent($1::jsonb, ${WITH_CUSTOMER})`, [JSON.stringify([{ product_id: pid, quantity: 1 }])])).rejects.toThrow(/item_unavailable/);
     });
     // and they still cannot be put on sale without the documentation check
     await asRole(db, "authenticated", adminId, async () => {
@@ -273,7 +282,7 @@ describe("order intents (Testes 4, 5, 6, 8)", () => {
 
     const res = await asRole(db, "anon", null, () =>
       one<{ r: { code: string; subtotal_cents: number; has_unpriced_items: boolean; items: { unit_price_cents: number | null }[] } }>(
-        `select create_order_intent($1::jsonb) as r`,
+        `select create_order_intent($1::jsonb, ${WITH_CUSTOMER}) as r`,
         [JSON.stringify([
           { product_id: centella, quantity: 2 },
           { product_id: cream, quantity: 1 },
@@ -300,13 +309,13 @@ describe("order intents (Testes 4, 5, 6, 8)", () => {
     const pid = await productId("celimax-pore-dark-spot-brightening-cream");
     await db.query(`update products set track_inventory = true, stock_quantity = 0 where id = $1`, [pid]);
     await asRole(db, "anon", null, async () => {
-      await expect(db.query(`select create_order_intent($1::jsonb)`, [JSON.stringify([{ product_id: pid, quantity: 1 }])])).rejects.toThrow(/item_unavailable/);
-      await expect(db.query(`select create_order_intent($1::jsonb)`, [JSON.stringify([{ product_id: pid, quantity: 500 }])])).rejects.toThrow(/invalid_quantity/);
+      await expect(db.query(`select create_order_intent($1::jsonb, ${WITH_CUSTOMER})`, [JSON.stringify([{ product_id: pid, quantity: 1 }])])).rejects.toThrow(/item_unavailable/);
+      await expect(db.query(`select create_order_intent($1::jsonb, ${WITH_CUSTOMER})`, [JSON.stringify([{ product_id: pid, quantity: 500 }])])).rejects.toThrow(/invalid_quantity/);
       await expect(db.query(`select create_order_intent('[]'::jsonb)`)).rejects.toThrow(/empty_cart/);
     });
     await db.query(`update products set stock_quantity = 2 where id = $1`, [pid]);
     await asRole(db, "anon", null, async () => {
-      await expect(db.query(`select create_order_intent($1::jsonb)`, [JSON.stringify([{ product_id: pid, quantity: 3 }])])).rejects.toThrow(/insufficient_stock/);
+      await expect(db.query(`select create_order_intent($1::jsonb, ${WITH_CUSTOMER})`, [JSON.stringify([{ product_id: pid, quantity: 3 }])])).rejects.toThrow(/insufficient_stock/);
     });
   });
 
@@ -314,7 +323,7 @@ describe("order intents (Testes 4, 5, 6, 8)", () => {
     const pid = await productId("celimax-pore-dark-spot-brightening-cream");
     await db.query(`update products set track_inventory = true, stock_quantity = 5, reserved_quantity = 0, price_cents = 8990 where id = $1`, [pid]);
     const r = await asRole(db, "anon", null, () =>
-      one<{ r: { id: string } }>(`select create_order_intent($1::jsonb) as r`, [JSON.stringify([{ product_id: pid, quantity: 2 }])]),
+      one<{ r: { id: string } }>(`select create_order_intent($1::jsonb, ${WITH_CUSTOMER}) as r`, [JSON.stringify([{ product_id: pid, quantity: 2 }])]),
     );
     const stock = () => one<{ stock_quantity: number; reserved_quantity: number }>(`select stock_quantity, reserved_quantity from products where id = $1`, [pid]);
     expect(await stock()).toEqual({ stock_quantity: 5, reserved_quantity: 0 });
@@ -402,7 +411,7 @@ describe("catalogue expansion (29 products)", () => {
     await db.query(`update products set status = 'published' where id = $1`, [pid]);
     await asRole(db, "anon", null, async () => {
       expect(await all(`select id from products where id = $1`, [pid])).toHaveLength(1);
-      await expect(db.query(`select create_order_intent($1::jsonb)`, [JSON.stringify([{ product_id: pid, quantity: 1 }])])).rejects.toThrow(/item_unavailable/);
+      await expect(db.query(`select create_order_intent($1::jsonb, ${WITH_CUSTOMER})`, [JSON.stringify([{ product_id: pid, quantity: 1 }])])).rejects.toThrow(/item_unavailable/);
     });
     await db.query(`update products set status = 'draft' where id = $1`, [pid]);
   });
@@ -439,8 +448,8 @@ describe("welcome offer (first purchase coupon)", () => {
   const order = (items: unknown, coupon: string | null, phone: string | null = null) =>
     asRole(db, "anon", null, () =>
       one<{ r: { id: string; subtotal_cents: number; discount_cents: number; coupon_code: string | null; discount_percent: number | null } }>(
-        `select create_order_intent($1::jsonb, null, $3, null, null, $2) as r`,
-        [JSON.stringify(items), coupon, phone],
+        `select create_order_intent($1::jsonb, p_coupon_code => $2, p_customer => $3::jsonb) as r`,
+        [JSON.stringify(items), coupon, newCustomer(phone ?? undefined)],
       ),
     );
 
@@ -480,10 +489,11 @@ describe("shipping calculator", () => {
   };
   const order = (items: unknown, zoneId: string | null, shipping: unknown) =>
     asRole(db, "anon", null, () =>
-      one<{ r: OrderResult }>(`select create_order_intent($1::jsonb, null, null, null, $2::uuid, null, $3::jsonb) as r`, [
+      one<{ r: OrderResult }>(`select create_order_intent($1::jsonb, null, null, null, $2::uuid, null, $3::jsonb, $4::jsonb) as r`, [
         JSON.stringify(items),
         zoneId,
         shipping == null ? null : JSON.stringify(shipping),
+        CUSTOMER,
       ]),
     );
   const stored = (id: string) =>
@@ -697,5 +707,79 @@ describe("premium home", () => {
     await db.query(`update store_settings set newsletter_enabled = false where id = 1`);
     await expect(sub("nova@exemplo.com")).rejects.toThrow(/newsletter_disabled/);
     await db.query(`update store_settings set newsletter_enabled = true where id = 1`);
+  });
+});
+
+describe("customer registration (lead capture)", () => {
+  const items = async () => JSON.stringify([{ product_id: await productId("skin1004-madagascar-centella-ampoule"), quantity: 1 }]);
+  const register = (name: string, email: string, phone: string, marketing = false) =>
+    asRole(db, "anon", null, () => one<{ r: string }>(`select register_customer($1, $2, $3, $4, 'teste') as r`, [name, email, phone, marketing]));
+
+  it("never registers an order without a customer", async () => {
+    await expect(asRole(db, "anon", null, async () => db.query(`select create_order_intent($1::jsonb)`, [await items()]))).rejects.toThrow(/customer_required/);
+  });
+
+  it("validates the registration, keeps customers private and the internal function closed", async () => {
+    await expect(register("A", "ana@teste.com", "11999990001")).rejects.toThrow(/invalid_name/);
+    await expect(register("Ana Lima", "ana-sem-arroba", "11999990001")).rejects.toThrow(/invalid_email/);
+    await expect(register("Ana Lima", "ana@teste.com", "1234")).rejects.toThrow(/invalid_phone/);
+    await expect(register("  Ana   Lima ", "Ana@Teste.com", "+55 (11) 99999-0001")).resolves.toEqual({ r: "ok" });
+    expect(await asRole(db, "anon", null, () => all(`select * from customers`))).toHaveLength(0);
+    await expect(asRole(db, "anon", null, () => db.query(`select upsert_customer('x', 'x@y.com', '11999990000', null, 'x')`))).rejects.toThrow(/permission denied/);
+    await expect(asRole(db, "anon", null, () => db.query(`insert into customers (name, email, phone) values ('x', 'x@y.com', '11999990000')`))).rejects.toThrow(
+      /row-level security|permission denied/,
+    );
+    const ana = await asRole(db, "authenticated", adminId, () => one(`select name, email, phone, marketing_consent from customers where email = 'ana@teste.com'`));
+    expect(ana).toEqual({ name: "Ana Lima", email: "ana@teste.com", phone: "11999990001", marketing_consent: false });
+  });
+
+  it("updates the record by e-mail, honours marketing opt-in (newsletter) and keeps it when an order says nothing", async () => {
+    await register("Bia Souza", "bia@teste.com", "21988887777", true);
+    await register("Beatriz Souza", "bia@teste.com", "21988886666", true);
+    const after = await one<{ name: string; phone: string; marketing_consent: boolean; marketing_consent_at: string | null }>(
+      `select name, phone, marketing_consent, marketing_consent_at from customers where email = 'bia@teste.com'`,
+    );
+    expect(after).toMatchObject({ name: "Beatriz Souza", phone: "21988886666", marketing_consent: true });
+    expect(after.marketing_consent_at).not.toBeNull();
+    expect(await one(`select source from newsletter_subscribers where email = 'bia@teste.com'`)).toEqual({ source: "cadastro" });
+
+    // an order without the "marketing" key keeps the previous choice
+    await asRole(db, "anon", null, async () =>
+      db.query(`select create_order_intent($1::jsonb, p_customer => $2::jsonb)`, [await items(), JSON.stringify({ name: "Beatriz Souza", email: "bia@teste.com", phone: "21988886666" })]),
+    );
+    expect(await one(`select marketing_consent from customers where email = 'bia@teste.com'`)).toEqual({ marketing_consent: true });
+    // explicit opt-out clears the consent date
+    await register("Beatriz Souza", "bia@teste.com", "21988886666", false);
+    expect(await one(`select marketing_consent, marketing_consent_at from customers where email = 'bia@teste.com'`)).toEqual({ marketing_consent: false, marketing_consent_at: null });
+  });
+
+  it("links the order to the customer, snapshots name and WhatsApp, counts orders and keeps the delivery city", async () => {
+    const r = await asRole(db, "anon", null, async () =>
+      one<{ r: { id: string } }>(`select create_order_intent($1::jsonb, null, null, 'Entregar à tarde', null, null, $2::jsonb, $3::jsonb) as r`, [
+        await items(),
+        JSON.stringify({ cep: "29055100", city: "Vitória", uf: "ES" }),
+        JSON.stringify({ name: "Carla Dias", email: "carla@teste.com", phone: "(27) 99876-5432", marketing: false }),
+      ]),
+    );
+    const order = await one<{ customer_name: string; customer_phone: string; customer_notes: string; email: string }>(
+      `select o.customer_name, o.customer_phone, o.customer_notes, c.email from order_intents o join customers c on c.id = o.customer_id where o.id = $1`,
+      [r.r.id],
+    );
+    expect(order).toEqual({ customer_name: "Carla Dias", customer_phone: "27998765432", customer_notes: "Entregar à tarde", email: "carla@teste.com" });
+    expect(await one(`select orders_count, cep, city, uf from customers where email = 'carla@teste.com'`)).toEqual({ orders_count: 1, cep: "29055100", city: "Vitória", uf: "ES" });
+  });
+
+  it("refuses the welcome coupon to a customer who already bought, even with another phone", async () => {
+    const ampoule = await productId("skin1004-madagascar-centella-ampoule");
+    const dani = (phone: string) => JSON.stringify({ name: "Dani Rocha", email: "dani@teste.com", phone });
+    const first = await asRole(db, "anon", null, () =>
+      one<{ r: { id: string } }>(`select create_order_intent($1::jsonb, p_customer => $2::jsonb) as r`, [JSON.stringify([{ product_id: ampoule, quantity: 1 }]), dani("31911112222")]),
+    );
+    await asRole(db, "authenticated", adminId, () => db.query(`select admin_set_order_status($1, 'confirmed')`, [first.r.id]));
+    await expect(
+      asRole(db, "anon", null, () =>
+        db.query(`select create_order_intent($1::jsonb, p_coupon_code => 'BEMVINDA10', p_customer => $2::jsonb)`, [JSON.stringify([{ product_id: ampoule, quantity: 1 }]), dani("31933334444")]),
+      ),
+    ).rejects.toThrow(/coupon_not_first_purchase/);
   });
 });

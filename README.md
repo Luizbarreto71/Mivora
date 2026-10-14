@@ -12,7 +12,7 @@ Loja virtual completa: vitrine pública, catálogo com busca e filtros, páginas
 |---|---|
 | Loja | Home editorial, catálogo (`/produtos`), marcas, categorias e necessidades, novidades, mais vendidos, ofertas, kits, “Monte seu ritual”, favoritos (salvos no aparelho), páginas institucionais |
 | Carrinho | Fica salvo no aparelho (localStorage) e é sincronizado entre abas. Preço e disponibilidade são conferidos de novo no banco ao abrir o carrinho |
-| Finalização | `/finalizar` → a função `create_order_intent` grava o pedido **com os preços lidos do banco** e devolve o código `MIV-000001` → abre o `wa.me` com a mensagem pronta. Carrinhos grandes geram uma mensagem resumida com o código |
+| Finalização | `/finalizar` em duas etapas: **cadastro obrigatório** (nome, WhatsApp e e-mail, sem senha) e entrega/revisão. A função `create_order_intent` grava o pedido **com os preços lidos do banco**, ligado ao cadastro, e devolve o código `MIV-000001` → abre o `wa.me` com a mensagem pronta. Carrinhos grandes geram uma mensagem resumida com o código |
 | Pedido ≠ venda | O pedido nasce como **Iniciado** e não mexe no estoque. No admin: **Confirmado** reserva o estoque, **Concluído** dá baixa definitiva, **Cancelado** libera a reserva ou estorna a baixa |
 | Admin (`/admin`) | Painel, pedidos (com exportação CSV), produtos (com fotos e variantes), estoque e histórico, kits, marcas, categorias, conteúdo da home, FAQ, páginas, configurações e opções de entrega, sugestões de produtos e auditoria |
 
@@ -69,6 +69,14 @@ Reprodução do mockup enviado pela dona da loja, sem trocar a stack nem apagar 
 - **Minha conta:** a loja não tem cadastro de cliente. A página mostra os pedidos enviados deste aparelho (código e link da conversa, guardados só no navegador) e os favoritos.
 - **Painel:** barra lateral escura, área clara, e os formulários não perdem mais o que foi digitado quando o servidor recusa um envio.
 - **Fotos:** a home usa as fotos de campanha enviadas e fotos reais dos produtos. Três fotos de produto com fundo cinza de estúdio ganharam fundo branco (originais em `assets/originals/products/`).
+
+### Cadastro obrigatório e captação de leads (13/10/2026)
+- **Para comprar, a cliente se cadastra:** nome completo, WhatsApp com DDD e e-mail, sem senha. O cadastro é feito na primeira etapa de `/finalizar` (ou em Minha conta, sem precisar comprar) e fica lembrado no aparelho para as próximas compras, com “Alterar dados” e “Sair deste aparelho”.
+- O botão “Comprar pelo WhatsApp” da página de produto agora passa pelo carrinho e pelo cadastro. As consultas (preço, disponibilidade, previsão) continuam indo direto para o WhatsApp.
+- **No banco:** tabela `customers` (só o admin lê), gravada pelas funções `register_customer` e `create_order_intent`, que **exige** o cadastro e liga o pedido a ele (`order_intents.customer_id`). O cadastro é atualizado pelo e-mail; o destino da entrega completa cidade/UF/CEP; há contagem de pedidos e limite de cadastros por minuto.
+- **Marketing só com consentimento:** a caixa “Quero receber novidades…” é opcional e vem desmarcada. Quem marca entra também na lista da newsletter (origem “cadastro”). Desmarcar depois revoga o consentimento.
+- **Painel → Clientes:** busca por nome, e-mail ou WhatsApp, consentimento, pedidos, cidade, exportação CSV e exclusão a pedido da cliente (os pedidos continuam, sem vínculo). O pedido mostra o e-mail do cadastro, e o painel inicial conta os clientes.
+- A política de privacidade e a pergunta “Preciso criar uma conta?” foram atualizadas.
 
 ## 2. Estrutura
 

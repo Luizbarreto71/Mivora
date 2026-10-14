@@ -23,7 +23,7 @@ export default async function OrderDetailPage({ params }: PageProps<"/admin/pedi
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const [{ data: order }, { data: items }, { data: history }] = await Promise.all([
-    supabase.from("order_intents").select("*, zone:delivery_zones(name)").eq("id", id).maybeSingle(),
+    supabase.from("order_intents").select("*, zone:delivery_zones(name), customer:customers(email, marketing_consent)").eq("id", id).maybeSingle(),
     supabase.from("order_intent_items").select("*").eq("order_id", id).order("sort_order"),
     supabase.from("order_status_history").select("*").eq("order_id", id).order("id", { ascending: false }),
   ]);
@@ -32,6 +32,7 @@ export default async function OrderDetailPage({ params }: PageProps<"/admin/pedi
   const phone = normalizeWhatsAppNumber(order.customer_phone);
   const zoneName = (order.zone as { name: string } | null)?.name;
   const serviceName = zoneName ?? order.shipping_service ?? null;
+  const customer = order.customer as { email: string; marketing_consent: boolean } | null;
 
   return (
     <AdminPage
@@ -120,7 +121,21 @@ export default async function OrderDetailPage({ params }: PageProps<"/admin/pedi
             </div>
           </Card>
 
-          <Card title="Contato e anotações" description="Dados informados voluntariamente pelo cliente.">
+          <Card
+            title="Contato e anotações"
+            description={
+              customer ? (
+                <>
+                  Cadastro: <a href={`mailto:${customer.email}`} className="underline">{customer.email}</a> · {customer.marketing_consent ? "aceita novidades" : "não aceita novidades"} ·{" "}
+                  <Link href={`/admin/clientes?q=${encodeURIComponent(customer.email)}`} className="underline">
+                    ver cliente
+                  </Link>
+                </>
+              ) : (
+                "Pedido sem cadastro vinculado (anterior ao cadastro obrigatório ou cadastro excluído)."
+              )
+            }
+          >
             <ActionForm action={saveOrderNotes} className="grid gap-4 sm:grid-cols-2">
               <input type="hidden" name="orderId" value={order.id} />
               <Field label="Nome" htmlFor="customerName">

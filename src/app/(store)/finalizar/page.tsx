@@ -15,7 +15,7 @@ export default async function CheckoutPage() {
       <Breadcrumbs items={[{ label: "Carrinho", href: "/carrinho" }, { label: "Finalizar" }]} className="mb-8" />
       <h1 className="heading-display text-[2rem] sm:text-[2.5rem]">Finalizar pelo WhatsApp</h1>
       <p className="mt-3 max-w-2xl text-[0.9375rem] leading-relaxed text-muted">
-        Revise o seu pedido. Ao continuar, registramos o pedido com um código e abrimos uma conversa com a MIVORA para confirmar disponibilidade, entrega e pagamento.
+        Faça seu cadastro rápido, escolha a entrega e revise o pedido. Ao continuar, registramos o pedido com um código e abrimos uma conversa com a MIVORA para confirmar disponibilidade, entrega e pagamento.
       </p>
       <div className="mt-10">
         <CheckoutForm

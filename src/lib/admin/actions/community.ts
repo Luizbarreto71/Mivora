@@ -55,3 +55,11 @@ export async function deleteSubscriber(id: string) {
   if (error) return fail(dbErrorMessage(error));
   return success("E-mail removido da lista.");
 }
+
+/** Deletes a customer's registration (e.g. on request). Orders stay, without the link. */
+export async function deleteCustomer(id: string) {
+  const { supabase } = await requireAdminAction();
+  const { error } = await supabase.from("customers").delete().eq("id", uuid.parse(id));
+  if (error) return fail(dbErrorMessage(error));
+  return success("Cadastro excluído.");
+}

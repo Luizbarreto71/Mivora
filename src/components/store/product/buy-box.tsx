@@ -1,6 +1,7 @@
 "use client";
 
 import { Check, Clock, CreditCard, Gift, Link2, Share2, ShoppingBag, Truck } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { WhatsAppIcon } from "@/components/brand/social-icons";
 import { buttonClasses } from "@/components/ui/button";
@@ -16,7 +17,8 @@ import { ShippingCalculator } from "../shipping-calculator";
 import { useStoreConfig } from "../store-config";
 
 export function BuyBox({ product }: { product: ProductDetail }) {
-  const { add } = useCart();
+  const { add, close } = useCart();
+  const router = useRouter();
   const { whatsappNumber, whatsappGreeting, deliverySummary, businessHours, siteUrl, comingSoonInquiry, welcomeOffer, shippingCalculator } = useStoreConfig();
   const [variantId, setVariantId] = useState<string | null>(product.variants[0]?.id ?? null);
   const [quantity, setQuantity] = useState(1);
@@ -39,6 +41,12 @@ export function BuyBox({ product }: { product: ProductDetail }) {
   }, []);
 
   const addToCart = () => add(cartLineFromProduct(product, variant), quantity);
+  // buying always goes through the checkout, where the registration is required
+  const buyNow = () => {
+    add(cartLineFromProduct(product, variant), quantity);
+    close();
+    router.push("/finalizar");
+  };
 
   const comingSoon = product.availability === "coming_soon";
   const whatsappHref = comingSoon
@@ -125,17 +133,19 @@ export function BuyBox({ product }: { product: ProductDetail }) {
             </button>
           </div>
         ) : null}
-        {whatsappHref ? (
-          <a href={whatsappHref} target="_blank" rel="noopener noreferrer" className={buttonClasses(isAvailable ? "outline" : "primary", "lg", "w-full")}>
+        {isAvailable && !comingSoon ? (
+          <button type="button" onClick={buyNow} className={buttonClasses("outline", "lg", "w-full")}>
+            <WhatsAppIcon className="h-4 w-4" /> Comprar pelo WhatsApp
+          </button>
+        ) : whatsappHref ? (
+          <a href={whatsappHref} target="_blank" rel="noopener noreferrer" className={buttonClasses("primary", "lg", "w-full")}>
             <WhatsAppIcon className="h-4 w-4" /> {comingSoon
               ? "Consultar previsão de chegada"
-              : isAvailable
-                ? "Comprar pelo WhatsApp"
-                : product.availability === "on_request"
-                  ? priceCents == null
-                    ? "Consultar preço pelo WhatsApp"
-                    : "Consultar disponibilidade"
-                  : "Consultar disponibilidade"}
+              : product.availability === "on_request"
+                ? priceCents == null
+                  ? "Consultar preço pelo WhatsApp"
+                  : "Consultar disponibilidade"
+                : "Consultar disponibilidade"}
           </a>
         ) : null}
       </div>
@@ -159,7 +169,7 @@ export function BuyBox({ product }: { product: ProductDetail }) {
         </li>
         <li className="flex gap-3">
           <Check className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.5} />
-          <span>Compra sem cadastro: finalize o pedido com atendimento humano pelo WhatsApp.</span>
+          <span>Cadastro rápido, sem senha, e finalização com atendimento humano pelo WhatsApp.</span>
         </li>
         <li className="flex gap-3">
           <CreditCard className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.5} />

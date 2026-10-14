@@ -102,14 +102,16 @@ const checkoutSchema = z.object({
     .array(lineRef.extend({ quantity: z.number().int().min(1).max(99) }))
     .min(1, "Seu carrinho está vazio.")
     .max(60, "Carrinho muito grande. Fale com a gente pelo WhatsApp."),
-  customerName: z.string().trim().max(120).optional().default(""),
-  customerPhone: z
-    .string()
-    .trim()
-    .max(30)
-    .regex(/^[0-9+() -]*$/, "Telefone inválido.")
-    .optional()
-    .default(""),
+  // mandatory registration (lead capture); validated again by the database
+  customer: z.object(
+    {
+      name: z.string().trim().min(2, "Informe seu nome completo.").max(120),
+      email: z.string().trim().max(254),
+      phone: z.string().trim().max(30),
+      marketing: z.boolean().optional(),
+    },
+    { error: "Faça seu cadastro para finalizar a compra." },
+  ),
   customerNotes: z.string().trim().max(1000).optional().default(""),
   deliveryZoneId: z.uuid().nullable().optional(),
   /** Option chosen in the CEP calculator; quoted again on the server */
@@ -149,6 +151,10 @@ const ERROR_MESSAGES: Record<string, string> = {
   rate_limited: "Muitos pedidos ao mesmo tempo. Tente novamente em instantes",
   coupon_invalid: "Este cupom não é válido no momento. Remova-o para continuar",
   coupon_not_first_purchase: "O cupom de boas-vindas vale apenas para a primeira compra. Remova-o para continuar",
+  customer_required: "Faça seu cadastro para finalizar a compra",
+  invalid_name: "Revise o nome do cadastro",
+  invalid_email: "Revise o e-mail do cadastro",
+  invalid_phone: "Revise o WhatsApp do cadastro (com DDD)",
   invalid_cep: "CEP inválido. Confira os números",
   invalid_shipping: "Não foi possível validar a entrega escolhida. Calcule o frete novamente",
   delivery_zone_unavailable: "A opção de entrega escolhida não atende este CEP. Calcule o frete novamente",
@@ -194,12 +200,11 @@ export async function submitOrder(input: unknown): Promise<CheckoutResult> {
 
   const { data: result, error } = await sb.rpc("create_order_intent", {
     p_items: data.items.map((i) => ({ product_id: i.productId, variant_id: i.variantId, kit_id: i.kitId, quantity: i.quantity })),
-    p_customer_name: data.customerName || null,
-    p_customer_phone: data.customerPhone || null,
     p_customer_notes: data.customerNotes || null,
     p_delivery_zone_id: deliveryZoneId,
     p_coupon_code: data.couponCode || null,
     p_shipping: shipping,
+    p_customer: data.customer,
   });
 
   if (error) {
@@ -241,7 +246,7 @@ export async function submitOrder(input: unknown): Promise<CheckoutResult> {
         : destination
           ? { label: null, feeCents: null, destination }
           : null,
-    customerName: data.customerName || null,
+    customerName: data.customer.name,
     customerNotes: data.customerNotes || null,
   });
 

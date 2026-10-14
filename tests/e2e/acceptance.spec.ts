@@ -26,6 +26,19 @@ async function editProductBySlug(page: Page, slug: string) {
   await expect(page.getByLabel("Preço de venda (R$)")).toBeVisible();
 }
 
+let customerSeq = 0;
+/** Fills the mandatory registration (step 1 of the checkout) with a new customer. */
+async function register(page: Page, name = "Cliente Teste") {
+  customerSeq += 1;
+  const email = `cliente${Date.now()}${customerSeq}@exemplo.com.br`;
+  await page.getByLabel("Nome completo").fill(name);
+  await page.getByLabel("WhatsApp com DDD").fill(`(11) 9${String(Date.now()).slice(-4)}-${String(1000 + customerSeq).slice(-4)}`);
+  await page.getByLabel("E-mail", { exact: true }).fill(email);
+  await page.getByRole("button", { name: "Continuar para a entrega" }).click();
+  await expect(page.getByRole("region", { name: "Seus dados" })).toBeVisible();
+  return email;
+}
+
 async function saveProduct(page: Page) {
   await page.getByRole("button", { name: /Salvar alterações|Criar produto/ }).click();
   await expect(page.getByRole("status").filter({ hasText: /Produto (salvo|criado)/ })).toBeVisible();
@@ -46,7 +59,7 @@ test("Teste 9 — visitante não autenticado não acessa o admin nem escreve dad
 
 test("login do administrador e configuração do WhatsApp", async () => {
   await admin.goto("/admin/login");
-  await admin.getByLabel("E-mail").fill(ADMIN_EMAIL);
+  await admin.getByLabel("E-mail", { exact: true }).fill(ADMIN_EMAIL);
   await admin.getByLabel("Senha").fill(ADMIN_PASSWORD);
   await admin.getByRole("button", { name: "Entrar" }).click();
   await expect(admin.getByRole("heading", { name: "Painel" })).toBeVisible();
@@ -153,7 +166,9 @@ test("Testes 3, 4, 5 e 13 — carrinho, subtotal, WhatsApp e intenção de pedid
   await expect(page.getByText(brl(expected)).first()).toBeVisible();
 
   await page.goto("/finalizar");
-  await page.getByLabel("Nome").fill("Cliente Teste");
+  // the order can only be finished after the registration
+  await expect(page.getByRole("button", { name: "Finalizar pelo WhatsApp" })).toBeDisabled();
+  await register(page);
   await page.getByRole("button", { name: "Finalizar pelo WhatsApp" }).click();
   await expect.poll(() => whatsappUrl, { timeout: 15_000 }).toContain("https://wa.me/5511912345678?text=");
 
@@ -348,6 +363,7 @@ test("Boas-vindas — apresentação na primeira visita e cupom de 10% aplicado 
   await page.goto("/finalizar");
   await expect(page.getByText("BEMVINDA10", { exact: true })).toBeVisible();
   await expect(page.getByText(/Desconto \(BEMVINDA10\)/)).toBeVisible();
+  await register(page, "Nova Cliente");
   await page.getByRole("button", { name: "Finalizar pelo WhatsApp" }).click();
   await expect.poll(() => whatsappUrl, { timeout: 15_000 }).toContain("https://wa.me/");
   const message = decodeURIComponent(whatsappUrl.split("text=")[1]);
@@ -430,6 +446,7 @@ test("Frete — admin configura origem e zona por CEP; cliente calcula no produt
 
   // Checkout: the remembered CEP is quoted again; the visitor picks SEDEX
   await page.goto("/finalizar");
+  await register(page);
   const sedex = page.getByRole("radio", { name: /Correios SEDEX/ });
   await expect(sedex).toBeVisible();
   await expect(page.getByRole("button", { name: "Finalizar pelo WhatsApp" })).toBeDisabled();
@@ -552,4 +569,74 @@ test("Home premium — cabeçalho, busca, seções do mockup, produto em abas, n
   await expect(admin.getByText("Banner salvo.").first()).toBeVisible();
   await page.goto("/");
   await expect(page.getByRole("heading", { name: "Em breve na MIVORA" })).toHaveCount(0);
+});
+
+// ---------------------------------------------------------------------------
+// Cadastro obrigatório (captação de leads)
+// ---------------------------------------------------------------------------
+test("Cadastro — obrigatório para comprar, lembrado no aparelho, visível em Clientes no painel", async ({ browser }) => {
+  const ctx = await browser.newContext({ storageState: RETURNING_VISITOR });
+  const page = await ctx.newPage();
+  let whatsappUrl = "";
+  await ctx.route("https://wa.me/**", async (route) => {
+    whatsappUrl = route.request().url();
+    await route.fulfill({ status: 200, body: "whatsapp" });
+  });
+
+  // "Comprar pelo WhatsApp" on the product page goes through the checkout
+  await page.goto("/produtos/dr-althea-345-relief-cream");
+  await page.getByRole("button", { name: "Comprar pelo WhatsApp" }).click();
+  await expect(page).toHaveURL(/\/finalizar$/);
+  await expect(page.getByRole("heading", { name: "Seu cadastro" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Finalizar pelo WhatsApp" })).toBeDisabled();
+
+  // validation
+  await page.getByLabel("Nome completo").fill("Helena Prado");
+  await page.getByLabel("WhatsApp com DDD").fill("1234");
+  await page.getByLabel("E-mail", { exact: true }).fill("helena@exemplo.com.br");
+  await page.getByRole("button", { name: "Continuar para a entrega" }).click();
+  await expect(page.getByText("Digite um WhatsApp com DDD, ex.: (11) 91234-5678.")).toBeVisible();
+
+  // valid registration with marketing opt-in
+  const email = `helena${Date.now()}@exemplo.com.br`;
+  await page.getByLabel("WhatsApp com DDD").fill("(27) 99876-5432");
+  await page.getByLabel("E-mail", { exact: true }).fill(email);
+  await page.getByLabel(/Quero receber novidades/).check();
+  await page.getByRole("button", { name: "Continuar para a entrega" }).click();
+  const summary = page.getByRole("region", { name: "Seus dados" });
+  await expect(summary).toContainText("Helena Prado");
+  await expect(summary).toContainText("(27) 99876-5432");
+  await page.getByRole("button", { name: "Finalizar pelo WhatsApp" }).click();
+  await expect.poll(() => whatsappUrl, { timeout: 15_000 }).toContain("https://wa.me/");
+  expect(decodeURIComponent(whatsappUrl.split("text=")[1])).toContain("Helena Prado");
+
+  // remembered on this device
+  await page.goto("/minha-conta");
+  await expect(page.getByText("Helena Prado")).toBeVisible();
+  await expect(page.getByText("Recebe novidades e ofertas")).toBeVisible();
+
+  // the lead is in the admin, with consent, linked to the order; also in the newsletter list
+  await admin.goto(`/admin/clientes?q=${encodeURIComponent(email)}`);
+  const row = admin.locator("tr").filter({ hasText: email });
+  await expect(row).toContainText("Helena Prado");
+  await expect(row).toContainText("(27) 99876-5432");
+  await expect(row).toContainText("Sim");
+  await expect(row).toContainText("1");
+  await admin.goto("/admin/newsletter");
+  await expect(admin.getByText(email)).toBeVisible();
+
+  // "Minha conta" also registers without buying
+  const other = await browser.newContext({ storageState: RETURNING_VISITOR });
+  const visitor = await other.newPage();
+  await visitor.goto("/minha-conta");
+  await visitor.getByLabel("Nome completo").fill("Iara Mendes");
+  await visitor.getByLabel("WhatsApp com DDD").fill("(31) 98888-1234");
+  const iara = `iara${Date.now()}@exemplo.com.br`;
+  await visitor.getByLabel("E-mail", { exact: true }).fill(iara);
+  await visitor.getByRole("button", { name: "Fazer cadastro" }).click();
+  await expect(visitor.getByText("Iara Mendes")).toBeVisible();
+  await admin.goto(`/admin/clientes?q=${encodeURIComponent(iara)}`);
+  await expect(admin.locator("tr").filter({ hasText: iara })).toContainText("Não");
+  await other.close();
+  await ctx.close();
 });
