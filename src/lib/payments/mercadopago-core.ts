@@ -26,6 +26,7 @@ export const PAYMENT_TYPE_LABEL: Record<string, string> = {
   prepaid_card: "Cartão pré-pago",
   ticket: "Boleto",
   account_money: "Saldo Mercado Pago",
+  apple_pay: "Apple Pay",
   digital_currency: "Linha de crédito Mercado Pago",
   digital_wallet: "Carteira digital",
 };
@@ -202,13 +203,23 @@ export function sortPayments(payments: MercadoPagoPayment[]) {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const isUuid = (v: unknown): v is string => typeof v === "string" && UUID.test(v);
 
-/** Payment id from a notification (Webhooks: type/data.id; legacy IPN: topic/id). Other topics → null. */
-export function parseNotification(query: URLSearchParams, body: unknown): string | null {
+/**
+ * What a notification is about: a payment (Checkout Pro; Webhooks type/data.id or legacy IPN topic/id)
+ * or an Orders API order (Apple Pay; type "order", id "ORD…"). Other topics → null.
+ */
+export function parseNotificationTarget(query: URLSearchParams, body: unknown): { topic: "payment" | "order"; id: string } | null {
   const b = (body && typeof body === "object" ? body : {}) as { type?: unknown; topic?: unknown; data?: { id?: unknown } };
   const type = String(query.get("type") ?? query.get("topic") ?? b.type ?? b.topic ?? "");
-  if (type !== "payment") return null;
   const id = String(query.get("data.id") ?? b.data?.id ?? query.get("id") ?? "");
-  return /^[0-9]{1,24}$/.test(id) ? id : null;
+  if (type === "payment") return /^[0-9]{1,24}$/.test(id) ? { topic: "payment", id } : null;
+  if (type === "order") return /^ORD[0-9A-Z]{8,40}$/.test(id) ? { topic: "order", id } : null;
+  return null;
+}
+
+/** Payment id from a payment notification. */
+export function parseNotification(query: URLSearchParams, body: unknown): string | null {
+  const target = parseNotificationTarget(query, body);
+  return target?.topic === "payment" ? target.id : null;
 }
 
 /**

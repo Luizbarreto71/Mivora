@@ -170,6 +170,28 @@ body {
   .prose-mivora a { text-decoration: underline; text-underline-offset: 3px; }
 }
 
+/* Apple Pay button: Safari draws the official button; other browsers never show it (feature detection) */
+.apple-pay-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 3rem;
+  border-radius: 0;
+  background: #000;
+  color: #fff;
+  font-weight: 600;
+}
+@supports (-webkit-appearance: -apple-pay-button) {
+  .apple-pay-button {
+    -webkit-appearance: -apple-pay-button;
+    -apple-pay-button-type: buy;
+    -apple-pay-button-style: black;
+  }
+  .apple-pay-button > * {
+    display: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

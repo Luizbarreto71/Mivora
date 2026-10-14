@@ -353,6 +353,18 @@ export async function saveSettings(_: ActionState, fd: FormData): Promise<Action
   if (!shippingExtra.ok || (shippingExtra.value ?? 0) > 100000) return fail("Valor fixo por envio inválido. Ex.: 3,50");
   const maxCarriers = formInt(fd, "shipping_max_carrier_options", 4);
   if (maxCarriers < 0 || maxCarriers > 20) return fail("O máximo de opções de transportadora deve ficar entre 0 e 20.");
+  const apMerchant = formNullable(fd, "apple_pay_merchant_id");
+  if (apMerchant && !/^merchant\.[A-Za-z0-9][A-Za-z0-9.-]{1,120}$/.test(apMerchant)) return fail("Merchant ID inválido. Ele começa com merchant., ex.: merchant.br.com.mivoracosmeticos", { apple_pay_merchant_id: "Inválido" });
+  const apPublicKey = formNullable(fd, "mercadopago_public_key");
+  if (apPublicKey && !/^(APP_USR|TEST)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(apPublicKey)) {
+    return fail("Public Key inválida. Ela tem o formato APP_USR-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx. Não use o Access Token, que é secreto.", { mercadopago_public_key: "Inválida" });
+  }
+  const apCertificate = formNullable(fd, "apple_pay_certificate_id");
+  if (apCertificate && !/^[A-Za-z0-9_-]{1,120}$/.test(apCertificate)) return fail("ID do certificado inválido.", { apple_pay_certificate_id: "Inválido" });
+  const apProduct = formNullable(fd, "apple_pay_product_id");
+  if (apProduct && !/^[A-Za-z0-9_.-]{1,120}$/.test(apProduct)) return fail("Product ID inválido.", { apple_pay_product_id: "Inválido" });
+  const apDomainFile = formNullable(fd, "apple_pay_domain_association");
+  if (apDomainFile && (apDomainFile.length > 20000 || /[<>]/.test(apDomainFile))) return fail("O arquivo de verificação da Apple parece inválido. Cole apenas o conteúdo do arquivo .txt.");
   const maxInstallments = formInt(fd, "online_payment_max_installments", 12);
   if (maxInstallments < 1 || maxInstallments > 12) return fail("O parcelamento máximo deve ficar entre 1x e 12x.");
   const defaultWeight = formInt(fd, "shipping_default_weight_g", 300);
@@ -415,6 +427,12 @@ export async function saveSettings(_: ActionState, fd: FormData): Promise<Action
       newsletter_enabled: formBool(fd, "newsletter_enabled"),
       online_payment_enabled: formBool(fd, "online_payment_enabled"),
       online_payment_max_installments: maxInstallments,
+      apple_pay_enabled: formBool(fd, "apple_pay_enabled"),
+      apple_pay_merchant_id: apMerchant,
+      mercadopago_public_key: apPublicKey,
+      apple_pay_certificate_id: apCertificate,
+      apple_pay_product_id: apProduct,
+      apple_pay_domain_association: apDomainFile,
       about_headline: formNullable(fd, "about_headline"),
       about_text: formNullable(fd, "about_text"),
       whatsapp_section_title: formNullable(fd, "whatsapp_section_title"),

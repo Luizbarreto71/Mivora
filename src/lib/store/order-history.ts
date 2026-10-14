@@ -13,7 +13,9 @@ export function readDeviceOrders(): DeviceOrder[] {
   }
 }
 
-export function rememberDeviceOrder(order: DeviceOrder) {
+/** Saves an order on this device (`at` defaults to now). */
+export function rememberDeviceOrder(input: Omit<DeviceOrder, "at"> & { at?: number }) {
+  const order: DeviceOrder = { ...input, at: input.at ?? Date.now() };
   try {
     const list = [order, ...readDeviceOrders().filter((o) => o.code !== order.code)].slice(0, MAX);
     localStorage.setItem(KEY, JSON.stringify(list));

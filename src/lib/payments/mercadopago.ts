@@ -10,6 +10,7 @@ import {
   type CheckoutOrder,
   type MercadoPagoPayment,
 } from "./mercadopago-core";
+import { isMpOrderId, mapMpOrder, type MpOrder } from "./apple-pay-core";
 
 const DEFAULT_BASE_URL = "https://api.mercadopago.com";
 
@@ -22,20 +23,26 @@ export function mercadoPagoConfig() {
   return { token, webhookSecret, baseUrl, serviceRole, ready: Boolean(token) && serviceRole };
 }
 
-type MpResponse<T> = { ok: boolean; status: number; body: T | null };
+export type MpResponse<T> = { ok: boolean; status: number; body: T | null };
 
-async function mp<T>(path: string, init: RequestInit = {}, timeoutMs = 10_000): Promise<MpResponse<T>> {
+/**
+ * Mercado Pago API call. With `auth: false` the access token is not sent (calls identified by the public key).
+ */
+export async function mpRequest<T>(path: string, init: RequestInit = {}, opts: { auth?: boolean; timeoutMs?: number } = {}): Promise<MpResponse<T>> {
   const { token, baseUrl } = mercadoPagoConfig();
-  if (!token) return { ok: false, status: 0, body: null };
+  const auth = opts.auth ?? true;
+  if (auth && !token) return { ok: false, status: 0, body: null };
   const res = await fetch(`${baseUrl}${path}`, {
     ...init,
     cache: "no-store",
-    signal: AbortSignal.timeout(timeoutMs),
-    headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...init.headers },
+    signal: AbortSignal.timeout(opts.timeoutMs ?? 10_000),
+    headers: { Accept: "application/json", "Content-Type": "application/json", ...(auth ? { Authorization: `Bearer ${token}` } : {}), ...init.headers },
   });
   const body = (await res.json().catch(() => null)) as T | null;
   return { ok: res.ok, status: res.status, body };
 }
+
+const mp = <T>(path: string, init: RequestInit = {}, timeoutMs = 10_000) => mpRequest<T>(path, init, { timeoutMs });
 
 export type MercadoPagoCheck = { ok: true; nickname: string | null; siteId: string | null; test: boolean } | { ok: false; status: number };
 
@@ -154,25 +161,66 @@ export async function openCheckout(orderId: string): Promise<CheckoutResult> {
 
 export type SyncResult = { ok: true; changed: boolean; orderId: string; paymentStatus: string } | { ok: false; reason: "not_configured" | "not_found" | "not_ours" | "mismatch" };
 
-async function applyPayment(payment: MercadoPagoPayment, orderId: string): Promise<SyncResult> {
+/** Records a payment result already read from the Mercado Pago API (apply_payment_update, service role only). */
+export async function recordPayment(input: {
+  orderId: string;
+  paymentId: string;
+  status: string;
+  detail: string | null;
+  type: string | null;
+  amountCents: number | null;
+}): Promise<SyncResult> {
   const sb = getServiceSupabase();
   if (!sb) return { ok: false, reason: "not_configured" };
-  const due = await sb.from("order_intents").select("amount_due_cents").eq("id", orderId).maybeSingle();
-  if (!due.data) return { ok: false, reason: "not_found" };
   const { data, error } = await sb.rpc("apply_payment_update", {
-    p_order_id: orderId,
-    p_payment_id: String(payment.id),
-    p_status: payment.status,
-    p_status_detail: payment.status_detail ?? null,
-    p_payment_type: payment.payment_type_id ?? null,
-    p_amount_cents: paidCents(payment, due.data.amount_due_cents),
+    p_order_id: input.orderId,
+    p_payment_id: input.paymentId,
+    p_status: input.status,
+    p_status_detail: input.detail,
+    p_payment_type: input.type,
+    p_amount_cents: input.amountCents,
   });
   if (error) {
     if (/order_not_found|not_online_order|invalid_payment/.test(error.message)) return { ok: false, reason: "not_ours" };
     throw new Error(`apply_payment_update: ${error.message}`);
   }
   const r = data as { changed: boolean; payment_status: string };
-  return { ok: true, changed: r.changed, orderId, paymentStatus: r.payment_status };
+  return { ok: true, changed: r.changed, orderId: input.orderId, paymentStatus: r.payment_status };
+}
+
+async function applyPayment(payment: MercadoPagoPayment, orderId: string): Promise<SyncResult> {
+  const sb = getServiceSupabase();
+  if (!sb) return { ok: false, reason: "not_configured" };
+  const due = await sb.from("order_intents").select("amount_due_cents").eq("id", orderId).maybeSingle();
+  if (!due.data) return { ok: false, reason: "not_found" };
+  return recordPayment({
+    orderId,
+    paymentId: String(payment.id),
+    status: payment.status,
+    detail: payment.status_detail ?? null,
+    type: payment.payment_type_id ?? null,
+    amountCents: paidCents(payment, due.data.amount_due_cents),
+  });
+}
+
+/** Records an Orders API order (Apple Pay) read from Mercado Pago. */
+export async function applyMpOrder(order: MpOrder, orderId: string, type = "apple_pay"): Promise<SyncResult> {
+  const mapped = mapMpOrder(order);
+  if (!mapped || !isMpOrderId(order.id)) return { ok: false, reason: "not_found" };
+  return recordPayment({ orderId, paymentId: order.id, status: mapped.status, detail: mapped.detail, type, amountCents: mapped.status === "approved" ? mapped.paidCents : null });
+}
+
+/** Reads an Orders API order (Apple Pay) from Mercado Pago and records it on its store order. */
+export async function syncMpOrder(mpOrderId: string, expectedOrderId?: string): Promise<SyncResult> {
+  if (!mercadoPagoConfig().ready) return { ok: false, reason: "not_configured" };
+  if (!isMpOrderId(mpOrderId)) return { ok: false, reason: "not_found" };
+  const r = await mp<MpOrder>(`/v1/orders/${mpOrderId}`);
+  if (r.status === 404 || (r.ok && !r.body)) return { ok: false, reason: "not_found" };
+  if (!r.ok || !r.body) throw new Error(`Mercado Pago respondeu ${r.status}`);
+  const orderId = r.body.external_reference;
+  if (!isUuid(orderId)) return { ok: false, reason: "not_ours" };
+  if (expectedOrderId && orderId !== expectedOrderId) return { ok: false, reason: "mismatch" };
+  return applyMpOrder(r.body, orderId);
 }
 
 /**
@@ -194,16 +242,25 @@ export async function syncPayment(paymentId: string, expectedOrderId?: string): 
 /** Looks up every payment of an order (by external_reference) and records them, oldest first. */
 export async function syncOrderPayments(orderId: string): Promise<SyncResult> {
   if (!mercadoPagoConfig().ready) return { ok: false, reason: "not_configured" };
+  // Apple Pay orders are Orders API orders: read them by id
+  const stored = await getServiceSupabase()?.from("order_intents").select("payment_id").eq("id", orderId).maybeSingle();
+  const storedId = stored?.data?.payment_id as string | null | undefined;
+  let orderResult: SyncResult | null = null;
+  if (isMpOrderId(storedId)) {
+    orderResult = await syncMpOrder(storedId, orderId);
+    // a settled Apple Pay payment is the order's payment: no need to look for Checkout Pro attempts
+    if (orderResult.ok && ["approved", "in_process", "refunded", "charged_back"].includes(orderResult.paymentStatus)) return orderResult;
+  }
   const r = await mp<{ results?: MercadoPagoPayment[] }>(
     `/v1/payments/search?external_reference=${encodeURIComponent(orderId)}&sort=date_created&criteria=desc&limit=20`,
   );
   if (!r.ok) throw new Error(`Mercado Pago respondeu ${r.status}`);
   const payments = sortPayments((r.body?.results ?? []).filter((p) => p.external_reference === orderId));
-  let last: SyncResult = { ok: false, reason: "not_found" };
-  let changed = false;
+  let last: SyncResult = orderResult ?? { ok: false, reason: "not_found" };
+  let changed = Boolean(orderResult?.ok && orderResult.changed);
   for (const p of payments) {
     last = await applyPayment(p, orderId);
     if (last.ok && last.changed) changed = true;
   }
-  return last.ok ? { ...last, changed } : last;
+  return last.ok ? { ...last, changed } : orderResult?.ok ? { ...orderResult, changed } : last;
 }

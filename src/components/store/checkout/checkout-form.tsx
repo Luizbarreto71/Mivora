@@ -3,15 +3,16 @@
 import { Check, CreditCard, Loader2, Tag, UserRound, X } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { WhatsAppIcon } from "@/components/brand/social-icons";
 import { Button, buttonClasses } from "@/components/ui/button";
-import { Field, Textarea } from "@/components/ui/form";
+import { Field, Input, Textarea } from "@/components/ui/form";
 import { deliveryQuote, lineTotal } from "@/lib/cart/math";
 import { formatBRL } from "@/lib/money";
+import { formatCpf, isValidCpf } from "@/lib/payments/apple-pay-core";
 import { destinationLabel } from "@/lib/shipping/cep";
 import type { ShippingOption, ShippingQuote } from "@/lib/shipping/types";
-import { startOnlinePayment, submitOrder } from "@/lib/store/actions";
+import { completeApplePay, payOrder, startApplePayOrder, startOnlinePayment, submitOrder, validateApplePayMerchant } from "@/lib/store/actions";
 import { formatBrPhone, readDeviceCustomer, type CustomerProfile } from "@/lib/store/customer";
 import { rememberDeviceOrder } from "@/lib/store/order-history";
 import { clearCoupon, saveCoupon, savedCoupon } from "@/lib/store/welcome";
@@ -24,6 +25,7 @@ import { useCartRefresh } from "../cart-lines";
 import { CustomerForm } from "../customer-form";
 import { ShippingCalculator } from "../shipping-calculator";
 import { useStoreConfig } from "../store-config";
+import { ApplePayButton, startApplePaySession, useApplePayAvailable, type PreparedOrder } from "./apple-pay";
 
 const LAST_ORDER_KEY = "mivora.lastOrder";
 type LastOrder = { code: string; url: string; summarized: boolean; at: number };
@@ -43,7 +45,7 @@ export function CheckoutForm({
   freeShippingThresholdCents: number | null;
 }) {
   const { lines, totals, hydrated, clear } = useCart();
-  const { whatsappNumber, whatsappGreeting, welcomeOffer, onlinePayment } = useStoreConfig();
+  const { whatsappNumber, whatsappGreeting, welcomeOffer, onlinePayment, applePay } = useStoreConfig();
   useCartRefresh(true);
 
   const [zoneId, setZoneId] = useState<string | null>(zones.length === 1 ? zones[0].id : null);
@@ -55,7 +57,13 @@ export function CheckoutForm({
   const [editingCustomer, setEditingCustomer] = useState(false);
   const [notes, setNotes] = useState("");
   // pay on the site (Mercado Pago) or finish with the team on WhatsApp
-  const [payWith, setPayWith] = useState<"online" | "whatsapp">("online");
+  const [payWith, setPayWith] = useState<"online" | "applepay" | "whatsapp">("online");
+  // Apple Pay: only where the device supports it; the CPF goes to Mercado Pago and is not stored
+  const applePayAvailable = useApplePayAvailable(applePay && onlinePayment);
+  const [cpf, setCpf] = useState("");
+  const [applePayBusy, setApplePayBusy] = useState(false);
+  // order already registered for a payment on the site, reused while the cart and the choices stay the same
+  const siteOrder = useRef<(PreparedOrder & { signature: string }) | null>(null);
   const [coupon, setCoupon] = useState("");
   const [couponDraft, setCouponDraft] = useState("");
   const [couponError, setCouponError] = useState<string | null>(null);
@@ -132,7 +140,9 @@ export function CheckoutForm({
           : "Escolha uma opção de entrega com valor definido para pagar pelo site."
         : null;
   const online = onlinePayment && !onlineBlocker && payWith === "online";
-  const mark = online ? "" : "*";
+  const applePayChosen = applePayAvailable && !onlineBlocker && payWith === "applepay";
+  const paysOnSite = online || applePayChosen;
+  const mark = paysOnSite ? "" : "*";
   const deliveryText = deliveryFeeCents == null ? (needsShippingChoice ? "Escolha uma opção" : "A combinar") : deliveryFeeCents === 0 ? `Grátis${mark}` : `${formatBRL(deliveryFeeCents)}${mark}`;
   const estimatedTotalCents = deliveryFeeCents != null && !totals.hasUnpricedItems ? totals.subtotalCents - discountCents + deliveryFeeCents : null;
 
@@ -149,20 +159,80 @@ export function CheckoutForm({
   }
 
   const needsRegistration = !customer || editingCustomer;
-  const blocked = needsRegistration || totals.hasUnavailableItems || zoneBelowMinimum || belowStoreMinimum || (!online && !whatsappNumber) || needsShippingChoice;
+  const blocked = needsRegistration || totals.hasUnavailableItems || zoneBelowMinimum || belowStoreMinimum || (!paysOnSite && !whatsappNumber) || needsShippingChoice;
+  const cpfValid = isValidCpf(cpf);
+
+  const buildPayload = () => ({
+    items: totals.purchasableLines.map((l) => ({ productId: l.productId, variantId: l.variantId, kitId: l.kitId, quantity: l.quantity })),
+    customer,
+    customerNotes: notes,
+    deliveryZoneId: !calculatorEnabled && zone && zone.method !== "to_arrange" ? zone.id : null,
+    shipping: calculatorEnabled && shippingQuote && shippingOption ? { cep: shippingQuote.cep, optionId: shippingOption.id } : null,
+    couponCode: coupon,
+  });
+
+  const leaveFor = (order: { code: string; orderUrl: string }, url: string) => {
+    rememberDeviceOrder({ code: order.code, url: order.orderUrl });
+    clear();
+    clearCoupon();
+    window.location.assign(url);
+  };
+
+  // Apple Pay: runs synchronously from the click (Apple requires a user gesture)
+  const payWithApplePay = () => {
+    if (estimatedTotalCents == null || !cpfValid) return;
+    setError(null);
+    const payload = buildPayload();
+    const signature = JSON.stringify(payload);
+    setApplePayBusy(true);
+    startApplePaySession({
+      label: "MIVORA",
+      estimateCents: estimatedTotalCents,
+      prepare: async () => {
+        const cached = siteOrder.current;
+        if (cached && cached.signature === signature) return { ok: true as const, ...cached };
+        const r = await startApplePayOrder(payload).catch(() => ({ ok: false as const, error: "Não foi possível registrar o pedido agora." }));
+        if (r.ok) siteOrder.current = { signature, orderId: r.orderId, code: r.code, orderUrl: r.orderUrl, amountCents: r.amountCents, lines: r.lines };
+        return r;
+      },
+      validate: (url) => validateApplePayMerchant(url),
+      pay: (order, token) => completeApplePay({ orderId: order.orderId, cpf, token }),
+      onDone: (order, outcome) => {
+        if (outcome.ok && outcome.status !== "rejected" && outcome.status !== "cancelled") {
+          leaveFor(order, order.orderUrl);
+          return;
+        }
+        setApplePayBusy(false);
+        setError({
+          message: outcome.ok ? "O pagamento com Apple Pay não foi aprovado. Tente outro cartão ou escolha Pix, cartão ou boleto pelo Mercado Pago." : outcome.error,
+          retryable: false,
+        });
+      },
+      onError: (message) => {
+        setApplePayBusy(false);
+        setError({ message, retryable: false });
+      },
+      onCancel: () => setApplePayBusy(false),
+    });
+  };
 
   const submit = () => {
     setError(null);
-    const payload = {
-      items: totals.purchasableLines.map((l) => ({ productId: l.productId, variantId: l.variantId, kitId: l.kitId, quantity: l.quantity })),
-      customer,
-      customerNotes: notes,
-      deliveryZoneId: !calculatorEnabled && zone && zone.method !== "to_arrange" ? zone.id : null,
-      shipping: calculatorEnabled && shippingQuote && shippingOption ? { cep: shippingQuote.cep, optionId: shippingOption.id } : null,
-      couponCode: coupon,
-    };
+    const payload = buildPayload();
     if (online) {
       startTransition(async () => {
+        // an order already registered by an Apple Pay attempt is paid instead of creating another one
+        const existing = siteOrder.current?.signature === JSON.stringify(payload) ? siteOrder.current : null;
+        if (existing) {
+          const opened = await payOrder(existing.orderId).catch(() => ({ ok: false as const, error: "Não foi possível abrir o pagamento agora. Tente novamente em instantes." }));
+          if (!opened.ok) {
+            setError({ message: opened.error, retryable: false });
+            return;
+          }
+          leaveFor(existing, opened.url);
+          await new Promise(() => {});
+          return;
+        }
         const result = await startOnlinePayment(payload).catch(() => ({ ok: false as const, error: "Não foi possível registrar o pedido agora.", retryable: true }));
         if (!result.ok) {
           setError({ message: result.error, retryable: result.retryable });
@@ -282,7 +352,7 @@ export function CheckoutForm({
               onSelect={setShippingOption}
               onQuote={setShippingQuote}
               title="Calcule o frete pelo CEP"
-              note={online ? "No pagamento pelo site, o frete escolhido é cobrado junto com o pedido. Os prazos são estimativas." : undefined}
+              note={paysOnSite ? "No pagamento pelo site, o frete escolhido é cobrado junto com o pedido. Os prazos são estimativas." : undefined}
             />
             {!shippingQuote ? <p className="mt-3 text-xs text-muted">Opcional: sem o CEP, combinamos a entrega com você pelo WhatsApp.</p> : null}
             {pickupDetails && shippingQuote?.options.some((o) => o.method === "pickup") ? <p className="mt-3 text-xs text-muted">Retirada: {pickupDetails}</p> : null}
@@ -328,8 +398,39 @@ export function CheckoutForm({
                   {onlineBlocker ? <span className="mt-1 block text-xs text-ink-soft">{onlineBlocker}</span> : null}
                 </span>
               </label>
-              <label className={cn("flex gap-3 border p-4 transition", whatsappNumber ? "cursor-pointer" : "cursor-not-allowed opacity-60", !online ? "border-ink" : "border-line hover:border-ink/40")}>
-                <input type="radio" name="pay-with" className="mt-1 h-4 w-4 accent-ink" checked={!online} disabled={!whatsappNumber} onChange={() => setPayWith("whatsapp")} />
+              {applePayAvailable ? (
+                <div className={cn("border p-4 transition", onlineBlocker && "opacity-60", applePayChosen ? "border-ink" : "border-line hover:border-ink/40")}>
+                  <label className={cn("flex gap-3", onlineBlocker ? "cursor-not-allowed" : "cursor-pointer")}>
+                    <input type="radio" name="pay-with" className="mt-1 h-4 w-4 accent-ink" checked={applePayChosen} disabled={Boolean(onlineBlocker)} onChange={() => setPayWith("applepay")} />
+                    <span className="min-w-0 flex-1 text-sm">
+                      <span className="font-semibold">Apple Pay</span>
+                      <span className="mt-1 block text-xs leading-relaxed text-muted">Pague com Face ID ou Touch ID. Cartões de crédito Visa e Mastercard, à vista, processado pelo Mercado Pago.</span>
+                    </span>
+                  </label>
+                  {applePayChosen ? (
+                    <Field
+                      label="Seu CPF"
+                      htmlFor="cpf"
+                      hint="Exigido pelo Mercado Pago para pagar com Apple Pay. Não fica salvo na loja."
+                      error={cpf.length === 14 && !cpfValid ? "CPF inválido. Confira os números." : null}
+                      className="mt-4 sm:pl-7"
+                    >
+                      <Input
+                        id="cpf"
+                        value={cpf}
+                        onChange={(e) => setCpf(formatCpf(e.target.value))}
+                        inputMode="numeric"
+                        autoComplete="off"
+                        placeholder="000.000.000-00"
+                        maxLength={14}
+                        aria-invalid={cpf.length === 14 && !cpfValid ? true : undefined}
+                      />
+                    </Field>
+                  ) : null}
+                </div>
+              ) : null}
+              <label className={cn("flex gap-3 border p-4 transition", whatsappNumber ? "cursor-pointer" : "cursor-not-allowed opacity-60", !paysOnSite ? "border-ink" : "border-line hover:border-ink/40")}>
+                <input type="radio" name="pay-with" className="mt-1 h-4 w-4 accent-ink" checked={!paysOnSite} disabled={!whatsappNumber} onChange={() => setPayWith("whatsapp")} />
                 <span className="min-w-0 flex-1 text-sm">
                   <span className="font-semibold">Finalizar pelo WhatsApp</span>
                   <span className="mt-1 block text-xs leading-relaxed text-muted">Combine pagamento e entrega com a nossa equipe.</span>
@@ -438,18 +539,18 @@ export function CheckoutForm({
           </div>
           {estimatedTotalCents != null ? (
             <div className="flex justify-between border-t border-line pt-2 text-base">
-              <span className="font-semibold">{online ? "Total a pagar" : "Total estimado"}</span>
+              <span className="font-semibold">{paysOnSite ? "Total a pagar" : "Total estimado"}</span>
               <span className="font-semibold tabular-nums">{formatBRL(estimatedTotalCents)}</span>
             </div>
           ) : null}
           {totals.hasUnpricedItems && !allUnpriced ? <p className="text-xs text-muted">Itens com preço sob consulta não entram no subtotal.</p> : null}
           {freeShippingThresholdCents != null ? <p className="text-xs text-muted">Frete grátis a partir de {formatBRL(freeShippingThresholdCents)} nas regiões participantes, confirmado no atendimento.</p> : null}
-          {deliveryFeeCents != null && !online ? <p className="text-xs text-muted">*Estimativa sujeita a confirmação no atendimento.</p> : null}
+          {deliveryFeeCents != null && !paysOnSite ? <p className="text-xs text-muted">*Estimativa sujeita a confirmação no atendimento.</p> : null}
         </div>
 
         <div className="mt-6 space-y-3">
           {needsRegistration ? <p className="text-sm text-ink-soft">Faça seu cadastro para escolher a entrega e finalizar.</p> : null}
-          {!whatsappNumber && !online ? <p className="text-sm text-danger">O WhatsApp da loja ainda não foi configurado. Tente novamente mais tarde.</p> : null}
+          {!whatsappNumber && !paysOnSite ? <p className="text-sm text-danger">O WhatsApp da loja ainda não foi configurado. Tente novamente mais tarde.</p> : null}
           {totals.hasUnavailableItems ? (
             <p className="text-sm text-danger">
               Há itens indisponíveis no carrinho.{" "}
@@ -466,7 +567,13 @@ export function CheckoutForm({
               {error.message}
             </p>
           ) : null}
-          {online ? (
+          {applePayChosen ? (
+            <>
+              {!cpfValid ? <p className="text-sm text-ink-soft">Informe seu CPF para pagar com Apple Pay.</p> : null}
+              <ApplePayButton onClick={payWithApplePay} disabled={blocked || pending || applePayBusy || !cpfValid} />
+              <p className="text-center text-xs text-muted">O pagamento é autorizado no seu aparelho e processado pelo Mercado Pago.</p>
+            </>
+          ) : online ? (
             <Button size="lg" className="w-full" onClick={submit} disabled={blocked || pending} data-mp-checkout-cta="checkout-pro">
               {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" strokeWidth={1.75} />}
               {pending ? "Abrindo o Mercado Pago…" : "Pagar com Mercado Pago"}

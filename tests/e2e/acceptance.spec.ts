@@ -674,7 +674,7 @@ test("Pagamento online — Mercado Pago: pagar pelo site, aviso assinado confirm
 
   // Product page → "Comprar agora" → checkout with the payment choice
   await page.goto("/produtos/skin1004-madagascar-centella-ampoule");
-  await expect(page.getByText(/Pague pelo site com Pix, cartão ou boleto/)).toBeVisible();
+  await expect(page.getByText(/Pague pelo site com Pix, cartão ou boleto/).filter({ visible: true }).first()).toBeVisible();
   await page.getByLabel("Calcular frete e prazo").fill("01001-000");
   await expect(page.getByText("Correios SEDEX")).toBeVisible();
   await page.getByRole("button", { name: "Comprar agora" }).click();
@@ -755,5 +755,183 @@ test("Pagamento online — Mercado Pago: pagar pelo site, aviso assinado confirm
   await expect(admin.getByText("Configurações salvas.")).toBeVisible();
   await page.goto("/produtos/skin1004-madagascar-centella-ampoule");
   await expect(page.getByRole("button", { name: "Comprar pelo WhatsApp" })).toBeVisible();
+  await ctx.close();
+});
+
+
+// ---------------------------------------------------------------------------
+// Apple Pay — Mercado Pago Orders API (Safari simulado: Apple Pay JS só existe em aparelhos Apple)
+// ---------------------------------------------------------------------------
+/** Stand-in for Safari's ApplePaySession following Apple Pay JS v3: validate → method → authorize. */
+function fakeApplePay() {
+  const store = (patch: Record<string, unknown>) => {
+    const current = JSON.parse(localStorage.getItem("__applePay") ?? "{}");
+    localStorage.setItem("__applePay", JSON.stringify({ ...current, ...patch }));
+  };
+  class FakeApplePaySession {
+    static STATUS_SUCCESS = 0;
+    static STATUS_FAILURE = 1;
+    static canMakePayments() {
+      return true;
+    }
+    static supportsVersion(version: number) {
+      return version <= 3;
+    }
+    onvalidatemerchant: ((e: unknown) => void) | null = null;
+    onpaymentmethodselected: ((e: unknown) => void) | null = null;
+    onpaymentauthorized: ((e: unknown) => void) | null = null;
+    oncancel: ((e: unknown) => void) | null = null;
+    constructor(version: number, request: unknown) {
+      localStorage.removeItem("__applePay");
+      store({ version, request });
+    }
+    begin() {
+      setTimeout(() => this.onvalidatemerchant?.({ validationURL: "https://apple-pay-gateway.apple.com/paymentservices/startSession" }), 10);
+    }
+    completeMerchantValidation(merchantSession: unknown) {
+      store({ merchantSession });
+      setTimeout(() => (this.onpaymentmethodselected ? this.onpaymentmethodselected({ paymentMethod: { network: "Visa", type: "credit" } }) : this.authorize()), 10);
+    }
+    completePaymentMethodSelection(update: { newTotal: unknown; newLineItems: unknown }) {
+      store({ total: update.newTotal, lineItems: update.newLineItems });
+      setTimeout(() => this.authorize(), 10);
+    }
+    authorize() {
+      const decline = localStorage.getItem("__applePayDecline") === "1";
+      this.onpaymentauthorized?.({
+        payment: {
+          token: {
+            paymentData: { version: "EC_v1", data: decline ? "decline" : "approve", signature: "c2lnbmF0dXJl", header: { transactionId: "abcdef" } },
+            transactionIdentifier: (decline ? "DEC" : "ABC") + Date.now().toString(16).toUpperCase(),
+            paymentMethod: { displayName: "Visa 0492", network: "Visa", type: "credit" },
+          },
+        },
+      });
+    }
+    completePayment(result: number | { status: number }) {
+      store({ result: typeof result === "number" ? result : result.status });
+    }
+    abort() {
+      store({ aborted: true });
+    }
+  }
+  (window as unknown as { ApplePaySession: unknown }).ApplePaySession = FakeApplePaySession;
+}
+
+test("Apple Pay — painel, arquivo da Apple, CPF, recusa sem pedido duplicado, aprovação e devolução avisada pelo webhook", async ({ browser, request }) => {
+  const MP = "http://localhost:54321/mercadopago";
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "http://localhost:54321";
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+
+  // Admin: the public key refuses an access token; then Apple Pay is configured and switched on
+  await admin.goto("/admin/configuracoes");
+  await admin.getByLabel("Oferecer pagamento pelo site (Pix, cartão e boleto)").check();
+  await admin.getByLabel("Oferecer Apple Pay no checkout").check();
+  await admin.getByLabel("Public Key do Mercado Pago").fill("APP_USR-ACCESS-TOKEN-FALSO-DE-TESTE");
+  await admin.getByRole("button", { name: "Salvar configurações" }).click();
+  await expect(admin.getByText(/Public Key inválida/)).toBeVisible();
+  await admin.getByLabel("Public Key do Mercado Pago").fill("TEST-00000000-0000-4000-8000-000000000001");
+  await admin.getByLabel("Merchant ID (Apple)").fill("merchant.br.com.mivoracosmeticos.teste");
+  await admin.getByLabel("ID do certificado de comerciante").fill("cert-local-0001");
+  await admin.getByLabel("Product ID (X-Product-ID)").fill("local-product");
+  await admin.getByLabel("Arquivo de verificação de domínio da Apple").fill("verificacao-local-0123456789abcdef");
+  await admin.getByRole("button", { name: "Salvar configurações" }).click();
+  await expect(admin.getByText("Configurações salvas.")).toBeVisible();
+  await admin.reload();
+  await expect(admin.getByText(/Pronto: o botão do Apple Pay aparece no checkout/)).toBeVisible();
+
+  // Apple's domain verification file is published at the address Apple checks
+  const file = await request.get("/.well-known/apple-developer-merchantid-domain-association.txt");
+  expect(file.status()).toBe(200);
+  expect(await file.text()).toBe("verificacao-local-0123456789abcdef");
+  expect((await request.get("/.well-known/apple-developer-merchantid-domain-association")).status()).toBe(200);
+
+  // A browser without Apple Pay never sees the option
+  const plain = await browser.newContext({ storageState: RETURNING_VISITOR });
+  const visitor = await plain.newPage();
+  await visitor.goto("/produtos/skin1004-madagascar-centella-ampoule");
+  await visitor.getByLabel("Calcular frete e prazo").fill("01001-000");
+  await expect(visitor.getByText("Correios SEDEX")).toBeVisible();
+  await visitor.getByRole("button", { name: "Comprar agora" }).click();
+  await register(visitor, "Davi Sem Apple");
+  await visitor.getByRole("radio", { name: /Correios SEDEX/ }).check();
+  await expect(visitor.getByRole("radio", { name: /Pagar agora pelo site/ })).toBeChecked();
+  await expect(visitor.getByRole("radio", { name: /Apple Pay/ })).toHaveCount(0);
+  await plain.close();
+
+  // Safari with Apple Pay (simulated)
+  const ctx = await browser.newContext({ storageState: RETURNING_VISITOR });
+  await ctx.addInitScript(fakeApplePay);
+  const page = await ctx.newPage();
+  await page.goto("/produtos/skin1004-madagascar-centella-ampoule");
+  await page.getByLabel("Calcular frete e prazo").fill("01001-000");
+  await expect(page.getByText("Correios SEDEX")).toBeVisible();
+  await page.getByRole("button", { name: "Comprar agora" }).click();
+  const email = await register(page, "Carla Apple");
+  await page.getByRole("radio", { name: /Correios SEDEX/ }).check();
+  await page.getByRole("radio", { name: /Apple Pay/ }).check();
+  await expect(page.getByText("Informe seu CPF para pagar com Apple Pay.")).toBeVisible();
+  const appleButton = page.getByRole("button", { name: "Pagar com Apple Pay" });
+  await expect(appleButton).toBeDisabled();
+  await page.getByLabel("Seu CPF").fill("123.456.789-00");
+  await expect(page.getByText("CPF inválido. Confira os números.")).toBeVisible();
+  await page.getByLabel("Seu CPF").fill("52998224725");
+  await expect(page.getByLabel("Seu CPF")).toHaveValue("529.982.247-25");
+  await expect(page.getByText("Total a pagar", { exact: true })).toBeVisible();
+
+  // First the card is refused: the message shows and the order is kept for the next attempt
+  await page.evaluate(() => localStorage.setItem("__applePayDecline", "1"));
+  await appleButton.click();
+  await expect(page.getByText(/O pagamento com Apple Pay não foi aprovado/)).toBeVisible();
+  expect((await page.evaluate(() => JSON.parse(localStorage.getItem("__applePay") ?? "{}"))).result).toBe(1);
+
+  // Then it is approved: the buyer lands on the order page
+  await page.evaluate(() => localStorage.removeItem("__applePayDecline"));
+  await appleButton.click();
+  await expect(page).toHaveURL(/\/pedido\/[0-9a-f-]{36}$/);
+  await expect(page.getByText("Pagamento aprovado").filter({ visible: true }).first()).toBeVisible();
+  await expect(page.getByText(`Recebemos o pagamento de ${brl(11990 + 4100)} (Apple Pay). Seu pedido está confirmado`, { exact: false }).filter({ visible: true }).first()).toBeVisible();
+
+  // What Safari was asked for: Visa and Mastercard credit, and the server's exact total
+  const sheet = await page.evaluate(() => JSON.parse(localStorage.getItem("__applePay") ?? "{}"));
+  expect(sheet.request).toMatchObject({ countryCode: "BR", currencyCode: "BRL", supportedNetworks: ["visa", "masterCard"], merchantCapabilities: ["supports3DS", "supportsCredit"] });
+  expect(sheet.total).toEqual({ label: "MIVORA", amount: "160.90", type: "final" });
+  expect(sheet.lineItems).toEqual([
+    { label: "Produtos", amount: "119.90", type: "final" },
+    { label: "Frete", amount: "41.00", type: "final" },
+  ]);
+  expect(sheet.merchantSession).toMatchObject({ domainName: "localhost", displayName: "MIVORA" });
+  expect(sheet.result).toBe(0);
+
+  // The refused attempt did not create a second order
+  const customers = await request.get(`${supabaseUrl}/rest/v1/customers?email=eq.${encodeURIComponent(email)}&select=orders_count`, {
+    headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
+  });
+  expect(await customers.json()).toEqual([{ orders_count: 1 }]);
+
+  // Admin: the payment card shows Apple Pay and the Mercado Pago order
+  const code = (await page.getByRole("heading", { level: 1 }).textContent())!.trim();
+  const orderId = page.url().match(/pedido\/([0-9a-f-]{36})/)![1];
+  await admin.goto(`/admin/pedidos?q=${code}`);
+  await admin.getByRole("link", { name: code }).click();
+  await expect(admin.getByText("Apple Pay", { exact: true })).toBeVisible();
+  await expect(admin.getByText(/Pedido confirmado automaticamente/)).toBeVisible();
+  const mpOrderId = (await admin.getByText(/^ORD01[0-9A-Z]+$/).textContent())!.trim();
+
+  // A refund at Mercado Pago arrives as a signed "order" notification
+  const refunded = await request.post(`${MP}/test/orders/${mpOrderId}/refund`);
+  expect((await refunded.json()).webhook).toBe(200);
+  const receipt = await request.post(`${supabaseUrl}/rest/v1/rpc/get_order_receipt`, { headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` }, data: { p_order_id: orderId } });
+  expect(await receipt.json()).toMatchObject({ payment_status: "refunded", payment_type: "apple_pay" });
+  await page.reload();
+  await expect(page.getByText("Pagamento devolvido").filter({ visible: true }).first()).toBeVisible();
+
+  // Switched off again
+  await admin.goto("/admin/configuracoes");
+  await admin.getByLabel("Oferecer Apple Pay no checkout").uncheck();
+  await admin.getByLabel("Oferecer pagamento pelo site (Pix, cartão e boleto)").uncheck();
+  await admin.getByRole("button", { name: "Salvar configurações" }).click();
+  await expect(admin.getByText("Configurações salvas.")).toBeVisible();
   await ctx.close();
 });

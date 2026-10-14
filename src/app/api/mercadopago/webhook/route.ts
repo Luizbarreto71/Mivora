@@ -1,8 +1,8 @@
 import { revalidateTag } from "next/cache";
 import { NextResponse, type NextRequest } from "next/server";
 import { TAGS } from "@/lib/catalog/tags";
-import { mercadoPagoConfig, syncPayment } from "@/lib/payments/mercadopago";
-import { parseNotification, verifyWebhookSignature } from "@/lib/payments/mercadopago-core";
+import { mercadoPagoConfig, syncMpOrder, syncPayment } from "@/lib/payments/mercadopago";
+import { parseNotificationTarget, verifyWebhookSignature } from "@/lib/payments/mercadopago-core";
 
 // Same payment notified several times in a row (created + updated, retries): handled once per short window
 const recent = new Map<string, number>();
@@ -15,16 +15,17 @@ function seenRecently(key: string) {
 }
 
 /**
- * Mercado Pago notifications (Webhooks). The body is never trusted: the payment is read again from the
- * Mercado Pago API with the store's access token. When the request is signed (x-signature), the signature
- * must match the application's secret (MERCADOPAGO_WEBHOOK_SECRET).
+ * Mercado Pago notifications (Webhooks): payments (Checkout Pro) and orders (Apple Pay, Orders API).
+ * The body is never trusted: the payment or order is read again from the Mercado Pago API with the
+ * store's access token. When the request is signed (x-signature), the signature must match the
+ * application's secret (MERCADOPAGO_WEBHOOK_SECRET).
  */
 export async function POST(request: NextRequest) {
   const query = request.nextUrl.searchParams;
   const body = await request.json().catch(() => null);
-  const paymentId = parseNotification(query, body);
+  const target = parseNotificationTarget(query, body);
   // other topics (merchant_order, tests without an id…) need nothing from the store
-  if (!paymentId) return new NextResponse(null, { status: 200 });
+  if (!target) return new NextResponse(null, { status: 200 });
 
   const config = mercadoPagoConfig();
   const signature = request.headers.get("x-signature");
@@ -35,16 +36,17 @@ export async function POST(request: NextRequest) {
   }
   // not configured yet: answer with an error so Mercado Pago tries again later
   if (!config.ready) return NextResponse.json({ error: "payments not configured" }, { status: 503 });
-  if (seenRecently(paymentId)) return new NextResponse(null, { status: 200 });
+  const key = `${target.topic}:${target.id}`;
+  if (seenRecently(key)) return new NextResponse(null, { status: 200 });
 
   try {
-    const result = await syncPayment(paymentId);
+    const result = target.topic === "order" ? await syncMpOrder(target.id) : await syncPayment(target.id);
     // stock reserved by a paid order shows up in the catalogue
     if (result.ok && result.changed) revalidateTag(TAGS.catalog, "max");
     return NextResponse.json({ ok: true }, { status: 200 });
   } catch (error) {
-    recent.delete(paymentId);
-    console.error("[mercadopago] webhook", paymentId, (error as Error).message);
+    recent.delete(key);
+    console.error("[mercadopago] webhook", key, (error as Error).message);
     return NextResponse.json({ error: "temporary failure" }, { status: 500 });
   }
 }

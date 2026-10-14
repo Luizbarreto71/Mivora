@@ -87,6 +87,13 @@ Reprodução do mockup enviado pela dona da loja, sem trocar a stack nem apagar 
 - **Dados:** a loja não recebe dados de cartão. Para o pagamento e a prevenção a fraudes, vão para o Mercado Pago o nome, o e-mail, o telefone e o CEP do cadastro, além dos itens. A política de privacidade ganhou a seção “Pagamentos online”.
 - **Aplicação no Mercado Pago:** “MIVORA Loja Online” (Checkout Pro). O webhook de produção já está cadastrado com o evento Pagamentos.
 
+### Apple Pay — Mercado Pago (14/10/2026, desligado até a liberação)
+- **Como funciona:** em iPhone, iPad ou Mac com Safari e Apple Pay configurado, a finalização mostra a opção **Apple Pay** (cartões de crédito Visa e Mastercard, à vista). A cliente informa o CPF, exigido pelo Mercado Pago para esse pagamento e que **não fica salvo na loja**, e toca no botão oficial. Em outros aparelhos a opção não aparece.
+- **Fluxo:** ao abrir a janela da Apple, o servidor registra o pedido (preços e frete do banco) e o Mercado Pago valida a sessão com o certificado da loja (`/applepay/v1/session`). A janela passa a mostrar o total exato do servidor. Autorizado com Face ID/Touch ID, o token da Apple vira um token de cartão no Mercado Pago (`/platforms/pci/applepay/v1/tokenize`) e o servidor cria a cobrança pela **Orders API** (`/v1/orders`) com o valor registrado no banco. Aprovado, o pedido é confirmado e o estoque reservado, como nos demais pagamentos online. Se o cartão for recusado, a cliente tenta de novo sem criar outro pedido.
+- **Avisos posteriores** (devolução, contestação) chegam pelo webhook com o evento **Order** e são relidos na API (`/v1/orders/{id}`).
+- **Configuração (Painel → Configurações → Apple Pay):** Merchant ID, Public Key, ID do certificado, Product ID e o conteúdo do arquivo de verificação de domínio, publicado em `/.well-known/apple-developer-merchantid-domain-association.txt`. São identificadores públicos; o Access Token continua só no servidor. A Public Key tem formato conferido, para impedir que o Access Token seja colado no campo por engano.
+- **Requisitos para ligar:** habilitação pelo time comercial do Mercado Pago; conta Apple Developer com o Merchant ID e o domínio verificados (o domínio com e sem `www`, se os dois forem usados); certificados de comerciante e de processamento gerados pela API do Mercado Pago e assinados no portal da Apple; o evento **Order (Mercado Pago)** marcado no webhook da aplicação.
+
 ## 2. Estrutura
 
 ```
@@ -187,6 +194,7 @@ O checklist também aparece no painel (`/admin`, card “Preparação para o lan
 8. **Páginas institucionais:** revisar privacidade, termos, envio e trocas com a assessoria e desmarcar “pendente de revisão”.
 9. **Entrega e frete:** informar o CEP de origem e criar as opções reais (faixas de CEP ou cidades, taxa, prazo) em Configurações. Para cotar Correios e transportadoras, gerar o token no Melhor Envio e cadastrar `MELHOR_ENVIO_TOKEN` na Vercel/Hostinger. Revisar as políticas de envio e de privacidade, que ganharam um parágrafo sobre a calculadora.
 10. **Domínio** e `NEXT_PUBLIC_SITE_URL`.
+10. **Apple Pay:** pedir a habilitação ao Mercado Pago (e o Product ID), criar a conta Apple Developer e o Merchant ID, verificar o domínio, gerar os certificados, marcar o evento Order no webhook e preencher o card Apple Pay em Configurações.
 10. **Pagamento pelo site:** ativar as credenciais de produção da aplicação “MIVORA Loja Online” no Mercado Pago, cadastrar `MERCADOPAGO_ACCESS_TOKEN`, `MERCADOPAGO_WEBHOOK_SECRET` e `SUPABASE_SERVICE_ROLE_KEY` na Vercel, fazer um novo deploy e ligar a opção em Configurações. Revisar a pergunta frequente sobre formas de pagamento e a política de trocas (estorno pelo Mercado Pago). Com vendas online, os dados legais (razão social, CNPJ, endereço) passam a ser essenciais.
 11. **Fotos editoriais da home:** para chegar ao nível do mockup, envie fotos licenciadas para o banner principal (horizontal, com espaço livre à esquerda, ou vertical com o produto no centro), “Rotinas de Skincare”, “Em breve”, cada necessidade e cada marca. Hoje essas áreas usam as fotos de campanha enviadas e fotos dos produtos.
 12. **Barra superior:** só troque a mensagem de frete para “Enviamos para todo o Brasil” depois de confirmar a cobertura (Configurações → Barra superior e newsletter).

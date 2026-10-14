@@ -17,6 +17,8 @@ export type StoreConfig = {
   shippingCalculator: boolean;
   /** Pay on the site (Mercado Pago): enabled in the admin and credentials present on the server */
   onlinePayment: boolean;
+  /** Apple Pay (Mercado Pago): enabled and configured; the browser still has to support it */
+  applePay: boolean;
 };
 
 const StoreConfigContext = createContext<StoreConfig>({
@@ -29,6 +31,7 @@ const StoreConfigContext = createContext<StoreConfig>({
   welcomeOffer: null,
   shippingCalculator: false,
   onlinePayment: false,
+  applePay: false,
 });
 
 export function StoreConfigProvider({ value, children }: { value: StoreConfig; children: ReactNode }) {

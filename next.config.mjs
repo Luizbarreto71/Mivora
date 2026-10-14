@@ -51,6 +51,13 @@ const nextConfig = {
     // Categories reorganised in the catalogue expansion (old URLs keep working)
     return [{ source: "/categorias/discos-faciais", destination: "/categorias/tonicos-e-discos", permanent: true }];
   },
+  async rewrites() {
+    // Apple Pay domain verification file (content managed in the admin)
+    return [
+      { source: "/.well-known/apple-developer-merchantid-domain-association", destination: "/api/apple-pay/domain-association" },
+      { source: "/.well-known/apple-developer-merchantid-domain-association.txt", destination: "/api/apple-pay/domain-association" },
+    ];
+  },
   async headers() {
     return [
       { source: "/:path*", headers: securityHeaders },

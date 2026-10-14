@@ -174,21 +174,30 @@ const mpPayments = new Map();
 let mpSeq = 90000000;
 const prefTotal = (body) =>
   Math.round((body.items ?? []).reduce((s, i) => s + Math.round(Number(i.unit_price) * 100) * Number(i.quantity), 0) + Number(body.shipments?.cost ?? 0) * 100);
-async function notifyPayment(id) {
+// Apple Pay (Orders API) doubles: session, Apple Pay token → card token, orders
+const TEST_MP_PUBLIC_KEY = "TEST-00000000-0000-4000-8000-000000000001";
+const mpCardTokens = new Map();
+const mpOrders = new Map();
+const mpOrderKeys = new Map();
+const newMpId = (prefix) => prefix + randomUUID().replace(/-/g, "").slice(0, 24).toUpperCase();
+
+/** Signed notification like Mercado Pago's (manifest uses the lower-case data.id). */
+async function notify(topic, id) {
   const requestId = randomUUID();
   const ts = String(Date.now());
-  const v1 = createHmac("sha256", TEST_MP_WEBHOOK_SECRET).update(`id:${id};request-id:${requestId};ts:${ts};`).digest("hex");
+  const v1 = createHmac("sha256", TEST_MP_WEBHOOK_SECRET).update(`id:${String(id).toLowerCase()};request-id:${requestId};ts:${ts};`).digest("hex");
   try {
-    const r = await fetch(`${LOCAL_SITE}/api/mercadopago/webhook?data.id=${id}&type=payment`, {
+    const r = await fetch(`${LOCAL_SITE}/api/mercadopago/webhook?data.id=${id}&type=${topic}`, {
       method: "POST",
       headers: { "content-type": "application/json", "x-signature": `ts=${ts},v1=${v1}`, "x-request-id": requestId },
-      body: JSON.stringify({ action: "payment.updated", api_version: "v1", type: "payment", data: { id: String(id) } }),
+      body: JSON.stringify({ action: `${topic}.updated`, api_version: "v1", type: topic, data: { id: String(id) } }),
     });
     return r.status;
   } catch {
     return 0;
   }
 }
+const notifyPayment = (id) => notify("payment", id);
 function checkoutPage(id, pref) {
   const total = (prefTotal(pref) / 100).toFixed(2).replace(".", ",");
   const button = (outcome, label) =>
@@ -286,7 +295,104 @@ const server = http.createServer(async (req, res) => {
         Object.assign(payment, { status: "approved", status_detail: "accredited", date_last_updated: new Date().toISOString() });
         return json(res, 200, { webhook: await notifyPayment(payment.id) });
       }
+      // Apple Pay: identified by the public key and the product id (no access token)
+      if (mpPath === "/applepay/v1/session" && req.method === "POST") {
+        if (req.headers["x-public-key"] !== TEST_MP_PUBLIC_KEY || !req.headers["x-product-id"]) return json(res, 401, { message: "invalid public key or product id" });
+        const body = JSON.parse((await readBody(req)).toString() || "{}");
+        const valid =
+          body.id && /^merchant\./.test(body.merchantIdentifier ?? "") && body.initiative === "web" && body.domainName && body.initiativeContext === body.domainName &&
+          /^https:\/\/apple-pay-gateway[^/]*\.apple\.com\//.test(body.validationURL ?? "");
+        if (!valid) return json(res, 400, { message: "invalid session request" });
+        return json(res, 200, {
+          epochTimestamp: Date.now(),
+          expiresAt: Date.now() + 3600_000,
+          merchantSessionIdentifier: `SSH-local-${randomUUID()}`,
+          nonce: "local",
+          merchantIdentifier: "LOCAL-MERCHANT",
+          domainName: body.domainName,
+          displayName: body.displayName,
+          signature: "local-signature",
+        });
+      }
+      if (mpPath === "/platforms/pci/applepay/v1/tokenize" && req.method === "POST") {
+        if (req.headers["x-public-key"] !== TEST_MP_PUBLIC_KEY || !req.headers["x-product-id"]) return json(res, 401, { message: "invalid public key or product id" });
+        const body = JSON.parse((await readBody(req)).toString() || "{}");
+        if (body.payment_method?.type !== "applepay" || !body.payment_method?.payment_data || !body.transaction_identifier) return json(res, 400, { message: "invalid tokenize request" });
+        let paymentData;
+        try {
+          paymentData = JSON.parse(Buffer.from(body.payment_method.payment_data, "base64").toString("utf8"));
+        } catch {
+          return json(res, 400, { message: "payment_data must be Base64-encoded JSON" });
+        }
+        const id = randomUUID().replace(/-/g, "");
+        mpCardTokens.set(id, { decline: paymentData?.data === "decline" });
+        return json(res, 200, { id, bin: "45099500" });
+      }
+      // test hook: an Apple Pay order is refunded and Mercado Pago notifies the site (topic "order")
+      const refund = mpPath.match(/^\/test\/orders\/(ORD[0-9A-Z]+)\/refund$/);
+      if (refund && req.method === "POST") {
+        const order = mpOrders.get(refund[1]);
+        if (!order) return json(res, 404, { message: "order not found" });
+        Object.assign(order, { status: "refunded", status_detail: "refunded", last_updated_date: new Date().toISOString() });
+        Object.assign(order.transactions.payments[0], { status: "refunded", status_detail: "refunded" });
+        return json(res, 200, { webhook: await notify("order", order.id) });
+      }
       if (bearer(req) !== TEST_MP_TOKEN) return json(res, 401, { message: "invalid access token", status: 401 });
+      if (mpPath === "/v1/orders" && req.method === "POST") {
+        const key = req.headers["x-idempotency-key"];
+        if (!key || key.length > 128) return json(res, 400, { errors: [{ code: "empty_required_header" }] });
+        if (mpOrderKeys.has(key)) return json(res, ...mpOrderKeys.get(key));
+        const body = JSON.parse((await readBody(req)).toString() || "{}");
+        // like the real API: unknown properties are refused
+        const allowed = ["type", "processing_mode", "total_amount", "currency_id", "external_reference", "payer", "transactions", "description"];
+        const extra = Object.keys(body).filter((k) => !allowed.includes(k));
+        if (extra.length) return json(res, 400, { errors: [{ code: "unsupported_properties", message: extra.join(", ") }] });
+        const p = body.transactions?.payments?.[0];
+        if (body.type !== "online" || body.processing_mode !== "automatic" || !p) return json(res, 400, { errors: [{ code: "required_properties" }] });
+        if (body.total_amount !== p.amount || !/^\d+\.\d{2}$/.test(body.total_amount)) return json(res, 400, { errors: [{ code: "invalid_total_amount" }] });
+        if (body.payer?.identification?.type !== "CPF" || !/^\d{11}$/.test(body.payer?.identification?.number ?? "") || !body.payer?.email) {
+          return json(res, 400, { errors: [{ code: "property_value", message: "payer" }] });
+        }
+        const card = mpCardTokens.get(p.payment_method?.token);
+        if (!card || !["visa", "master"].includes(p.payment_method?.id) || p.payment_method?.installments !== 1) return json(res, 400, { errors: [{ code: "property_value", message: "payment_method" }] });
+        const failed = card.decline;
+        const now = new Date().toISOString();
+        const order = {
+          id: newMpId("ORD01"),
+          type: "online",
+          processing_mode: "automatic",
+          external_reference: body.external_reference,
+          total_amount: body.total_amount,
+          total_paid_amount: failed ? "0.00" : body.total_amount,
+          status: failed ? "failed" : "processed",
+          status_detail: failed ? "failed" : "accredited",
+          created_date: now,
+          last_updated_date: now,
+          transactions: {
+            payments: [
+              {
+                id: newMpId("PAY01"),
+                amount: p.amount,
+                paid_amount: failed ? "0.00" : p.amount,
+                payment_method: { id: p.payment_method.id, type: p.payment_method.type, installments: 1 },
+                status: failed ? "failed" : "processed",
+                status_detail: failed ? "rejected_by_issuer" : "accredited",
+              },
+            ],
+          },
+        };
+        mpOrders.set(order.id, order);
+        const response = failed
+          ? [402, { errors: [{ code: "failed", message: "The following transactions failed", details: [`${order.transactions.payments[0].id}: rejected_by_issuer`] }], data: order }]
+          : [201, order];
+        mpOrderKeys.set(key, response);
+        return json(res, ...response);
+      }
+      const orderGet = mpPath.match(/^\/v1\/orders\/(ORD[0-9A-Z]+)$/);
+      if (orderGet && req.method === "GET") {
+        const order = mpOrders.get(orderGet[1]);
+        return order ? json(res, 200, order) : json(res, 404, { errors: [{ code: "order_not_found" }] });
+      }
       if (mpPath === "/checkout/preferences" && req.method === "POST") {
         const body = JSON.parse((await readBody(req)).toString() || "{}");
         if (!Array.isArray(body.items) || body.items.length === 0 || !body.external_reference) return json(res, 400, { message: "invalid preference", status: 400 });

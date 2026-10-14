@@ -928,3 +928,59 @@ describe("online payments (Mercado Pago)", () => {
     await db.query(`update store_settings set online_payment_enabled = false where id = 1`);
   });
 });
+
+
+describe("Apple Pay (Mercado Pago Orders API)", () => {
+  it("starts off with public identifiers only, in strict formats (an access token never fits the public key)", async () => {
+    expect(
+      await one(`select apple_pay_enabled, apple_pay_merchant_id, apple_pay_certificate_id, apple_pay_product_id, mercadopago_public_key, apple_pay_domain_association from store_settings where id = 1`),
+    ).toEqual({
+      apple_pay_enabled: false,
+      apple_pay_merchant_id: null,
+      apple_pay_certificate_id: null,
+      apple_pay_product_id: null,
+      mercadopago_public_key: null,
+      apple_pay_domain_association: null,
+    });
+    const set = (column: string, value: string) => db.query(`update store_settings set ${column} = $1 where id = 1`, [value]);
+    await expect(set("apple_pay_merchant_id", "br.com.mivora")).rejects.toThrow(/check/);
+    await expect(set("mercadopago_public_key", "APP_USR-ACCESS-TOKEN-FALSO-DE-TESTE")).rejects.toThrow(/check/);
+    await expect(set("apple_pay_domain_association", "<script>alert(1)</script>")).rejects.toThrow(/check/);
+    await expect(set("apple_pay_certificate_id", "cert id with spaces")).rejects.toThrow(/check/);
+    await set("apple_pay_merchant_id", "merchant.br.com.mivoracosmeticos");
+    await set("mercadopago_public_key", "APP_USR-6dd5f0f9-b2b4-4e1b-8f4a-0c3d7d1a2b3c");
+    await set("apple_pay_certificate_id", "cert_0123-abc");
+    await set("apple_pay_product_id", "prod.apple-pay_01");
+    await set("apple_pay_domain_association", "7B227073704964223A2239373943394538");
+    await db.query(`update store_settings set apple_pay_merchant_id = null, mercadopago_public_key = null, apple_pay_certificate_id = null, apple_pay_product_id = null, apple_pay_domain_association = null where id = 1`);
+    const privacy = await one<{ body: string }>(`select body from pages where slug = 'politica-de-privacidade'`);
+    expect(privacy.body).toContain("## Apple Pay");
+    expect(privacy.body).toMatch(/CPF.*não fica salvo/);
+  });
+
+  it("records Orders API payments (ORD ids, type apple_pay): a refused attempt, then approval, then a refund", async () => {
+    await db.query(`update store_settings set online_payment_enabled = true where id = 1`);
+    const pid = await productId("medicube-pdrn-pink-peptide-serum");
+    await db.query(`update products set price_cents = 15999, track_inventory = false, availability = 'in_stock' where id = $1`, [pid]);
+    const r = await asRole(db, "anon", null, () =>
+      one<{ r: { id: string; amount_due_cents: number } }>(`select create_order_intent($1::jsonb, null, null, null, null, null, $2::jsonb, $3::jsonb, 'mercadopago') as r`, [
+        JSON.stringify([{ product_id: pid, quantity: 1 }]),
+        JSON.stringify({ cep: "01001000", city: "São Paulo", uf: "SP", service: "Correios SEDEX", fee_cents: 4100, estimate: "3 dias úteis" }),
+        newCustomer(),
+      ]),
+    );
+    const pay = (id: string, status: string, amount: number | null) =>
+      asRole(db, "service_role", null, () =>
+        one<{ r: { changed: boolean; status: string; payment_status: string } }>(`select apply_payment_update($1, $2, $3, 'detail', 'apple_pay', $4) as r`, [r.r.id, id, status, amount]),
+      );
+    expect((await pay("ORD01AAAAAAAAAAAAAAAAAAAAAAAA", "rejected", null)).r).toMatchObject({ status: "started", payment_status: "rejected" });
+    expect((await pay("ORD01BBBBBBBBBBBBBBBBBBBBBBBB", "approved", r.r.amount_due_cents)).r).toMatchObject({ status: "confirmed", payment_status: "approved" });
+    expect(await one(`select payment_id, payment_type, amount_paid_cents from order_intents where id = $1`, [r.r.id])).toEqual({
+      payment_id: "ORD01BBBBBBBBBBBBBBBBBBBBBBBB",
+      payment_type: "apple_pay",
+      amount_paid_cents: 15999 + 4100,
+    });
+    expect((await pay("ORD01BBBBBBBBBBBBBBBBBBBBBBBB", "refunded", r.r.amount_due_cents)).r).toMatchObject({ status: "confirmed", payment_status: "refunded" });
+    await db.query(`update store_settings set online_payment_enabled = false where id = 1`);
+  });
+});

@@ -135,6 +135,13 @@ export type StoreSettings = {
   /** Pay on the site through Mercado Pago Checkout Pro (also needs the server credentials) */
   online_payment_enabled: boolean;
   online_payment_max_installments: number;
+  /** Apple Pay through Mercado Pago (Orders API); public identifiers only */
+  apple_pay_enabled: boolean;
+  apple_pay_merchant_id: string | null;
+  apple_pay_certificate_id: string | null;
+  apple_pay_product_id: string | null;
+  mercadopago_public_key: string | null;
+  apple_pay_domain_association: string | null;
   about_headline: string | null;
   about_text: string | null;
   whatsapp_section_title: string | null;

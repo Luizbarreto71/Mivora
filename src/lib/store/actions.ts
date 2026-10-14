@@ -3,6 +3,8 @@
 import { headers } from "next/headers";
 import { z } from "zod";
 import { getKits, getProductsByIds, getStoreSettings } from "@/lib/catalog/queries";
+import { applePayConfig, applePayDomain, chargeWithApplePay, createApplePaySession } from "@/lib/payments/apple-pay";
+import type { ApplePayLines } from "@/lib/payments/apple-pay-core";
 import { mercadoPagoConfig, openCheckout } from "@/lib/payments/mercadopago";
 import { getPublicSupabase } from "@/lib/supabase/public";
 import { lineKey } from "@/lib/cart/math";
@@ -331,4 +333,91 @@ export async function payOrder(orderId: unknown): Promise<{ ok: true; url: strin
           ? "Este pedido não está aguardando pagamento."
           : "Não foi possível abrir o pagamento agora. Tente novamente em instantes.",
   };
+}
+
+// ---------------------------------------------------------------------------
+// Apple Pay (Mercado Pago Orders API)
+// ---------------------------------------------------------------------------
+const applePayHits = new Map<string, { count: number; reset: number }>();
+async function allowApplePay() {
+  const ip = (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
+  const now = Date.now();
+  const entry = applePayHits.get(ip);
+  if (!entry || entry.reset < now) {
+    if (applePayHits.size > 5000) applePayHits.clear();
+    applePayHits.set(ip, { count: 1, reset: now + 60_000 });
+    return true;
+  }
+  entry.count += 1;
+  return entry.count <= 20;
+}
+
+export type ApplePayStart =
+  | { ok: true; orderId: string; code: string; orderUrl: string; amountCents: number; lines: ApplePayLines }
+  | { ok: false; error: string };
+
+/** Apple Pay, step 1: registers the order (server prices) so the payment sheet shows the exact total. */
+export async function startApplePayOrder(input: unknown): Promise<ApplePayStart> {
+  const settings = await getStoreSettings();
+  if (!applePayConfig(settings).ready) return { ok: false, error: "O Apple Pay não está disponível no momento. Escolha outra forma de pagamento." };
+  if (!(await allowApplePay())) return { ok: false, error: "Muitas tentativas seguidas. Aguarde um minuto e tente de novo." };
+  const registered = await registerOrder(input, "mercadopago");
+  if (!registered.ok) return { ok: false, error: registered.error };
+  const r = registered.r;
+  if (r.amount_due_cents == null) return { ok: false, error: "Não foi possível calcular o total do pedido. Escolha outra forma de pagamento." };
+  return {
+    ok: true,
+    orderId: r.id,
+    code: r.code,
+    orderUrl: `/pedido/${r.id}`,
+    amountCents: r.amount_due_cents,
+    lines: { subtotalCents: r.subtotal_cents, discountCents: r.discount_cents ?? 0, feeCents: r.delivery?.fee_cents ?? 0 },
+  };
+}
+
+/** Apple Pay, step 2: merchant validation (Mercado Pago opens the session with the store's certificate). */
+export async function validateApplePayMerchant(validationURL: unknown): Promise<{ ok: true; session: unknown } | { ok: false; error: string }> {
+  const url = z.url().max(500).safeParse(validationURL);
+  const failure = { ok: false as const, error: "Não foi possível iniciar o Apple Pay agora. Tente novamente ou escolha outra forma de pagamento." };
+  if (!url.success || !(await allowApplePay())) return failure;
+  const settings = await getStoreSettings();
+  const domain = applePayDomain((await headers()).get("host"));
+  const result = await createApplePaySession(settings, url.data, domain).catch(() => ({ ok: false as const }));
+  return result.ok ? { ok: true, session: result.session } : failure;
+}
+
+const applePaySchema = z.object({
+  orderId: z.uuid(),
+  cpf: z.string().max(20),
+  token: z.object({
+    paymentData: z.record(z.string(), z.unknown()).refine((v) => JSON.stringify(v).length <= 20_000, "Pagamento inválido."),
+    transactionIdentifier: z.string().regex(/^[0-9A-Fa-f]{1,128}$/),
+    paymentMethod: z.object({
+      network: z.string().max(40).nullable().optional(),
+      type: z.string().max(20).nullable().optional(),
+      displayName: z.string().max(80).nullable().optional(),
+    }),
+  }),
+});
+
+export type ApplePayCompletion = { ok: true; status: string; approved: boolean; orderUrl: string } | { ok: false; error: string };
+
+/** Apple Pay, step 3: the authorized payment is charged for the amount registered in the database. */
+export async function completeApplePay(input: unknown): Promise<ApplePayCompletion> {
+  const parsed = applePaySchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Não foi possível ler o pagamento do Apple Pay. Tente novamente." };
+  if (!(await allowApplePay())) return { ok: false, error: "Muitas tentativas seguidas. Aguarde um minuto e tente de novo." };
+  const settings = await getStoreSettings();
+  const result = await chargeWithApplePay(settings, parsed.data);
+  if (result.ok) return { ok: true, status: result.status, approved: result.status === "approved", orderUrl: result.orderUrl };
+  const messages: Record<typeof result.reason, string> = {
+    invalid_cpf: "Confira o CPF: o Mercado Pago exige um CPF válido para pagar com Apple Pay.",
+    unsupported_card: "O Apple Pay aceita cartões de crédito Visa e Mastercard. Escolha outro cartão ou outra forma de pagamento.",
+    expired: "O prazo para pagar este pedido terminou. Faça um novo pedido ou fale com a gente pelo WhatsApp.",
+    not_payable: "Este pedido não está aguardando pagamento.",
+    not_found: "Pedido não encontrado.",
+    not_configured: "O Apple Pay não está disponível no momento. Escolha outra forma de pagamento.",
+    provider_error: "Não foi possível concluir o pagamento com Apple Pay agora. Tente novamente em instantes ou escolha outra forma de pagamento.",
+  };
+  return { ok: false, error: messages[result.reason] };
 }

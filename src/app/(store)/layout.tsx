@@ -9,6 +9,7 @@ import { TopBar } from "@/components/store/top-bar";
 import { WelcomeIntro } from "@/components/store/welcome-intro";
 import { getBrands, getCategories, getKits, getStoreSettings } from "@/lib/catalog/queries";
 import { SITE_URL } from "@/lib/env";
+import { applePayConfig } from "@/lib/payments/apple-pay";
 import { mercadoPagoConfig } from "@/lib/payments/mercadopago";
 import { normalizeWhatsAppNumber } from "@/lib/whatsapp";
 
@@ -34,6 +35,7 @@ export default async function StoreLayout({ children }: { children: React.ReactN
         welcomeOffer: settings.welcome_offer_enabled ? { code: settings.welcome_offer_code, percent: settings.welcome_offer_percent } : null,
         shippingCalculator: settings.shipping_calculator_enabled,
         onlinePayment: settings.online_payment_enabled && mercadoPagoConfig().ready,
+        applePay: applePayConfig(settings).ready,
       }}
     >
       <CartProvider>

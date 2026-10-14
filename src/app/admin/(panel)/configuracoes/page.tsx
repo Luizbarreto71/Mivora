@@ -8,6 +8,7 @@ import { requireAdmin } from "@/lib/admin/auth";
 import { DEFAULT_SETTINGS } from "@/lib/catalog/queries";
 import { SITE_URL } from "@/lib/env";
 import { centsToInput } from "@/lib/money";
+import { applePayConfig } from "@/lib/payments/apple-pay";
 import { checkMercadoPago, mercadoPagoConfig } from "@/lib/payments/mercadopago";
 import { formatCep } from "@/lib/shipping/cep";
 import { checkMelhorEnvio, melhorEnvioConfig } from "@/lib/shipping/quote";
@@ -98,6 +99,20 @@ export default async function SettingsPage() {
       ? { ok: true, text: "Assinatura dos avisos do Mercado Pago verificada (MERCADOPAGO_WEBHOOK_SECRET)." }
       : { ok: null, text: "Recomendado: cadastre a chave secreta do webhook (MERCADOPAGO_WEBHOOK_SECRET) para recusar avisos falsificados." },
   ];
+  const ap = applePayConfig({ ...DEFAULT_SETTINGS, ...v });
+  const apMissing = [
+    !mp.ready && "as credenciais do Mercado Pago e do Supabase no servidor",
+    !v.online_payment_enabled && "ligar o pagamento pelo site",
+    !v.apple_pay_merchant_id && "o Merchant ID",
+    !v.mercadopago_public_key && "a Public Key",
+    !v.apple_pay_certificate_id && "o ID do certificado",
+    !v.apple_pay_product_id && "o Product ID",
+  ].filter(Boolean) as string[];
+  const apStatus = ap.ready
+    ? { tone: "text-success", text: "Pronto: o botão do Apple Pay aparece no checkout para clientes com Apple Pay no aparelho." }
+    : apMissing.length === 0
+      ? { tone: "text-muted", text: "Tudo configurado. Marque a opção acima para mostrar o Apple Pay na loja." }
+      : { tone: v.apple_pay_enabled ? "text-warning" : "text-muted", text: `Para o Apple Pay aparecer na loja, falta: ${apMissing.join(", ")}.` };
   const carrier = !me.token
     ? {
         tone: "text-muted",
@@ -299,6 +314,42 @@ export default async function SettingsPage() {
               </li>
               <li className="text-muted">Pedidos com itens “Sob consulta” ou entrega “a combinar” continuam sendo finalizados pelo WhatsApp.</li>
             </ul>
+          </div>
+        </Card>
+
+        <Card
+          title="Apple Pay (Mercado Pago)"
+          description="Botão de Apple Pay no checkout para clientes com iPhone, iPad ou Mac no Safari: cartões de crédito Visa e Mastercard, à vista, com o CPF exigido pelo Mercado Pago. Precisa da habilitação do time comercial do Mercado Pago, de um Merchant ID no Apple Developer e dos certificados cadastrados no Mercado Pago."
+        >
+          <div className="grid gap-5 sm:grid-cols-2">
+            <div className="space-y-2 sm:col-span-2">
+              <Checkbox name="apple_pay_enabled" label="Oferecer Apple Pay no checkout" defaultChecked={v.apple_pay_enabled ?? false} />
+              <p className={cn("text-xs leading-relaxed", apStatus.tone)}>{apStatus.text}</p>
+            </div>
+            <Field label="Merchant ID (Apple)" htmlFor="apple_pay_merchant_id" hint="Ex.: merchant.br.com.mivoracosmeticos">
+              <Input id="apple_pay_merchant_id" name="apple_pay_merchant_id" defaultValue={v.apple_pay_merchant_id ?? ""} placeholder="merchant.br.com.mivoracosmeticos" />
+            </Field>
+            <Field label="Public Key do Mercado Pago" htmlFor="mercadopago_public_key" hint="Credenciais de produção da aplicação. Nunca cole aqui o Access Token.">
+              <Input id="mercadopago_public_key" name="mercadopago_public_key" defaultValue={v.mercadopago_public_key ?? ""} placeholder="APP_USR-00000000-0000-0000-0000-000000000000" />
+            </Field>
+            <Field label="ID do certificado de comerciante" htmlFor="apple_pay_certificate_id" hint="certificate_id gerado no Mercado Pago">
+              <Input id="apple_pay_certificate_id" name="apple_pay_certificate_id" defaultValue={v.apple_pay_certificate_id ?? ""} />
+            </Field>
+            <Field label="Product ID (X-Product-ID)" htmlFor="apple_pay_product_id" hint="Informado pelo Mercado Pago">
+              <Input id="apple_pay_product_id" name="apple_pay_product_id" defaultValue={v.apple_pay_product_id ?? ""} />
+            </Field>
+            <Field
+              label="Arquivo de verificação de domínio da Apple"
+              htmlFor="apple_pay_domain_association"
+              hint={
+                <>
+                  Cole o conteúdo do arquivo baixado no portal Apple Developer. Ele fica publicado em <code className="break-all">{SITE_URL}/.well-known/apple-developer-merchantid-domain-association.txt</code>
+                </>
+              }
+              className="sm:col-span-2"
+            >
+              <Textarea id="apple_pay_domain_association" name="apple_pay_domain_association" rows={3} className="font-mono text-xs" defaultValue={v.apple_pay_domain_association ?? ""} />
+            </Field>
           </div>
         </Card>
 
