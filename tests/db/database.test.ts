@@ -670,6 +670,8 @@ describe("premium home", () => {
     expect(JSON.stringify(s)).not.toMatch(/todo o Brasil/i);
     expect(s.newsletter_enabled).toBe(true);
     await expect(db.query(`update store_settings set top_bar_messages = array['a','b','c','d','e'] where id = 1`)).rejects.toThrow(/top_bar_valid/);
+    expect(await one(`select shipping_max_carrier_options from store_settings where id = 1`)).toEqual({ shipping_max_carrier_options: 4 });
+    await expect(db.query(`update store_settings set shipping_max_carrier_options = 50 where id = 1`)).rejects.toThrow(/check/);
   });
 
   it("publishes testimonials only with the customer's authorisation and shows visitors only published ones", async () => {

@@ -351,6 +351,8 @@ export async function saveSettings(_: ActionState, fd: FormData): Promise<Action
   if (!Number.isFinite(markup) || markup < 0 || markup > 100) return fail("O acréscimo sobre o frete deve ficar entre 0% e 100%.");
   const shippingExtra = moneyField(fd, "shipping_extra");
   if (!shippingExtra.ok || (shippingExtra.value ?? 0) > 100000) return fail("Valor fixo por envio inválido. Ex.: 3,50");
+  const maxCarriers = formInt(fd, "shipping_max_carrier_options", 4);
+  if (maxCarriers < 0 || maxCarriers > 20) return fail("O máximo de opções de transportadora deve ficar entre 0 e 20.");
   const defaultWeight = formInt(fd, "shipping_default_weight_g", 300);
   if (defaultWeight < 1 || defaultWeight > 30000) return fail("O peso padrão deve ficar entre 1 g e 30.000 g.");
   const [defaultHeight, defaultWidth, defaultLength] = [
@@ -403,6 +405,7 @@ export async function saveSettings(_: ActionState, fd: FormData): Promise<Action
       shipping_markup_percent: Math.round(markup * 100) / 100,
       shipping_extra_cents: shippingExtra.value ?? 0,
       shipping_default_weight_g: defaultWeight,
+      shipping_max_carrier_options: maxCarriers,
       shipping_default_height_cm: defaultHeight,
       shipping_default_width_cm: defaultWidth,
       shipping_default_length_cm: defaultLength,

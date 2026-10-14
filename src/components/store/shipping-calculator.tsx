@@ -20,6 +20,24 @@ function readSavedCep() {
   }
 }
 
+/** Delivery option chosen in the cart, offered again at checkout (this tab only). */
+const CHOICE_KEY = "mivora.shippingChoice";
+function readChoice(): { cep: string; id: string } | null {
+  try {
+    const c = JSON.parse(sessionStorage.getItem(CHOICE_KEY) ?? "null");
+    return c && typeof c.cep === "string" && typeof c.id === "string" ? c : null;
+  } catch {
+    return null;
+  }
+}
+function saveChoice(cep: string, id: string) {
+  try {
+    sessionStorage.setItem(CHOICE_KEY, JSON.stringify({ cep, id }));
+  } catch {
+    /* private mode */
+  }
+}
+
 function rememberCep(cep: string) {
   try {
     localStorage.setItem(CEP_KEY, cep);
@@ -42,11 +60,13 @@ type Props = {
   selectedId?: string | null;
   onSelect?: (option: ShippingOption | null) => void;
   onQuote?: (quote: ShippingQuote | null) => void;
+  /** Keep the chosen option for the next step (cart → checkout) */
+  rememberChoice?: boolean;
   title?: string;
   className?: string;
 };
 
-export function ShippingCalculator({ items, autoQuote = false, selectedId = null, onSelect, onQuote, title = "Calcular frete e prazo", className }: Props) {
+export function ShippingCalculator({ items, autoQuote = false, selectedId = null, onSelect, onQuote, rememberChoice = false, title = "Calcular frete e prazo", className }: Props) {
   const inputId = useId();
   const [cep, setCep] = useState("");
   const [quote, setQuote] = useState<ShippingQuote | null>(null);
@@ -55,9 +75,9 @@ export function ShippingCalculator({ items, autoQuote = false, selectedId = null
   const itemsKey = JSON.stringify(items.map((i) => [i.productId, i.variantId, i.kitId, i.quantity]));
 
   // Latest props for async callbacks, without re-running effects
-  const latest = useRef({ items, onSelect, onQuote, selectedId });
+  const latest = useRef({ items, onSelect, onQuote, selectedId, rememberChoice });
   useEffect(() => {
-    latest.current = { items, onSelect, onQuote, selectedId };
+    latest.current = { items, onSelect, onQuote, selectedId, rememberChoice };
   });
   const requestId = useRef(0);
 
@@ -88,10 +108,12 @@ export function ShippingCalculator({ items, autoQuote = false, selectedId = null
       setQuote(result.quote);
       notify?.(result.quote);
       if (select) {
-        // keep the chosen option (with fresh values) or pre-select the only real choice
+        // keep the chosen option (with fresh values), the one chosen in the cart, or the only real choice
+        const stored = latest.current.rememberChoice ? readChoice() : null;
+        const preferred = current ?? (stored?.cep === normalized ? stored.id : null);
         const choosable = result.quote.options.filter((o) => !o.unavailableReason);
         const real = choosable.filter((o) => o.kind !== "arrange");
-        select(choosable.find((o) => o.id === current) ?? (real.length === 1 ? real[0] : null));
+        select(choosable.find((o) => o.id === preferred) ?? (real.length === 1 ? real[0] : null));
       }
     });
   }, []);
@@ -197,7 +219,10 @@ export function ShippingCalculator({ items, autoQuote = false, selectedId = null
                     className="mt-0.5 h-4 w-4 accent-ink"
                     checked={selectedId === o.id}
                     disabled={Boolean(o.unavailableReason)}
-                    onChange={() => onSelect(o)}
+                    onChange={() => {
+                      onSelect(o);
+                      if (rememberChoice) saveChoice(quote.cep, o.id);
+                    }}
                   />
                   <OptionText option={o} />
                 </label>

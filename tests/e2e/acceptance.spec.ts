@@ -303,7 +303,8 @@ test("Expansão — “Em breve”: vitrine sem compra e venda bloqueada sem doc
   await expect(card.getByRole("button", { name: /Adicionar/ })).toHaveCount(0);
 
   await page.goto("/produtos/mediheal-madecassoside-blemish-pad");
-  await expect(page.getByText("Este produto ainda não está disponível.")).toBeVisible();
+  // getByText also sees the hidden copy React may leave from streaming right after a revalidation
+  await expect(page.getByText("Este produto ainda não está disponível.").filter({ visible: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Adicionar ao carrinho" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: /Consultar previsão de chegada/ })).toHaveAttribute("href", /ainda%20n%C3%A3o%20est%C3%A1%20dispon%C3%ADvel/);
 
@@ -444,13 +445,17 @@ test("Frete — admin configura origem e zona por CEP; cliente calcula no produt
   await expect(page.getByText("Correios SEDEX")).toBeVisible();
   await page.getByRole("button", { name: "Adicionar ao carrinho" }).click();
 
-  // Checkout: the remembered CEP is quoted again; the visitor picks SEDEX
+  // Cart: the remembered CEP is quoted, the visitor picks SEDEX and sees it in the total
+  await page.goto("/carrinho");
+  await page.getByRole("radio", { name: /Correios SEDEX/ }).check();
+  await expect(page.getByText("Total estimado", { exact: true })).toBeVisible();
+  await expect(page.getByText(brl(11990 + 4100)).first()).toBeVisible();
+
+  // Checkout: after the registration, SEDEX comes pre-selected and the fee is in the total
   await page.goto("/finalizar");
   await register(page);
   const sedex = page.getByRole("radio", { name: /Correios SEDEX/ });
-  await expect(sedex).toBeVisible();
-  await expect(page.getByRole("button", { name: "Finalizar pelo WhatsApp" })).toBeDisabled();
-  await sedex.check();
+  await expect(sedex).toBeChecked();
   await expect(page.getByText("Total estimado", { exact: true })).toBeVisible();
   await expect(page.getByText(brl(11990 + 4100)).first()).toBeVisible();
   await page.getByRole("button", { name: "Finalizar pelo WhatsApp" }).click();

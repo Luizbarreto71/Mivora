@@ -22,6 +22,8 @@ export type ShippingOption = {
   unavailableReason: string | null;
   zoneId: string | null;
   serviceId: number | null;
+  /** Carriers: longest estimated business days (preparation included) */
+  days?: number | null;
 };
 
 export type ShippingQuote = {

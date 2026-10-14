@@ -127,6 +127,8 @@ export type StoreSettings = {
   shipping_default_height_cm: number;
   shipping_default_width_cm: number;
   shipping_default_length_cm: number;
+  /** Carrier services listed in the calculator (0 = all) */
+  shipping_max_carrier_options: number;
   /** Thin black bar above the header (up to 4 short messages) */
   top_bar_messages: string[];
   newsletter_enabled: boolean;

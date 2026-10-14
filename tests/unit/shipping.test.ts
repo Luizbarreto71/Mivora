@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { addressLabel, formatCep, normalizeCep, parseBrasilApiCep, parseViaCep } from "@/lib/shipping/cep";
-import { buildMelhorEnvioRequest, businessDaysLabel, parseMelhorEnvioResponse } from "@/lib/shipping/melhor-envio";
+import { buildMelhorEnvioRequest, businessDaysLabel, parseMelhorEnvioResponse, pickCarrierOptions } from "@/lib/shipping/melhor-envio";
 import { formatCepRange, parseCepRangeLine, parseCepRanges, parseCities, sortShippingOptions, zoneCovers, zoneOption } from "@/lib/shipping/zones";
 import type { DeliveryZone } from "@/lib/types";
 import { buildOrderMessage } from "@/lib/whatsapp";
@@ -105,6 +105,18 @@ describe("Melhor Envio", () => {
     ]);
     expect(parseMelhorEnvioResponse({ message: "Unauthenticated." }, { handlingDays: 0, markupPercent: 0, extraCents: 0 })).toEqual([]);
     expect(businessDaysLabel(0, 1)).toBe("1 dia útil");
+  });
+
+  it("lists the fastest service plus the cheapest ones, up to the limit", () => {
+    const carrier = (id: number, feeCents: number, days: number) => ({
+      id: `carrier:${id}`, kind: "carrier" as const, method: "shipping" as const, name: `S${id}`, feeCents, estimate: null, note: null, unavailableReason: null, zoneId: null, serviceId: id, days,
+    });
+    const all = [carrier(1, 2282, 8), carrier(2, 3536, 3), carrier(3, 1469, 5), carrier(4, 1473, 3), carrier(5, 2016, 9), carrier(6, 1513, 6)];
+    expect(pickCarrierOptions(all, 4).map((o) => o.id)).toEqual(["carrier:4", "carrier:3", "carrier:6", "carrier:5"]);
+    expect(pickCarrierOptions(all, 0)).toHaveLength(6);
+    expect(pickCarrierOptions(all.slice(0, 2), 4)).toHaveLength(2);
+    const parsed = parseMelhorEnvioResponse([{ id: 9, name: "PAC", price: "20.00", delivery_range: { min: 5, max: 7 }, company: { name: "Correios" } }], { handlingDays: 1, markupPercent: 0, extraCents: 0 });
+    expect(parsed[0].days).toBe(8);
   });
 
   it("orders options: pickup, local, carriers by price, a combinar", () => {

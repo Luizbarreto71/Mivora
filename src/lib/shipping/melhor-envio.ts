@@ -85,7 +85,19 @@ export function parseMelhorEnvioResponse(json: unknown, pricing: CarrierPricing)
       unavailableReason: null,
       zoneId: null,
       serviceId: raw.id,
+      days: max > 0 ? max : null,
     });
   }
   return options;
+}
+
+/**
+ * Keeps the list short: the fastest service plus the cheapest ones, up to `max` (0 = all).
+ */
+export function pickCarrierOptions(options: ShippingOption[], max: number) {
+  if (max <= 0 || options.length <= max) return options;
+  const fee = (o: ShippingOption) => o.feeCents ?? Number.MAX_SAFE_INTEGER;
+  const fastest = [...options].sort((a, b) => (a.days ?? 99) - (b.days ?? 99) || fee(a) - fee(b))[0];
+  const cheapest = [...options].sort((a, b) => fee(a) - fee(b) || (a.days ?? 99) - (b.days ?? 99)).filter((o) => o !== fastest);
+  return [fastest, ...cheapest].slice(0, max);
 }

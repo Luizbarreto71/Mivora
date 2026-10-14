@@ -246,6 +246,7 @@ export function CheckoutForm({
             <ShippingCalculator
               items={totals.purchasableLines.map((l) => ({ productId: l.productId, variantId: l.variantId, kitId: l.kitId, quantity: l.quantity }))}
               autoQuote
+              rememberChoice
               selectedId={shippingOption?.id ?? null}
               onSelect={setShippingOption}
               onQuote={setShippingQuote}

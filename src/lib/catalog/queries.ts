@@ -64,6 +64,7 @@ export const DEFAULT_SETTINGS: StoreSettings = {
   shipping_default_height_cm: 6,
   shipping_default_width_cm: 11,
   shipping_default_length_cm: 16,
+  shipping_max_carrier_options: 4,
   top_bar_messages: ["Skincare coreano e cosméticos importados", "Frete e prazo calculados pelo CEP", "Atendimento via WhatsApp"],
   newsletter_enabled: true,
   about_headline: null,

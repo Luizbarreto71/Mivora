@@ -1,9 +1,10 @@
 import "server-only";
 import { getDeliveryZones, getStoreSettings } from "@/lib/catalog/queries";
+import { SITE_URL } from "@/lib/env";
 import { getPublicSupabase } from "@/lib/supabase/public";
 import type { StoreSettings } from "@/lib/types";
 import { parseBrasilApiCep, parseViaCep } from "./cep";
-import { buildMelhorEnvioRequest, parseMelhorEnvioResponse, type CarrierPackageItem } from "./melhor-envio";
+import { buildMelhorEnvioRequest, parseMelhorEnvioResponse, pickCarrierOptions, type CarrierPackageItem } from "./melhor-envio";
 import type { ShippingAddress, ShippingItemRef, ShippingOption, ShippingQuote } from "./types";
 import { arrangeOption, sortShippingOptions, zoneCovers, zoneOption } from "./zones";
 
@@ -16,7 +17,9 @@ export function melhorEnvioConfig(settings: Pick<StoreSettings, "contact_email">
   const sandbox = process.env.MELHOR_ENVIO_SANDBOX === "true";
   const baseUrl = (process.env.MELHOR_ENVIO_BASE_URL ?? (sandbox ? "https://sandbox.melhorenvio.com.br" : "https://melhorenvio.com.br")).replace(/\/$/, "");
   const email = process.env.MELHOR_ENVIO_EMAIL?.trim() || settings.contact_email || null;
-  return { token, sandbox, baseUrl, email, ready: Boolean(token && email) };
+  // Melhor Envio asks for the app name and a contact in the User-Agent; without an e-mail the site address identifies the store
+  const contact = email ?? SITE_URL.replace(/^https?:\/\//, "");
+  return { token, sandbox, baseUrl, email, contact, ready: Boolean(token) };
 }
 
 function melhorEnvioRequest(config: ReturnType<typeof melhorEnvioConfig>, body: unknown): RequestInit {
@@ -26,7 +29,7 @@ function melhorEnvioRequest(config: ReturnType<typeof melhorEnvioConfig>, body: 
       Accept: "application/json",
       "Content-Type": "application/json",
       Authorization: `Bearer ${config.token}`,
-      "User-Agent": `MIVORA Loja (${config.email})`,
+      "User-Agent": `MIVORA Loja (${config.contact})`,
     },
     body: JSON.stringify(body),
   };
@@ -216,7 +219,7 @@ export async function getShippingQuote(cep: string, items: ShippingItemRef[]): P
   const [settings, zones] = await Promise.all([getStoreSettings(), getDeliveryZones()]);
   const [lookup, cart] = await Promise.all([lookupCep(cep), loadCart(items, settings)]);
   const zoneOptions = zones.filter((z) => zoneCovers(z, cep, lookup.address)).map((z) => zoneOption(z, cart));
-  const carriers = lookup.found === false ? [] : await quoteCarriers(settings, cep, cart.packages);
+  const carriers = lookup.found === false ? [] : pickCarrierOptions(await quoteCarriers(settings, cep, cart.packages), settings.shipping_max_carrier_options);
   const options = [...zoneOptions, ...carriers];
   // there is always a way to finish: arranging the delivery on WhatsApp
   if (!options.some((o) => o.method === "to_arrange")) options.push(arrangeOption());

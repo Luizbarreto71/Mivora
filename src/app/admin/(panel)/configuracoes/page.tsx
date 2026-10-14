@@ -84,14 +84,12 @@ export default async function SettingsPage() {
         tone: "text-muted",
         text: "Para cotar Correios e transportadoras: crie uma conta no Melhor Envio, gere um token em melhorenvio.com.br/painel/gerenciar/tokens (“Novo token”, com as permissões de cotação de frete) e cadastre-o na variável de ambiente MELHOR_ENVIO_TOKEN do servidor (Vercel ou Hostinger). Por segurança, o token nunca é salvo no banco de dados. Sem ele, a calculadora mostra apenas as opções de entrega cadastradas abaixo.",
       }
-    : !me.email
-      ? { tone: "text-warning", text: "Token encontrado. Informe o e-mail de contato da loja (ou MELHOR_ENVIO_EMAIL): o Melhor Envio exige um e-mail de contato nas consultas." }
-      : !v.shipping_origin_cep
+    : !v.shipping_origin_cep
         ? { tone: "text-warning", text: "Token encontrado. Informe o CEP de origem para ativar as cotações." }
         : check?.ok && check.services > 0
           ? {
               tone: "text-success",
-              text: `Melhor Envio conectado${me.sandbox ? " (ambiente de testes — sandbox)" : ""}: a cotação de teste respondeu com ${check.services} ${check.services === 1 ? "serviço" : "serviços"}.${v.carrier_quotes_enabled ? "" : " Marque a opção acima para mostrar as cotações na loja."}`,
+              text: `Melhor Envio conectado${me.sandbox ? " (ambiente de testes — sandbox)" : ""}: a cotação de teste respondeu com ${check.services} ${check.services === 1 ? "serviço" : "serviços"}.${v.carrier_quotes_enabled ? "" : " Marque a opção acima para mostrar as cotações na loja."}${me.email ? "" : " Recomendado: preencha o e-mail de contato da loja, que o Melhor Envio pede nas consultas."}`,
             }
           : check?.ok
             ? { tone: "text-warning", text: "Melhor Envio conectado, mas a cotação de teste não trouxe nenhum serviço. Confira as transportadoras habilitadas na sua conta do Melhor Envio." }
@@ -231,6 +229,9 @@ export default async function SettingsPage() {
             </Field>
             <Field label="Valor fixo por envio (R$)" htmlFor="shipping_extra" hint="Opcional. Ex.: custo da embalagem">
               <Input id="shipping_extra" name="shipping_extra" inputMode="decimal" defaultValue={v.shipping_extra_cents ? centsToInput(v.shipping_extra_cents) : ""} />
+            </Field>
+            <Field label="Máximo de opções de transportadora" htmlFor="shipping_max_carrier_options" hint="A mais rápida e as mais baratas (0 = mostrar todas)">
+              <Input id="shipping_max_carrier_options" name="shipping_max_carrier_options" inputMode="numeric" defaultValue={v.shipping_max_carrier_options ?? 4} />
             </Field>
             <Field label="Peso padrão por produto, com embalagem (g)" htmlFor="shipping_default_weight_g" hint="Vale para produtos sem peso cadastrado">
               <Input id="shipping_default_weight_g" name="shipping_default_weight_g" inputMode="numeric" defaultValue={v.shipping_default_weight_g ?? 300} />
