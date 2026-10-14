@@ -204,6 +204,8 @@ export async function saveBanner(_: ActionState, fd: FormData): Promise<ActionSt
   const endsAt = brasiliaDateTime(formString(fd, "ends_at"));
   if (startsAt === undefined || endsAt === undefined) return fail("Data da campanha inválida.");
   if (startsAt && endsAt && new Date(startsAt) >= new Date(endsAt)) return fail("O fim da campanha deve ser depois do início.");
+  const layout = formString(fd, "layout") === "full" ? "full" : "split";
+  if (layout === "full" && !formNullable(fd, "image_desktop_url")) return fail("A arte completa precisa de uma imagem.");
   const row = {
     placement,
     eyebrow: formNullable(fd, "eyebrow"),
@@ -217,6 +219,7 @@ export async function saveBanner(_: ActionState, fd: FormData): Promise<ActionSt
     image_mobile_url: safeImage(formNullable(fd, "image_mobile_url")),
     image_alt: formNullable(fd, "image_alt"),
     background_color: color ? color.toUpperCase() : null,
+    layout,
     product_id: productId,
     starts_at: startsAt,
     ends_at: endsAt,

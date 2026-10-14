@@ -24,6 +24,7 @@ type BannerRow = {
   image_mobile_url: string | null;
   image_alt: string | null;
   background_color: string | null;
+  layout: string;
   product_id: string | null;
   starts_at: string | null;
   ends_at: string | null;
@@ -109,6 +110,12 @@ function BannerForm({ banner, placement, products }: { banner?: BannerRow; place
         hint="Foto vertical ou quadrada, com o produto ou a modelo no centro. Ela se dissolve na cor de fundo pelo lado esquerdo."
       />
       <MediaField name="image_mobile_url" label="Imagem (celular, opcional)" defaultValue={banner?.image_mobile_url ?? null} folder="banners" />
+      <Field label="Layout" htmlFor={`layout-${id}`} hint="Arte completa: a imagem já tem logo/textos e aparece inteira, sem texto por cima (proporção 16:9)">
+        <Select id={`layout-${id}`} name="layout" defaultValue={banner?.layout ?? "split"}>
+          <option value="split">Foto ao lado do texto</option>
+          <option value="full">Arte completa (imagem pronta)</option>
+        </Select>
+      </Field>
       <Field label="Descrição da imagem (acessibilidade)" htmlFor={`alt-${id}`}>
         <Input id={`alt-${id}`} name="image_alt" defaultValue={banner?.image_alt ?? ""} />
       </Field>

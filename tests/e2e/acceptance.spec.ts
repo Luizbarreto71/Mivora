@@ -453,7 +453,7 @@ test("Frete — admin configura origem e zona por CEP; cliente calcula no produt
 // ---------------------------------------------------------------------------
 // Home — carrossel de fotos
 // ---------------------------------------------------------------------------
-test("Home — carrossel: banner do mockup, fotos de campanha, setas, indicadores e pausa", async ({ page }) => {
+test("Home — carrossel: banner do mockup, artes autorais da MIVORA, setas, indicadores e pausa", async ({ page }) => {
   await page.goto("/");
   const carousel = page.getByRole("region", { name: "Destaques da MIVORA" });
   await expect(carousel.getByRole("heading", { level: 1, name: "Sua pele, seu ritual." })).toBeVisible();
@@ -463,22 +463,25 @@ test("Home — carrossel: banner do mockup, fotos de campanha, setas, indicadore
 
   await carousel.getByRole("button", { name: "Pausar a troca automática" }).click();
   await expect(carousel.getByRole("button", { name: "Retomar a troca automática" })).toBeVisible();
+
+  // the owner's own art (logo inside the image) is shown whole and the banner itself is the link
   await carousel.getByRole("button", { name: "Próximo destaque" }).click();
-  await expect(carousel.getByRole("heading", { name: "Seu momento de autocuidado" })).toBeVisible();
-  await expect(carousel.getByRole("img", { name: /aparelho facial de luz/ })).toBeVisible();
+  await expect(carousel.getByRole("heading", { name: "Seu momento de autocuidado" })).toBeAttached();
+  await expect(carousel.getByRole("img", { name: /sérum com conta-gotas/ })).toBeVisible();
+  await expect(carousel.getByRole("link", { name: /Seu momento de autocuidado/ })).toHaveAttribute("href", "/produtos");
+
+  await carousel.getByRole("button", { name: /Ir para o destaque 5/ }).click();
+  await expect(carousel.getByRole("img", { name: /máscara transparente/ })).toBeVisible();
+  await expect(carousel.getByRole("link", { name: /Desperte seu glow com o cuidado noturno/ })).toHaveAttribute("href", "/produtos/medicube-collagen-night-wrapping-mask");
+  await carousel.getByRole("button", { name: "Próximo destaque" }).click();
+  await expect(carousel.getByRole("heading", { level: 1, name: "Sua pele, seu ritual." })).toBeVisible();
+  await carousel.getByRole("button", { name: "Destaque anterior" }).click();
+  await carousel.getByRole("button", { name: "Destaque anterior" }).click();
+  await expect(carousel.getByRole("img", { name: /textura em gel/ })).toBeVisible();
 
   await carousel.getByRole("button", { name: /Ir para o destaque 3/ }).click();
-  await expect(carousel.getByRole("heading", { name: "Desperte seu glow com o cuidado noturno" })).toBeVisible();
-  await expect(carousel.getByRole("link", { name: "Ver produto" })).toHaveAttribute("href", "/produtos/medicube-collagen-night-wrapping-mask");
-
-  await carousel.getByRole("button", { name: /Ir para o destaque 4/ }).click();
-  await expect(carousel.getByRole("heading", { name: "Poros limpos, pele lisa" })).toBeVisible();
-  for (let i = 0; i < 4; i++) await carousel.getByRole("button", { name: "Destaque anterior" }).click();
-  await expect(carousel.getByRole("heading", { name: "Glow de pele de vidro o dia todo" })).toBeVisible();
-
-  await carousel.getByRole("button", { name: /Ir para o destaque 4/ }).click();
-  await carousel.getByRole("link", { name: "Comprar agora" }).click();
-  await expect(page).toHaveURL(/\/produtos\/medicube-zero-pore-pad$/);
+  await carousel.getByRole("link", { name: /Hidratação que deixa a pele macia/ }).click();
+  await expect(page).toHaveURL(/\/categorias\/hidratantes$/);
 });
 
 test("Home premium — cabeçalho, busca, seções do mockup, produto em abas, newsletter e depoimentos reais", async ({ page }) => {

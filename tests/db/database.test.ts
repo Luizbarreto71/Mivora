@@ -571,12 +571,8 @@ describe("shipping calculator", () => {
 });
 
 describe("home carousel", () => {
-  const PHOTOS = [
-    "/banners/home-ritual-aparelho-luz.webp",
-    "/banners/home-medicube-collagen-night-wrapping-mask.webp",
-    "/banners/home-medicube-zero-pore-pad.webp",
-    "/banners/home-medicube-collagen-jelly-cream.webp",
-  ];
+  // the owner's own art, in the order she sent it (migration 013)
+  const ART = ["/banners/home-mivora-serum.webp", "/banners/home-mivora-creme.webp", "/banners/home-mivora-gel.webp", "/banners/home-mivora-mascara.webp"];
   type Slide = {
     title: string;
     image_desktop_url: string | null;
@@ -586,17 +582,18 @@ describe("home carousel", () => {
     cta2_label: string | null;
     product_slug: string | null;
     background_color: string | null;
+    layout: string;
   };
   const slides = () =>
     asRole(db, "anon", null, () =>
       all<Slide>(
-        `select b.title, b.image_desktop_url, b.image_alt, b.cta_label, b.cta_href, b.cta2_label, p.slug as product_slug, b.background_color
+        `select b.title, b.image_desktop_url, b.image_alt, b.cta_label, b.cta_href, b.cta2_label, p.slug as product_slug, b.background_color, b.layout
            from banners b left join products p on p.id = b.product_id
           where b.placement = 'hero' order by b.sort_order`,
       ),
     );
 
-  it("opens with the mockup slide (real serum photo on rosé), then the four campaign photos, each with copy and a link", async () => {
+  it("opens with the mockup slide (real serum photo on rosé), then the owner's four banners, each with copy and a link", async () => {
     const rows = await slides();
     expect(rows[0]).toMatchObject({
       title: "Sua pele, seu ritual.",
@@ -604,9 +601,14 @@ describe("home carousel", () => {
       image_desktop_url: null,
       cta_href: "/produtos",
       background_color: "#F6E4E1",
+      layout: "split",
     });
-    expect(rows.slice(1).map((r) => r.image_desktop_url)).toEqual(PHOTOS);
+    expect(rows.slice(1).map((r) => r.image_desktop_url)).toEqual(ART);
+    expect(rows.slice(1).every((r) => r.layout === "full")).toBe(true);
     expect(rows[1]).toMatchObject({ title: "Seu momento de autocuidado", cta2_label: null });
+    expect(rows[2]).toMatchObject({ title: "Hidratação que deixa a pele macia", cta_href: "/categorias/hidratantes" });
+    // no campaign photo with people is left
+    expect(rows.some((r) => r.image_desktop_url?.includes("medicube") || r.image_desktop_url?.includes("aparelho"))).toBe(false);
     expect(new Set(rows.map((r) => r.title)).size).toBe(rows.length);
     for (const r of rows) {
       expect(r.cta_label).toBeTruthy();
@@ -621,10 +623,10 @@ describe("home carousel", () => {
     }
   });
 
-  it("re-running the carousel and premium home migrations changes nothing (idempotent)", async () => {
+  it("re-running the carousel, premium home and banner art migrations changes nothing (idempotent)", async () => {
     const before = await slides();
     const banners = await all(`select placement, title, sort_order from banners order by placement, sort_order`);
-    for (const name of ["home_carousel", "premium_home"]) {
+    for (const name of ["home_carousel", "premium_home", "authored_banners"]) {
       const file = readdirSync(path.join(process.cwd(), "supabase", "migrations")).find((f) => f.includes(name))!;
       await db.exec(readFileSync(path.join(process.cwd(), "supabase", "migrations", file), "utf8"));
     }

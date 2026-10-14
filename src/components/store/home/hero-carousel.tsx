@@ -27,7 +27,9 @@ function usePrefersReducedMotion() {
  * Home banner (mockup): wide rosé banner, copy on the left, photo or product on the right.
  * Crossfade between slides; autoplay pauses on hover, focus, off-screen, on request and for
  * reduced motion. Campaign photos dissolve into the slide colour; slides without a photo show
- * the chosen product under a soft studio light.
+ * the chosen product under a soft studio light. "Full" slides show finished art (logo and
+ * copy already in the image) whole and clickable; their copy stays for screen readers and,
+ * on phones, below the image.
  */
 export function HeroCarousel({ slides }: { slides: Banner[] }) {
   const count = slides.length;
@@ -95,6 +97,9 @@ export function HeroCarousel({ slides }: { slides: Banner[] }) {
           // copy rises in, one line after the other, when its slide becomes active
           const reveal = cn("transition duration-700 ease-out motion-reduce:transition-none", active ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0");
           const delay = (step: number) => ({ transitionDelay: active ? `${120 + step * 90}ms` : "0ms" });
+          const full = s.layout === "full" && Boolean(s.image_desktop_url);
+          // on phones the image comes first; on desktop full art hides the copy (it is in the image)
+          const desktopHidden = full ? "lg:hidden" : "";
           return (
             <div
               key={s.id}
@@ -109,23 +114,27 @@ export function HeroCarousel({ slides }: { slides: Banner[] }) {
               )}
               style={{ backgroundColor: s.background_color ?? DEFAULT_BG }}
             >
-              <div className="container-page relative z-10 flex items-center pb-8 pt-10 sm:pt-14 lg:h-full lg:py-0">
+              {full ? <FullArt slide={s} active={active} preload={i === 0} /> : null}
+              <div className={cn("container-page relative z-10 order-2 flex items-center pb-8 pt-7 sm:pt-10 lg:order-none", full ? "lg:absolute lg:p-0" : "lg:h-full lg:py-0")}>
                 <div className="max-w-[36rem] lg:pb-12">
                   {s.eyebrow ? (
-                    <p className={cn("mb-4 text-[0.6875rem] font-medium uppercase tracking-[0.22em] text-ink/70", reveal)} style={delay(0)}>
+                    <p className={cn("mb-4 text-[0.6875rem] font-medium uppercase tracking-[0.22em] text-ink/70", reveal, desktopHidden)} style={delay(0)}>
                       {s.eyebrow}
                     </p>
                   ) : null}
-                  <Heading className={cn("heading-display text-balance text-[2.25rem] leading-[1.06] sm:text-[2.75rem] lg:text-[3.25rem] xl:text-[3.5rem]", reveal)} style={delay(1)}>
+                  <Heading
+                    className={cn("heading-display text-balance text-[2.25rem] leading-[1.06] sm:text-[2.75rem] lg:text-[3.25rem] xl:text-[3.5rem]", reveal, full && "lg:sr-only")}
+                    style={delay(1)}
+                  >
                     {s.title}
                   </Heading>
                   {s.subtitle ? (
-                    <p className={cn("mt-4 max-w-[27rem] text-[0.9375rem] leading-relaxed text-ink/75 sm:text-base", reveal)} style={delay(2)}>
+                    <p className={cn("mt-4 max-w-[27rem] text-[0.9375rem] leading-relaxed text-ink/75 sm:text-base", reveal, desktopHidden)} style={delay(2)}>
                       {s.subtitle}
                     </p>
                   ) : null}
                   {(s.cta_label && s.cta_href) || (s.cta2_label && s.cta2_href) ? (
-                    <div className={cn("mt-7 flex flex-col gap-3 sm:flex-row", reveal)} style={delay(3)}>
+                    <div className={cn("mt-7 flex flex-col gap-3 sm:flex-row", reveal, desktopHidden)} style={delay(3)}>
                       {s.cta_label && s.cta_href ? (
                         <Link href={s.cta_href} className={buttonClasses("primary", "md", "group/cta h-12 gap-3 px-7")}>
                           {s.cta_label} <ArrowRight className="h-4 w-4 transition-transform group-hover/cta:translate-x-0.5" strokeWidth={1.75} />
@@ -140,7 +149,7 @@ export function HeroCarousel({ slides }: { slides: Banner[] }) {
                   ) : null}
                 </div>
               </div>
-              <SlideVisual slide={s} active={active} preload={i === 0} />
+              {full ? null : <SlideVisual slide={s} active={active} preload={i === 0} />}
             </div>
           );
         })}
@@ -149,9 +158,10 @@ export function HeroCarousel({ slides }: { slides: Banner[] }) {
       {multiple ? (
         <>
           {/* desktop: under the copy, as in the mockup */}
-          <div className="pointer-events-none absolute inset-x-0 bottom-8 z-20 hidden lg:block">
+          <div className="pointer-events-none absolute inset-x-0 bottom-5 z-20 hidden lg:block">
             <div className="container-page">
-              <div className="pointer-events-auto flex w-fit items-center gap-5">
+              {/* a light pill keeps the controls legible over photos and finished art */}
+              <div className="pointer-events-auto flex w-fit items-center gap-4 rounded-full bg-paper/80 py-1 pl-4 pr-2 backdrop-blur-sm">
                 <Indicators {...controls} />
                 <Arrows onPrev={() => go(-1)} onNext={() => go(1)} />
                 {!reduced ? <PauseButton playing={playing} onToggle={() => setPlaying((p) => !p)} /> : null}
@@ -172,11 +182,28 @@ export function HeroCarousel({ slides }: { slides: Banner[] }) {
   );
 }
 
+/** Finished banner art (16:9): shown whole, centred, edges dissolving into the slide colour. */
+function FullArt({ slide: s, active, preload }: { slide: Banner; active: boolean; preload: boolean }) {
+  return (
+    <Link
+      href={s.cta_href ?? "/produtos"}
+      aria-label={s.cta_label ? `${s.cta_label}: ${s.title}` : s.title}
+      className="relative order-1 block aspect-video w-full overflow-hidden lg:absolute lg:inset-0 lg:flex lg:aspect-auto lg:items-center lg:justify-center"
+    >
+      <span className="relative block h-full w-full lg:aspect-video lg:w-auto lg:[mask-image:linear-gradient(to_right,transparent,#000_7%,#000_93%,transparent)]">
+        <span className={cn("absolute inset-0 transition-transform duration-[7000ms] ease-out motion-reduce:transition-none", active ? "scale-100" : "scale-[1.02]")}>
+          <Image src={s.image_desktop_url!} alt={s.image_alt ?? s.title} fill preload={preload} sizes="(min-width: 1024px) 75vw, 100vw" className="object-cover" />
+        </span>
+      </span>
+    </Link>
+  );
+}
+
 function SlideVisual({ slide: s, active, preload }: { slide: Banner; active: boolean; preload: boolean }) {
   const motion = cn("transition-transform duration-[7000ms] ease-out motion-reduce:transition-none", active ? "scale-100" : "scale-[1.04]");
   if (s.image_desktop_url) {
     return (
-      <div className="relative aspect-square w-full overflow-hidden sm:aspect-[16/11] lg:absolute lg:inset-y-0 lg:right-0 lg:aspect-auto lg:w-[min(56%,calc(var(--hero-h)*1.18))] lg:[mask-image:linear-gradient(to_right,transparent,#000_34%)]">
+      <div className="relative order-1 aspect-square w-full overflow-hidden sm:aspect-[16/11] lg:absolute lg:inset-y-0 lg:right-0 lg:aspect-auto lg:w-[min(56%,calc(var(--hero-h)*1.18))] lg:[mask-image:linear-gradient(to_right,transparent,#000_34%)]">
         <div className={cn("absolute inset-0", motion)}>
           {s.image_mobile_url ? (
             <>
@@ -193,7 +220,7 @@ function SlideVisual({ slide: s, active, preload }: { slide: Banner; active: boo
   const image = s.product?.image;
   if (!image) return null;
   return (
-    <div className="relative aspect-[5/4] w-full overflow-hidden lg:absolute lg:inset-y-0 lg:right-0 lg:aspect-auto lg:w-[52%]">
+    <div className="relative order-1 aspect-video w-full overflow-hidden lg:absolute lg:inset-y-0 lg:right-0 lg:aspect-auto lg:w-[52%]">
       {/* studio light: the product photo (white background) blends into it */}
       <div
         aria-hidden="true"

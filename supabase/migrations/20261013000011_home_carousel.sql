@@ -5,7 +5,9 @@
 -- 1. Brand slide: the original "Sua pele, seu ritual." banner gets the photo (or is created if it was changed)
 do $$
 begin
-  if not exists (select 1 from public.banners where image_desktop_url = '/banners/home-ritual-aparelho-luz.webp') then
+  -- skipped once the owner's own art replaced these photos (migration 013)
+  if not exists (select 1 from public.banners where image_desktop_url = '/banners/home-ritual-aparelho-luz.webp')
+     and not exists (select 1 from public.banners where image_desktop_url like '/banners/home-mivora-%') then
     update public.banners
        set image_desktop_url = '/banners/home-ritual-aparelho-luz.webp',
            image_alt = 'Modelo com a pele luminosa usando um aparelho facial de luz na bochecha',
@@ -39,4 +41,5 @@ select v.* from (values
    'Ver produto', '/produtos/medicube-collagen-jelly-cream', '/banners/home-medicube-collagen-jelly-cream.webp',
    'Modelo com a pele luminosa, apoiada ao lado do pote do Medicube Collagen Jelly Cream', 4)
 ) as v(placement, eyebrow, title, subtitle, cta_label, cta_href, image_desktop_url, image_alt, sort_order)
-where not exists (select 1 from public.banners b where b.image_desktop_url = v.image_desktop_url);
+where not exists (select 1 from public.banners b where b.image_desktop_url = v.image_desktop_url)
+  and not exists (select 1 from public.banners b where b.image_desktop_url like '/banners/home-mivora-%');
