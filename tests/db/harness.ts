@@ -26,10 +26,10 @@ export async function createTestDb() {
 
 export type TestDb = Awaited<ReturnType<typeof createTestDb>>;
 
-/** Runs `fn` as an API role (anon or an authenticated user), like PostgREST does. */
+/** Runs `fn` as an API role (anon, an authenticated user or the server's service_role), like PostgREST does. */
 export async function asRole<T>(
   db: TestDb,
-  role: "anon" | "authenticated",
+  role: "anon" | "authenticated" | "service_role",
   userId: string | null,
   fn: () => Promise<T>,
 ): Promise<T> {

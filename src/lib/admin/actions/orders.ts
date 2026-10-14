@@ -5,6 +5,7 @@ import { z } from "zod";
 import { dbErrorMessage, fail, formString, success, type ActionState } from "@/lib/admin/action-state";
 import { requireAdminAction } from "@/lib/admin/auth";
 import { TAGS } from "@/lib/catalog/tags";
+import { syncOrderPayments } from "@/lib/payments/mercadopago";
 
 const STATUSES = ["started", "awaiting_contact", "negotiating", "confirmed", "completed", "cancelled"] as const;
 
@@ -22,6 +23,27 @@ export async function changeOrderStatus(_: ActionState, formData: FormData): Pro
   // Stock and best sellers may have changed
   updateTag(TAGS.catalog);
   return success("Status atualizado.");
+}
+
+/** Reads the order's payments from the Mercado Pago API again (e.g. a notification that never arrived). */
+export async function refreshOrderPayment(_: ActionState, formData: FormData): Promise<ActionState> {
+  await requireAdminAction();
+  const orderId = z.uuid().safeParse(formData.get("orderId"));
+  if (!orderId.success) return fail("Pedido inválido.");
+  try {
+    const result = await syncOrderPayments(orderId.data);
+    if (!result.ok) {
+      return fail(
+        result.reason === "not_configured"
+          ? "Pagamento online não configurado no servidor (credenciais do Mercado Pago e do Supabase)."
+          : "Nenhum pagamento deste pedido foi encontrado no Mercado Pago.",
+      );
+    }
+    if (result.changed) updateTag(TAGS.catalog);
+    return success(result.changed ? "Situação do pagamento atualizada." : "Nenhuma novidade no Mercado Pago.");
+  } catch {
+    return fail("Não foi possível consultar o Mercado Pago agora. Tente novamente em instantes.");
+  }
 }
 
 export async function saveOrderNotes(_: ActionState, formData: FormData): Promise<ActionState> {

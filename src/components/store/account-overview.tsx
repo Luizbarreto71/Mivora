@@ -126,15 +126,21 @@ export function AccountOverview() {
                     <p className="font-semibold tabular-nums">{o.code}</p>
                     <p className="text-xs text-muted">{dateFormat.format(new Date(o.at))}</p>
                   </div>
-                  <a href={o.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-xs font-semibold underline underline-offset-4">
-                    <WhatsAppIcon className="h-3.5 w-3.5" /> Abrir conversa do pedido <ExternalLink className="h-3 w-3" />
-                  </a>
+                  {o.url.startsWith("/") ? (
+                    <Link href={o.url} className="inline-flex items-center gap-2 text-xs font-semibold underline underline-offset-4">
+                      Ver pedido e pagamento
+                    </Link>
+                  ) : (
+                    <a href={o.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 text-xs font-semibold underline underline-offset-4">
+                      <WhatsAppIcon className="h-3.5 w-3.5" /> Abrir conversa do pedido <ExternalLink className="h-3 w-3" />
+                    </a>
+                  )}
                 </li>
               ))}
             </ul>
           )}
           <p className="border-t border-line px-5 py-4 text-xs leading-relaxed text-muted">
-            A situação de cada pedido (confirmação, pagamento e entrega) é informada pela nossa equipe no WhatsApp. Este histórico fica salvo apenas neste navegador.
+            Pedidos pagos pelo site mostram a situação do pagamento na página do pedido. Os demais são acompanhados pela nossa equipe no WhatsApp. Este histórico fica salvo apenas neste navegador.
           </p>
         </section>
       </div>

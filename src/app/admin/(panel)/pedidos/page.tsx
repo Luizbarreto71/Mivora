@@ -6,6 +6,7 @@ import { ORDER_STATUS_TONE } from "@/lib/admin/labels";
 import { formatBRL } from "@/lib/money";
 import { ORDER_STATUS_LABEL, type OrderStatus } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
+import { PAYMENT_STATUS_LABEL, type PaymentStatus } from "@/lib/payments/mercadopago-core";
 
 export const metadata: Metadata = { title: "Pedidos" };
 
@@ -20,7 +21,7 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ped
 
   let query = supabase
     .from("order_intents")
-    .select("id, code, status, item_count, subtotal_cents, has_unpriced_items, customer_name, customer_phone, source, created_at", { count: "exact" })
+    .select("id, code, status, item_count, subtotal_cents, has_unpriced_items, customer_name, customer_phone, source, created_at, payment_method, payment_status", { count: "exact" })
     .order("created_at", { ascending: false })
     .range((page - 1) * PAGE, page * PAGE - 1);
   if (status) query = query.eq("status", status);
@@ -84,6 +85,11 @@ export default async function OrdersPage({ searchParams }: PageProps<"/admin/ped
               </Td>
               <Td>
                 <StatusPill tone={ORDER_STATUS_TONE[o.status as OrderStatus]}>{ORDER_STATUS_LABEL[o.status as OrderStatus]}</StatusPill>
+                {o.payment_method === "mercadopago" ? (
+                  <p className={o.payment_status === "approved" ? "mt-1 text-xs font-semibold text-success" : "mt-1 text-xs text-muted"}>
+                    {PAYMENT_STATUS_LABEL[o.payment_status as PaymentStatus]} · online
+                  </p>
+                ) : null}
               </Td>
             </tr>
           ))}

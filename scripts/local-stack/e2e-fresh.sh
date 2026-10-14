@@ -37,6 +37,11 @@ case "${MELHOR_ENVIO_BASE_URL:-}" in
   http://localhost:*) ;;
   *) echo "Refusing to run E2E without the local Melhor Envio double"; exit 1 ;;
 esac
+# Payments must hit the local Mercado Pago double, never the real API
+case "${MERCADOPAGO_BASE_URL:-}" in
+  http://localhost:*) ;;
+  *) echo "Refusing to run E2E without the local Mercado Pago double"; exit 1 ;;
+esac
 npx next build > .next-build.log 2>&1 || { tail -40 .next-build.log; exit 1; }
 npx next start -p 3000 > .next-start.log 2>&1 &
 for i in $(seq 1 30); do

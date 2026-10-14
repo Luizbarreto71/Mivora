@@ -6,7 +6,9 @@ import { Checkbox, Field, Input, Select, Textarea } from "@/components/ui/form";
 import { deleteDeliveryZone, saveDeliveryZone, saveSettings } from "@/lib/admin/actions/content";
 import { requireAdmin } from "@/lib/admin/auth";
 import { DEFAULT_SETTINGS } from "@/lib/catalog/queries";
+import { SITE_URL } from "@/lib/env";
 import { centsToInput } from "@/lib/money";
+import { checkMercadoPago, mercadoPagoConfig } from "@/lib/payments/mercadopago";
 import { formatCep } from "@/lib/shipping/cep";
 import { checkMelhorEnvio, melhorEnvioConfig } from "@/lib/shipping/quote";
 import { formatCepRange } from "@/lib/shipping/zones";
@@ -79,6 +81,23 @@ export default async function SettingsPage() {
   const me = melhorEnvioConfig({ contact_email: v.contact_email ?? null });
   // live test quote, so an expired or revoked token shows up here
   const check = me.ready && v.shipping_origin_cep ? await checkMelhorEnvio({ ...DEFAULT_SETTINGS, ...v }) : null;
+  const mp = mercadoPagoConfig();
+  const mpCheck = mp.token ? await checkMercadoPago() : null;
+  const mpLines: { ok: boolean | null; text: string }[] = [
+    !mp.token
+      ? { ok: false, text: "Credencial do Mercado Pago (MERCADOPAGO_ACCESS_TOKEN) não configurada no servidor." }
+      : mpCheck?.ok
+        ? { ok: true, text: `Conectado ao Mercado Pago${mpCheck.nickname ? ` (conta ${mpCheck.nickname})` : ""}${mpCheck.test ? " — credencial de TESTE: pagamentos não são reais" : ""}.` }
+        : mpCheck && (mpCheck.status === 401 || mpCheck.status === 403)
+          ? { ok: false, text: "O Mercado Pago recusou a credencial (MERCADOPAGO_ACCESS_TOKEN). Confira se copiou o Access Token de produção da aplicação." }
+          : { ok: null, text: `Não foi possível testar a conexão com o Mercado Pago agora${mpCheck?.status ? ` (resposta ${mpCheck.status})` : ""}.` },
+    mp.serviceRole
+      ? { ok: true, text: "Chave de serviço do Supabase configurada (registra os pagamentos aprovados)." }
+      : { ok: false, text: "Chave de serviço do Supabase (SUPABASE_SERVICE_ROLE_KEY) não configurada: sem ela, o site não consegue registrar os pagamentos." },
+    mp.webhookSecret
+      ? { ok: true, text: "Assinatura dos avisos do Mercado Pago verificada (MERCADOPAGO_WEBHOOK_SECRET)." }
+      : { ok: null, text: "Recomendado: cadastre a chave secreta do webhook (MERCADOPAGO_WEBHOOK_SECRET) para recusar avisos falsificados." },
+  ];
   const carrier = !me.token
     ? {
         tone: "text-muted",
@@ -247,6 +266,39 @@ export default async function SettingsPage() {
                 <Input id="shipping_default_length_cm" name="shipping_default_length_cm" inputMode="numeric" defaultValue={v.shipping_default_length_cm ?? 16} />
               </Field>
             </div>
+          </div>
+        </Card>
+
+        <Card
+          title="Pagamento pelo site (Mercado Pago)"
+          description="O cliente paga com Pix, cartão de crédito ou boleto na página segura do Mercado Pago e volta para a página do pedido. A loja não recebe dados de cartão. Quando o pagamento é aprovado, o pedido é confirmado e o estoque é reservado automaticamente."
+        >
+          <div className="grid gap-5 sm:grid-cols-2">
+            <div className="space-y-2 sm:col-span-2">
+              <Checkbox name="online_payment_enabled" label="Oferecer pagamento pelo site (Pix, cartão e boleto)" defaultChecked={v.online_payment_enabled ?? false} />
+              {v.online_payment_enabled && !mp.ready ? <p className="text-xs text-warning">Ativado, mas só aparece na loja quando as credenciais abaixo estiverem configuradas no servidor.</p> : null}
+            </div>
+            <Field label="Parcelamento máximo no cartão" htmlFor="online_payment_max_installments" hint="Os juros seguem a configuração da sua conta Mercado Pago">
+              <Select id="online_payment_max_installments" name="online_payment_max_installments" defaultValue={String(v.online_payment_max_installments ?? 12)}>
+                {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
+                  <option key={n} value={n}>
+                    {n === 1 ? "À vista (1x)" : `Até ${n}x`}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <ul className="space-y-1.5 text-xs leading-relaxed sm:col-span-2">
+              {mpLines.map((l) => (
+                <li key={l.text} className={cn(l.ok === true ? "text-success" : l.ok === false ? "text-danger" : "text-warning")}>
+                  {l.ok === true ? "✓ " : l.ok === false ? "✕ " : "! "}
+                  {l.text}
+                </li>
+              ))}
+              <li className="text-muted">
+                Endereço de avisos (webhook), cadastrado no painel do Mercado Pago com o evento Pagamentos: <code className="break-all">{SITE_URL}/api/mercadopago/webhook</code>
+              </li>
+              <li className="text-muted">Pedidos com itens “Sob consulta” ou entrega “a combinar” continuam sendo finalizados pelo WhatsApp.</li>
+            </ul>
           </div>
         </Card>
 

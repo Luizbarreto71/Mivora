@@ -132,6 +132,9 @@ export type StoreSettings = {
   /** Thin black bar above the header (up to 4 short messages) */
   top_bar_messages: string[];
   newsletter_enabled: boolean;
+  /** Pay on the site through Mercado Pago Checkout Pro (also needs the server credentials) */
+  online_payment_enabled: boolean;
+  online_payment_max_installments: number;
   about_headline: string | null;
   about_text: string | null;
   whatsapp_section_title: string | null;

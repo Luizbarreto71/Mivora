@@ -65,6 +65,7 @@ function verifyJwt(token) {
   return payload;
 }
 const anonKey = signJwt({ role: "anon", iss: "mivora-local", iat: 1700000000, exp: 4102444800 });
+const serviceKey = signJwt({ role: "service_role", iss: "mivora-local", iat: 1700000000, exp: 4102444800 });
 
 // ---------------------------------------------------------------------------
 // Postgres
@@ -163,6 +164,41 @@ function testCarrierQuote(body) {
   ];
 }
 
+// Mercado Pago test doubles (Checkout Pro): preferences, a stand-in for the hosted checkout page,
+// payments and signed webhooks sent to the local site. Nothing here talks to Mercado Pago.
+const TEST_MP_TOKEN = "TEST-local-mercadopago";
+const TEST_MP_WEBHOOK_SECRET = "local-webhook-secret";
+const LOCAL_SITE = "http://localhost:3000";
+const mpPreferences = new Map();
+const mpPayments = new Map();
+let mpSeq = 90000000;
+const prefTotal = (body) =>
+  Math.round((body.items ?? []).reduce((s, i) => s + Math.round(Number(i.unit_price) * 100) * Number(i.quantity), 0) + Number(body.shipments?.cost ?? 0) * 100);
+async function notifyPayment(id) {
+  const requestId = randomUUID();
+  const ts = String(Date.now());
+  const v1 = createHmac("sha256", TEST_MP_WEBHOOK_SECRET).update(`id:${id};request-id:${requestId};ts:${ts};`).digest("hex");
+  try {
+    const r = await fetch(`${LOCAL_SITE}/api/mercadopago/webhook?data.id=${id}&type=payment`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-signature": `ts=${ts},v1=${v1}`, "x-request-id": requestId },
+      body: JSON.stringify({ action: "payment.updated", api_version: "v1", type: "payment", data: { id: String(id) } }),
+    });
+    return r.status;
+  } catch {
+    return 0;
+  }
+}
+function checkoutPage(id, pref) {
+  const total = (prefTotal(pref) / 100).toFixed(2).replace(".", ",");
+  const button = (outcome, label) =>
+    `<form method="post" action="/mercadopago/checkout/${id}/pay"><input type="hidden" name="outcome" value="${outcome}"><button type="submit">${label}</button></form>`;
+  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Mercado Pago (simulador local)</title></head><body>
+<h1>Mercado Pago — simulador local</h1><p>Pedido ${pref.metadata?.order_code ?? ""}</p><p>Total: R$ ${total}</p>
+${button("approved", "Aprovar pagamento com cartão")}${button("pending", "Pagar com Pix (fica pendente)")}${button("rejected", "Recusar pagamento")}
+</body></html>`;
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${cfg.gatewayPort}`);
   try {
@@ -207,6 +243,69 @@ const server = http.createServer(async (req, res) => {
       if (bearer(req) !== TEST_ME_TOKEN) return json(res, 401, { message: "Unauthenticated." });
       if (!/@/.test(req.headers["user-agent"] ?? "")) return json(res, 400, { message: "User-Agent must contain a contact e-mail." });
       return json(res, 200, testCarrierQuote(JSON.parse((await readBody(req)).toString() || "{}")));
+    }
+    // Mercado Pago test doubles
+    if (url.pathname.startsWith("/mercadopago/")) {
+      const mpPath = url.pathname.slice("/mercadopago".length);
+      const page = mpPath.match(/^\/checkout\/(pref-[0-9a-f-]+)$/);
+      if (page && req.method === "GET") {
+        const pref = mpPreferences.get(page[1]);
+        if (!pref) return json(res, 404, { message: "preference not found" });
+        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        return res.end(checkoutPage(page[1], pref));
+      }
+      const pay = mpPath.match(/^\/checkout\/(pref-[0-9a-f-]+)\/pay$/);
+      if (pay && req.method === "POST") {
+        const pref = mpPreferences.get(pay[1]);
+        if (!pref) return json(res, 404, { message: "preference not found" });
+        const outcome = new URLSearchParams((await readBody(req)).toString()).get("outcome");
+        const now = new Date().toISOString();
+        const payment = {
+          id: ++mpSeq,
+          status: outcome === "approved" ? "approved" : outcome === "pending" ? "pending" : "rejected",
+          status_detail: outcome === "approved" ? "accredited" : outcome === "pending" ? "pending_waiting_transfer" : "cc_rejected_insufficient_amount",
+          payment_type_id: outcome === "pending" ? "bank_transfer" : "credit_card",
+          transaction_amount: prefTotal(pref) / 100,
+          shipping_amount: Number(pref.shipments?.cost ?? 0),
+          external_reference: pref.external_reference,
+          date_created: now,
+          date_last_updated: now,
+        };
+        mpPayments.set(String(payment.id), payment);
+        if (outcome !== "pending") await notifyPayment(payment.id);
+        const back = pref.back_urls?.[outcome === "approved" ? "success" : outcome === "pending" ? "pending" : "failure"];
+        const qs = new URLSearchParams({ payment_id: String(payment.id), collection_id: String(payment.id), status: payment.status, collection_status: payment.status, external_reference: pref.external_reference, preference_id: pay[1] });
+        res.writeHead(302, { location: `${back}?${qs}` });
+        return res.end();
+      }
+      // test hook: a pending Pix is paid later and Mercado Pago notifies the site
+      const approve = mpPath.match(/^\/test\/payments\/([0-9]+)\/approve$/);
+      if (approve && req.method === "POST") {
+        const payment = mpPayments.get(approve[1]);
+        if (!payment) return json(res, 404, { message: "payment not found" });
+        Object.assign(payment, { status: "approved", status_detail: "accredited", date_last_updated: new Date().toISOString() });
+        return json(res, 200, { webhook: await notifyPayment(payment.id) });
+      }
+      if (bearer(req) !== TEST_MP_TOKEN) return json(res, 401, { message: "invalid access token", status: 401 });
+      if (mpPath === "/checkout/preferences" && req.method === "POST") {
+        const body = JSON.parse((await readBody(req)).toString() || "{}");
+        if (!Array.isArray(body.items) || body.items.length === 0 || !body.external_reference) return json(res, 400, { message: "invalid preference", status: 400 });
+        if (body.auto_return && !/^https:/.test(body.back_urls?.success ?? "")) return json(res, 400, { message: "auto_return invalid. back_url.success must be defined", status: 400 });
+        const id = `pref-${randomUUID()}`;
+        mpPreferences.set(id, body);
+        return json(res, 201, { id, init_point: `http://localhost:${cfg.gatewayPort}/mercadopago/checkout/${id}`, external_reference: body.external_reference });
+      }
+      if (mpPath === "/v1/payments/search" && req.method === "GET") {
+        const ref = url.searchParams.get("external_reference");
+        return json(res, 200, { results: [...mpPayments.values()].filter((p) => p.external_reference === ref), paging: { total: 0 } });
+      }
+      const paymentGet = mpPath.match(/^\/v1\/payments\/([0-9]+)$/);
+      if (paymentGet && req.method === "GET") {
+        const payment = mpPayments.get(paymentGet[1]);
+        return payment ? json(res, 200, payment) : json(res, 404, { message: "Payment not found", status: 404 });
+      }
+      if (mpPath === "/users/me") return json(res, 200, { id: 1, nickname: "MIVORA-TESTE", site_id: "MLB", tags: ["test_user", "normal"] });
+      return json(res, 404, { message: `No Mercado Pago double for ${req.method} ${mpPath}` });
     }
     // Storage
     const pub = url.pathname.match(/^\/storage\/v1\/object\/public\/([^/]+)\/(.+)$/);
@@ -254,7 +353,9 @@ writeFileSync(
   path.join(stateDir, "local.env"),
   `export NEXT_PUBLIC_SUPABASE_URL=http://localhost:${cfg.gatewayPort}\nexport NEXT_PUBLIC_SUPABASE_ANON_KEY=${anonKey}\nexport NEXT_PUBLIC_SITE_URL=http://localhost:3000\n` +
     // shipping calculator against the test doubles above (never the real services)
-    `export CEP_API_URL=http://localhost:${cfg.gatewayPort}/viacep\nexport MELHOR_ENVIO_BASE_URL=http://localhost:${cfg.gatewayPort}/melhor-envio\nexport MELHOR_ENVIO_TOKEN=${TEST_ME_TOKEN}\nexport MELHOR_ENVIO_EMAIL=loja@example.com\n`,
+    `export CEP_API_URL=http://localhost:${cfg.gatewayPort}/viacep\nexport MELHOR_ENVIO_BASE_URL=http://localhost:${cfg.gatewayPort}/melhor-envio\nexport MELHOR_ENVIO_TOKEN=${TEST_ME_TOKEN}\nexport MELHOR_ENVIO_EMAIL=loja@example.com\n` +
+    // online payments against the Mercado Pago doubles; the service role key is the local one
+    `export MERCADOPAGO_BASE_URL=http://localhost:${cfg.gatewayPort}/mercadopago\nexport MERCADOPAGO_ACCESS_TOKEN=${TEST_MP_TOKEN}\nexport MERCADOPAGO_WEBHOOK_SECRET=${TEST_MP_WEBHOOK_SECRET}\nexport SUPABASE_SERVICE_ROLE_KEY=${serviceKey}\n`,
 );
 
 // .env.local for the Next.js app

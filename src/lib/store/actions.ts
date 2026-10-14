@@ -1,7 +1,9 @@
 "use server";
 
+import { headers } from "next/headers";
 import { z } from "zod";
 import { getKits, getProductsByIds, getStoreSettings } from "@/lib/catalog/queries";
+import { mercadoPagoConfig, openCheckout } from "@/lib/payments/mercadopago";
 import { getPublicSupabase } from "@/lib/supabase/public";
 import { lineKey } from "@/lib/cart/math";
 import { destinationLabel, normalizeCep } from "@/lib/shipping/cep";
@@ -158,6 +160,10 @@ const ERROR_MESSAGES: Record<string, string> = {
   invalid_cep: "CEP inválido. Confira os números",
   invalid_shipping: "Não foi possível validar a entrega escolhida. Calcule o frete novamente",
   delivery_zone_unavailable: "A opção de entrega escolhida não atende este CEP. Calcule o frete novamente",
+  invalid_payment_method: "Forma de pagamento inválida",
+  online_payment_disabled: "O pagamento pelo site não está disponível no momento. Você pode finalizar pelo WhatsApp",
+  online_payment_unavailable: "Há itens com preço sob consulta no carrinho. Para eles, finalize pelo WhatsApp",
+  delivery_required: "Para pagar pelo site, escolha uma entrega com valor definido (calcule o frete pelo CEP)",
 };
 
 function describeRpcError(message: string) {
@@ -167,21 +173,31 @@ function describeRpcError(message: string) {
   return detail ? `${base}: ${detail.trim()}.` : `${base}.`;
 }
 
-/**
- * Registers an order intent (server-side prices) and returns the WhatsApp link.
- * An intent is not a sale: stock only moves when the store confirms it.
- */
-export async function submitOrder(input: unknown): Promise<CheckoutResult> {
+type OrderRpcResult = {
+  id: string;
+  code: string;
+  subtotal_cents: number;
+  discount_cents: number;
+  coupon_code: string | null;
+  discount_percent: number | null;
+  has_unpriced_items: boolean;
+  amount_due_cents: number | null;
+  delivery: { name: string; method: DeliveryMethod; fee_cents: number | null; estimate: string | null } | null;
+  destination: { cep: string; city: string | null; uf: string | null } | null;
+  items: { name: string; brand: string | null; code: string | null; quantity: number; unit_price_cents: number | null; line_total_cents: number | null }[];
+};
+
+type Registered = { ok: true; data: z.infer<typeof checkoutSchema>; r: OrderRpcResult } | { ok: false; error: string; retryable: boolean };
+
+/** Validates the cart, quotes the delivery again and registers the order with server-side prices. */
+async function registerOrder(input: unknown, paymentMethod: "whatsapp" | "mercadopago"): Promise<Registered> {
   const parsed = checkoutSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Dados inválidos.", retryable: false };
   }
   const data = parsed.data;
   const sb = getPublicSupabase();
-  const settings = await getStoreSettings();
-  const number = normalizeWhatsAppNumber(settings.whatsapp_number);
   if (!sb) return { ok: false, error: "A loja ainda não está conectada ao banco de dados.", retryable: false };
-  if (!number) return { ok: false, error: "O WhatsApp da loja ainda não foi configurado.", retryable: false };
 
   // Delivery chosen in the CEP calculator: quoted again here, never trusted from the browser
   let deliveryZoneId = data.deliveryZoneId ?? null;
@@ -205,6 +221,7 @@ export async function submitOrder(input: unknown): Promise<CheckoutResult> {
     p_coupon_code: data.couponCode || null,
     p_shipping: shipping,
     p_customer: data.customer,
+    p_payment_method: paymentMethod,
   });
 
   if (error) {
@@ -213,18 +230,21 @@ export async function submitOrder(input: unknown): Promise<CheckoutResult> {
     console.error("[checkout] create_order_intent failed", error.message);
     return { ok: false, error: "Não foi possível registrar o pedido agora.", retryable: true };
   }
+  return { ok: true, data, r: result as OrderRpcResult };
+}
 
-  const r = result as {
-    code: string;
-    subtotal_cents: number;
-    discount_cents: number;
-    coupon_code: string | null;
-    discount_percent: number | null;
-    has_unpriced_items: boolean;
-    delivery: { name: string; method: DeliveryMethod; fee_cents: number | null; estimate: string | null } | null;
-    destination: { cep: string; city: string | null; uf: string | null } | null;
-    items: { name: string; brand: string | null; code: string | null; quantity: number; unit_price_cents: number | null; line_total_cents: number | null }[];
-  };
+/**
+ * Registers an order intent (server-side prices) and returns the WhatsApp link.
+ * An intent is not a sale: stock only moves when the store confirms it.
+ */
+export async function submitOrder(input: unknown): Promise<CheckoutResult> {
+  const settings = await getStoreSettings();
+  const number = normalizeWhatsAppNumber(settings.whatsapp_number);
+  if (!number) return { ok: false, error: "O WhatsApp da loja ainda não foi configurado.", retryable: false };
+
+  const registered = await registerOrder(input, "whatsapp");
+  if (!registered.ok) return registered;
+  const { data, r } = registered;
 
   const destination = r.destination ? destinationLabel(r.destination) : null;
   const { url, summarized } = buildOrderWhatsAppLink(number, {
@@ -258,5 +278,57 @@ export async function submitOrder(input: unknown): Promise<CheckoutResult> {
     subtotalCents: r.subtotal_cents,
     discountCents: r.discount_cents ?? 0,
     hasUnpricedItems: r.has_unpriced_items,
+  };
+}
+
+export type OnlineCheckoutResult =
+  | { ok: true; code: string; orderUrl: string; checkoutUrl: string | null }
+  | { ok: false; error: string; retryable: boolean };
+
+/**
+ * Pay on the site: registers the order (total = products − discount + delivery, all computed by the
+ * database) and opens the Mercado Pago checkout. The order is confirmed only when Mercado Pago approves.
+ */
+export async function startOnlinePayment(input: unknown): Promise<OnlineCheckoutResult> {
+  const settings = await getStoreSettings();
+  if (!settings.online_payment_enabled || !mercadoPagoConfig().ready) {
+    return { ok: false, error: "O pagamento pelo site não está disponível no momento. Você pode finalizar pelo WhatsApp.", retryable: false };
+  }
+  const registered = await registerOrder(input, "mercadopago");
+  if (!registered.ok) return registered;
+  const checkout = await openCheckout(registered.r.id);
+  return { ok: true, code: registered.r.code, orderUrl: `/pedido/${registered.r.id}`, checkoutUrl: checkout.ok ? checkout.url : null };
+}
+
+// per-IP limit for opening checkouts again from the order page
+const payHits = new Map<string, { count: number; reset: number }>();
+function allowPay(ip: string) {
+  const now = Date.now();
+  const entry = payHits.get(ip);
+  if (!entry || entry.reset < now) {
+    if (payHits.size > 5000) payHits.clear();
+    payHits.set(ip, { count: 1, reset: now + 60_000 });
+    return true;
+  }
+  entry.count += 1;
+  return entry.count <= 10;
+}
+
+/** "Pagar agora" / "Tentar novamente" on the order page. */
+export async function payOrder(orderId: unknown): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  const id = z.uuid().safeParse(orderId);
+  if (!id.success) return { ok: false, error: "Pedido inválido." };
+  const ip = (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
+  if (!allowPay(ip)) return { ok: false, error: "Muitas tentativas seguidas. Aguarde um minuto e tente de novo." };
+  const result = await openCheckout(id.data);
+  if (result.ok) return result;
+  return {
+    ok: false,
+    error:
+      result.reason === "expired"
+        ? "O prazo para pagar este pedido terminou. Faça um novo pedido ou fale com a gente pelo WhatsApp."
+        : result.reason === "not_payable"
+          ? "Este pedido não está aguardando pagamento."
+          : "Não foi possível abrir o pagamento agora. Tente novamente em instantes.",
   };
 }

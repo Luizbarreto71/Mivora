@@ -353,6 +353,8 @@ export async function saveSettings(_: ActionState, fd: FormData): Promise<Action
   if (!shippingExtra.ok || (shippingExtra.value ?? 0) > 100000) return fail("Valor fixo por envio inválido. Ex.: 3,50");
   const maxCarriers = formInt(fd, "shipping_max_carrier_options", 4);
   if (maxCarriers < 0 || maxCarriers > 20) return fail("O máximo de opções de transportadora deve ficar entre 0 e 20.");
+  const maxInstallments = formInt(fd, "online_payment_max_installments", 12);
+  if (maxInstallments < 1 || maxInstallments > 12) return fail("O parcelamento máximo deve ficar entre 1x e 12x.");
   const defaultWeight = formInt(fd, "shipping_default_weight_g", 300);
   if (defaultWeight < 1 || defaultWeight > 30000) return fail("O peso padrão deve ficar entre 1 g e 30.000 g.");
   const [defaultHeight, defaultWidth, defaultLength] = [
@@ -411,6 +413,8 @@ export async function saveSettings(_: ActionState, fd: FormData): Promise<Action
       shipping_default_length_cm: defaultLength,
       top_bar_messages: topBar,
       newsletter_enabled: formBool(fd, "newsletter_enabled"),
+      online_payment_enabled: formBool(fd, "online_payment_enabled"),
+      online_payment_max_installments: maxInstallments,
       about_headline: formNullable(fd, "about_headline"),
       about_text: formNullable(fd, "about_text"),
       whatsapp_section_title: formNullable(fd, "whatsapp_section_title"),

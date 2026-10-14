@@ -19,7 +19,7 @@ import { useStoreConfig } from "../store-config";
 export function BuyBox({ product }: { product: ProductDetail }) {
   const { add, close } = useCart();
   const router = useRouter();
-  const { whatsappNumber, whatsappGreeting, deliverySummary, businessHours, siteUrl, comingSoonInquiry, welcomeOffer, shippingCalculator } = useStoreConfig();
+  const { whatsappNumber, whatsappGreeting, deliverySummary, businessHours, siteUrl, comingSoonInquiry, welcomeOffer, shippingCalculator, onlinePayment } = useStoreConfig();
   const [variantId, setVariantId] = useState<string | null>(product.variants[0]?.id ?? null);
   const [quantity, setQuantity] = useState(1);
   const [showSticky, setShowSticky] = useState(false);
@@ -135,7 +135,15 @@ export function BuyBox({ product }: { product: ProductDetail }) {
         ) : null}
         {isAvailable && !comingSoon ? (
           <button type="button" onClick={buyNow} className={buttonClasses("outline", "lg", "w-full")}>
-            <WhatsAppIcon className="h-4 w-4" /> Comprar pelo WhatsApp
+            {onlinePayment ? (
+              <>
+                <CreditCard className="h-4 w-4" strokeWidth={1.75} /> Comprar agora
+              </>
+            ) : (
+              <>
+                <WhatsAppIcon className="h-4 w-4" /> Comprar pelo WhatsApp
+              </>
+            )}
           </button>
         ) : whatsappHref ? (
           <a href={whatsappHref} target="_blank" rel="noopener noreferrer" className={buttonClasses("primary", "lg", "w-full")}>
@@ -169,11 +177,11 @@ export function BuyBox({ product }: { product: ProductDetail }) {
         </li>
         <li className="flex gap-3">
           <Check className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.5} />
-          <span>Cadastro rápido, sem senha, e finalização com atendimento humano pelo WhatsApp.</span>
+          <span>{onlinePayment ? "Cadastro rápido, sem senha. Se preferir, finalize com atendimento humano pelo WhatsApp." : "Cadastro rápido, sem senha, e finalização com atendimento humano pelo WhatsApp."}</span>
         </li>
         <li className="flex gap-3">
           <CreditCard className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.5} />
-          <span>Pagamento combinado no atendimento, depois da confirmação do pedido.</span>
+          <span>{onlinePayment ? "Pague pelo site com Pix, cartão ou boleto (Mercado Pago), ou combine o pagamento no atendimento." : "Pagamento combinado no atendimento, depois da confirmação do pedido."}</span>
         </li>
         {businessHours ? (
           <li className="flex gap-3">

@@ -15,6 +15,8 @@ export type StoreConfig = {
   welcomeOffer: { code: string; percent: number } | null;
   /** CEP shipping calculator (product page, cart, checkout) */
   shippingCalculator: boolean;
+  /** Pay on the site (Mercado Pago): enabled in the admin and credentials present on the server */
+  onlinePayment: boolean;
 };
 
 const StoreConfigContext = createContext<StoreConfig>({
@@ -26,6 +28,7 @@ const StoreConfigContext = createContext<StoreConfig>({
   comingSoonInquiry: false,
   welcomeOffer: null,
   shippingCalculator: false,
+  onlinePayment: false,
 });
 
 export function StoreConfigProvider({ value, children }: { value: StoreConfig; children: ReactNode }) {

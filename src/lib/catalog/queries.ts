@@ -67,6 +67,8 @@ export const DEFAULT_SETTINGS: StoreSettings = {
   shipping_max_carrier_options: 4,
   top_bar_messages: ["Skincare coreano e cosméticos importados", "Frete e prazo calculados pelo CEP", "Atendimento via WhatsApp"],
   newsletter_enabled: true,
+  online_payment_enabled: false,
+  online_payment_max_installments: 12,
   about_headline: null,
   about_text: null,
   whatsapp_section_title: null,

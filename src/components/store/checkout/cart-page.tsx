@@ -14,7 +14,7 @@ import { useStoreConfig } from "../store-config";
 
 export function CartPageContent() {
   const { lines, totals, hydrated, clear } = useCart();
-  const { shippingCalculator } = useStoreConfig();
+  const { shippingCalculator, onlinePayment } = useStoreConfig();
   const [, setShippingQuote] = useState<ShippingQuote | null>(null);
   const [shippingOption, setShippingOption] = useState<ShippingOption | null>(null);
   useCartRefresh(true);
@@ -95,14 +95,20 @@ export function CartPageContent() {
           <div className="mt-7">
             {canCheckout ? (
               <Link href="/finalizar" className={buttonClasses("primary", "lg", "w-full")}>
-                <WhatsAppIcon className="h-4 w-4" /> Finalizar pelo WhatsApp
+                {onlinePayment ? "Finalizar compra" : (
+                  <>
+                    <WhatsAppIcon className="h-4 w-4" /> Finalizar pelo WhatsApp
+                  </>
+                )}
               </Link>
             ) : (
               <p className="text-sm text-danger">Remova os itens indisponíveis para finalizar o pedido.</p>
             )}
           </div>
           <p className="mt-4 text-xs leading-relaxed text-muted">
-            Ao finalizar, abriremos uma conversa no WhatsApp com a lista do seu pedido. A compra é confirmada pela nossa equipe.
+            {onlinePayment
+              ? "Na finalização, você paga pelo site com Pix, cartão ou boleto (Mercado Pago) ou, se preferir, envia o pedido para a nossa equipe pelo WhatsApp."
+              : "Ao finalizar, abriremos uma conversa no WhatsApp com a lista do seu pedido. A compra é confirmada pela nossa equipe."}
           </p>
         </aside>
       </div>

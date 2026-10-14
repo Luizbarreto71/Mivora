@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Loader2, Tag, UserRound, X } from "lucide-react";
+import { Check, CreditCard, Loader2, Tag, UserRound, X } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState, useTransition } from "react";
@@ -11,7 +11,7 @@ import { deliveryQuote, lineTotal } from "@/lib/cart/math";
 import { formatBRL } from "@/lib/money";
 import { destinationLabel } from "@/lib/shipping/cep";
 import type { ShippingOption, ShippingQuote } from "@/lib/shipping/types";
-import { submitOrder } from "@/lib/store/actions";
+import { startOnlinePayment, submitOrder } from "@/lib/store/actions";
 import { formatBrPhone, readDeviceCustomer, type CustomerProfile } from "@/lib/store/customer";
 import { rememberDeviceOrder } from "@/lib/store/order-history";
 import { clearCoupon, saveCoupon, savedCoupon } from "@/lib/store/welcome";
@@ -43,7 +43,7 @@ export function CheckoutForm({
   freeShippingThresholdCents: number | null;
 }) {
   const { lines, totals, hydrated, clear } = useCart();
-  const { whatsappNumber, whatsappGreeting, welcomeOffer } = useStoreConfig();
+  const { whatsappNumber, whatsappGreeting, welcomeOffer, onlinePayment } = useStoreConfig();
   useCartRefresh(true);
 
   const [zoneId, setZoneId] = useState<string | null>(zones.length === 1 ? zones[0].id : null);
@@ -54,6 +54,8 @@ export function CheckoutForm({
   const [customerChecked, setCustomerChecked] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState(false);
   const [notes, setNotes] = useState("");
+  // pay on the site (Mercado Pago) or finish with the team on WhatsApp
+  const [payWith, setPayWith] = useState<"online" | "whatsapp">("online");
   const [coupon, setCoupon] = useState("");
   const [couponDraft, setCouponDraft] = useState("");
   const [couponError, setCouponError] = useState<string | null>(null);
@@ -119,7 +121,19 @@ export function CheckoutForm({
       ? quote.feeCents
       : null;
   const needsShippingChoice = calculatorEnabled && shippingQuote != null && shippingOption == null;
-  const deliveryText = deliveryFeeCents == null ? (needsShippingChoice ? "Escolha uma opção" : "A combinar") : deliveryFeeCents === 0 ? "Grátis*" : `${formatBRL(deliveryFeeCents)}*`;
+  // paying on the site needs a known total: every item priced and a delivery with a defined fee
+  const onlineBlocker = !onlinePayment
+    ? null
+    : totals.hasUnpricedItems
+      ? "Há itens com preço sob consulta no carrinho. Para eles, finalize pelo WhatsApp."
+      : deliveryFeeCents == null
+        ? calculatorEnabled
+          ? "Calcule o frete pelo CEP e escolha uma entrega com valor definido para pagar pelo site."
+          : "Escolha uma opção de entrega com valor definido para pagar pelo site."
+        : null;
+  const online = onlinePayment && !onlineBlocker && payWith === "online";
+  const mark = online ? "" : "*";
+  const deliveryText = deliveryFeeCents == null ? (needsShippingChoice ? "Escolha uma opção" : "A combinar") : deliveryFeeCents === 0 ? `Grátis${mark}` : `${formatBRL(deliveryFeeCents)}${mark}`;
   const estimatedTotalCents = deliveryFeeCents != null && !totals.hasUnpricedItems ? totals.subtotalCents - discountCents + deliveryFeeCents : null;
 
   if (done) return <OrderSent order={done} onNew={() => { sessionStorage.removeItem(LAST_ORDER_KEY); setDone(null); }} />;
@@ -135,19 +149,36 @@ export function CheckoutForm({
   }
 
   const needsRegistration = !customer || editingCustomer;
-  const blocked = needsRegistration || totals.hasUnavailableItems || zoneBelowMinimum || belowStoreMinimum || !whatsappNumber || needsShippingChoice;
+  const blocked = needsRegistration || totals.hasUnavailableItems || zoneBelowMinimum || belowStoreMinimum || (!online && !whatsappNumber) || needsShippingChoice;
 
   const submit = () => {
     setError(null);
+    const payload = {
+      items: totals.purchasableLines.map((l) => ({ productId: l.productId, variantId: l.variantId, kitId: l.kitId, quantity: l.quantity })),
+      customer,
+      customerNotes: notes,
+      deliveryZoneId: !calculatorEnabled && zone && zone.method !== "to_arrange" ? zone.id : null,
+      shipping: calculatorEnabled && shippingQuote && shippingOption ? { cep: shippingQuote.cep, optionId: shippingOption.id } : null,
+      couponCode: coupon,
+    };
+    if (online) {
+      startTransition(async () => {
+        const result = await startOnlinePayment(payload).catch(() => ({ ok: false as const, error: "Não foi possível registrar o pedido agora.", retryable: true }));
+        if (!result.ok) {
+          setError({ message: result.error, retryable: result.retryable });
+          return;
+        }
+        rememberDeviceOrder({ code: result.code, url: result.orderUrl, at: Date.now() });
+        clear();
+        clearCoupon();
+        // Mercado Pago's page; if it could not be opened, the order page offers to try again
+        window.location.assign(result.checkoutUrl ?? result.orderUrl);
+        await new Promise(() => {}); // keep the button busy while the browser leaves
+      });
+      return;
+    }
     startTransition(async () => {
-      const result = await submitOrder({
-        items: totals.purchasableLines.map((l) => ({ productId: l.productId, variantId: l.variantId, kitId: l.kitId, quantity: l.quantity })),
-        customer,
-        customerNotes: notes,
-        deliveryZoneId: !calculatorEnabled && zone && zone.method !== "to_arrange" ? zone.id : null,
-        shipping: calculatorEnabled && shippingQuote && shippingOption ? { cep: shippingQuote.cep, optionId: shippingOption.id } : null,
-        couponCode: coupon,
-      }).catch(() => ({ ok: false as const, error: "Não foi possível registrar o pedido agora.", retryable: true }));
+      const result = await submitOrder(payload).catch(() => ({ ok: false as const, error: "Não foi possível registrar o pedido agora.", retryable: true }));
 
       if (!result.ok) {
         setError({ message: result.error, retryable: result.retryable });
@@ -251,6 +282,7 @@ export function CheckoutForm({
               onSelect={setShippingOption}
               onQuote={setShippingQuote}
               title="Calcule o frete pelo CEP"
+              note={online ? "No pagamento pelo site, o frete escolhido é cobrado junto com o pedido. Os prazos são estimativas." : undefined}
             />
             {!shippingQuote ? <p className="mt-3 text-xs text-muted">Opcional: sem o CEP, combinamos a entrega com você pelo WhatsApp.</p> : null}
             {pickupDetails && shippingQuote?.options.some((o) => o.method === "pickup") ? <p className="mt-3 text-xs text-muted">Retirada: {pickupDetails}</p> : null}
@@ -283,6 +315,29 @@ export function CheckoutForm({
             <p className="mt-3 text-xs text-muted">Valores e prazos de entrega são confirmados pelo atendimento antes do pagamento.</p>
           </fieldset>
         ) : null}
+
+        {needsRegistration || !onlinePayment ? null : (
+          <fieldset>
+            <legend className="eyebrow mb-4 text-ink">Pagamento</legend>
+            <div className="grid gap-3">
+              <label className={cn("flex gap-3 border p-4 transition", onlineBlocker ? "cursor-not-allowed opacity-60" : "cursor-pointer", online ? "border-ink" : "border-line hover:border-ink/40")}>
+                <input type="radio" name="pay-with" className="mt-1 h-4 w-4 accent-ink" checked={online} disabled={Boolean(onlineBlocker)} onChange={() => setPayWith("online")} />
+                <span className="min-w-0 flex-1 text-sm">
+                  <span className="font-semibold">Pagar agora pelo site</span>
+                  <span className="mt-1 block text-xs leading-relaxed text-muted">Pix, cartão de crédito ou boleto, em ambiente seguro do Mercado Pago. O pedido é confirmado assim que o pagamento é aprovado.</span>
+                  {onlineBlocker ? <span className="mt-1 block text-xs text-ink-soft">{onlineBlocker}</span> : null}
+                </span>
+              </label>
+              <label className={cn("flex gap-3 border p-4 transition", whatsappNumber ? "cursor-pointer" : "cursor-not-allowed opacity-60", !online ? "border-ink" : "border-line hover:border-ink/40")}>
+                <input type="radio" name="pay-with" className="mt-1 h-4 w-4 accent-ink" checked={!online} disabled={!whatsappNumber} onChange={() => setPayWith("whatsapp")} />
+                <span className="min-w-0 flex-1 text-sm">
+                  <span className="font-semibold">Finalizar pelo WhatsApp</span>
+                  <span className="mt-1 block text-xs leading-relaxed text-muted">Combine pagamento e entrega com a nossa equipe.</span>
+                </span>
+              </label>
+            </div>
+          </fieldset>
+        )}
 
         {needsRegistration ? null : (
           <Field label="Observações (opcional)" htmlFor="notes">
@@ -383,18 +438,18 @@ export function CheckoutForm({
           </div>
           {estimatedTotalCents != null ? (
             <div className="flex justify-between border-t border-line pt-2 text-base">
-              <span className="font-semibold">Total estimado</span>
+              <span className="font-semibold">{online ? "Total a pagar" : "Total estimado"}</span>
               <span className="font-semibold tabular-nums">{formatBRL(estimatedTotalCents)}</span>
             </div>
           ) : null}
           {totals.hasUnpricedItems && !allUnpriced ? <p className="text-xs text-muted">Itens com preço sob consulta não entram no subtotal.</p> : null}
           {freeShippingThresholdCents != null ? <p className="text-xs text-muted">Frete grátis a partir de {formatBRL(freeShippingThresholdCents)} nas regiões participantes, confirmado no atendimento.</p> : null}
-          {deliveryFeeCents != null ? <p className="text-xs text-muted">*Estimativa sujeita a confirmação no atendimento.</p> : null}
+          {deliveryFeeCents != null && !online ? <p className="text-xs text-muted">*Estimativa sujeita a confirmação no atendimento.</p> : null}
         </div>
 
         <div className="mt-6 space-y-3">
           {needsRegistration ? <p className="text-sm text-ink-soft">Faça seu cadastro para escolher a entrega e finalizar.</p> : null}
-          {!whatsappNumber ? <p className="text-sm text-danger">O WhatsApp da loja ainda não foi configurado. Tente novamente mais tarde.</p> : null}
+          {!whatsappNumber && !online ? <p className="text-sm text-danger">O WhatsApp da loja ainda não foi configurado. Tente novamente mais tarde.</p> : null}
           {totals.hasUnavailableItems ? (
             <p className="text-sm text-danger">
               Há itens indisponíveis no carrinho.{" "}
@@ -411,10 +466,18 @@ export function CheckoutForm({
               {error.message}
             </p>
           ) : null}
-          <Button size="lg" className="w-full" onClick={submit} disabled={blocked || pending}>
-            {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <WhatsAppIcon className="h-4 w-4" />}
-            {pending ? "Registrando pedido…" : "Finalizar pelo WhatsApp"}
-          </Button>
+          {online ? (
+            <Button size="lg" className="w-full" onClick={submit} disabled={blocked || pending} data-mp-checkout-cta="checkout-pro">
+              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" strokeWidth={1.75} />}
+              {pending ? "Abrindo o Mercado Pago…" : "Pagar com Mercado Pago"}
+            </Button>
+          ) : (
+            <Button size="lg" className="w-full" onClick={submit} disabled={blocked || pending}>
+              {pending ? <Loader2 className="h-4 w-4 animate-spin" /> : <WhatsAppIcon className="h-4 w-4" />}
+              {pending ? "Registrando pedido…" : "Finalizar pelo WhatsApp"}
+            </Button>
+          )}
+          {online ? <p className="text-center text-xs text-muted">Você será levado ao Mercado Pago para pagar e voltará para a página do seu pedido.</p> : null}
           {fallbackUrl ? (
             <a href={fallbackUrl} target="_blank" rel="noopener noreferrer" className={buttonClasses("outline", "md", "w-full")}>
               Enviar lista pelo WhatsApp mesmo assim

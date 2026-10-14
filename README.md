@@ -78,6 +78,15 @@ Reprodução do mockup enviado pela dona da loja, sem trocar a stack nem apagar 
 - **Painel → Clientes:** busca por nome, e-mail ou WhatsApp, consentimento, pedidos, cidade, exportação CSV e exclusão a pedido da cliente (os pedidos continuam, sem vínculo). O pedido mostra o e-mail do cadastro, e o painel inicial conta os clientes.
 - A política de privacidade e a pergunta “Preciso criar uma conta?” foram atualizadas.
 
+### Pagamento pelo site — Mercado Pago (14/10/2026)
+- **Como funciona:** na finalização, a cliente escolhe **Pagar agora pelo site** (Pix, cartão de crédito ou boleto) ou **Finalizar pelo WhatsApp**. Pagando pelo site, o pedido é registrado com o total calculado pelo banco (produtos − cupom + frete) e ela vai para o **Checkout Pro** do Mercado Pago. Depois volta para `/pedido/[id]`, que mostra a situação do pagamento, oferece “Pagar agora” ou “Tentar pagar novamente” e se atualiza sozinha enquanto um Pix é confirmado.
+- **Quando aparece:** com a opção ligada em Configurações → Pagamento pelo site **e** com as credenciais no servidor. Pedidos com item “Sob consulta” ou entrega “a combinar” só podem ser finalizados pelo WhatsApp, porque o total precisa estar definido.
+- **Confirmação automática:** o Mercado Pago avisa o site em `/api/mercadopago/webhook`. O site **nunca confia no aviso**: relê o pagamento na API do Mercado Pago com o token da loja e grava pela função `apply_payment_update`, que só o servidor executa (service role). Pagamento aprovado com o valor total confirma o pedido e reserva o estoque. Uma tentativa recusada depois de um pagamento aprovado não desfaz nada. Valor menor, estoque esgotado no meio do caminho, devolução e contestação ficam registrados no histórico do pedido para a equipe decidir. A página do pedido e o botão “Consultar no Mercado Pago” do painel também conferem o pagamento, caso um aviso se perca.
+- **Avisos assinados:** com `MERCADOPAGO_WEBHOOK_SECRET`, avisos com assinatura (`x-signature`) inválida são recusados.
+- **Painel:** card “Pagamento online” no pedido (situação, forma, valor pago, ID no Mercado Pago), aviso “Pago · online” na lista e colunas de pagamento no CSV. Em Configurações, o card mostra se a credencial, a chave de serviço e a chave do webhook estão configuradas e testa a conexão com o Mercado Pago.
+- **Dados:** a loja não recebe dados de cartão. Para o pagamento e a prevenção a fraudes, vão para o Mercado Pago o nome, o e-mail, o telefone e o CEP do cadastro, além dos itens. A política de privacidade ganhou a seção “Pagamentos online”.
+- **Aplicação no Mercado Pago:** “MIVORA Loja Online” (Checkout Pro). O webhook de produção já está cadastrado com o evento Pagamentos.
+
 ## 2. Estrutura
 
 ```
@@ -115,7 +124,7 @@ tests/                    unit (Vitest), db (PGlite: RLS/RPC/estoque), e2e (Play
 
 ### 3.3 Vercel
 1. Importe o repositório na Vercel (o framework Next.js é detectado sozinho).
-2. Variáveis de ambiente (veja `.env.example`): `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_SITE_URL`. Opcionais, para cotar Correios e transportadoras: `MELHOR_ENVIO_TOKEN` (gerado em <https://melhorenvio.com.br/painel/gerenciar/tokens>, botão “Novo token”), `MELHOR_ENVIO_EMAIL` (se vazio, usa o e-mail de contato da loja) e `MELHOR_ENVIO_SANDBOX=true` para o ambiente de testes. Depois de mudar uma variável, faça um novo deploy.
+2. Variáveis de ambiente (veja `.env.example`): `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_SITE_URL`. Opcionais, para cotar Correios e transportadoras: `MELHOR_ENVIO_TOKEN` (gerado em <https://melhorenvio.com.br/painel/gerenciar/tokens>, botão “Novo token”), `MELHOR_ENVIO_EMAIL` (se vazio, usa o e-mail de contato da loja) e `MELHOR_ENVIO_SANDBOX=true` para o ambiente de testes. Para o pagamento pelo site: `MERCADOPAGO_ACCESS_TOKEN` (Access Token de produção da aplicação no Mercado Pago), `MERCADOPAGO_WEBHOOK_SECRET` (Suas integrações → aplicação → Webhooks → assinatura secreta) e `SUPABASE_SERVICE_ROLE_KEY` (Supabase → Project Settings → API Keys → `service_role`/secret). As três ficam **só no servidor**, nunca com o prefixo `NEXT_PUBLIC_`. Depois de mudar uma variável, faça um novo deploy.
 3. Faça o deploy. **O banco precisa estar acessível durante o build**, porque as páginas públicas são pré-renderizadas com os dados reais.
 4. **Domínio:** em Project → Domains, adicione o domínio e configure o DNS indicado. Atualize `NEXT_PUBLIC_SITE_URL` e faça um novo deploy.
 
@@ -128,6 +137,7 @@ tests/                    unit (Vitest), db (PGlite: RLS/RPC/estoque), e2e (Play
 - **RLS em todas as tabelas.** Visitantes só leem dados publicados. Custo de aquisição, SKU, código de barras e notas internas ficam em `product_private`, que só o admin lê.
 - Pedidos, estoque e auditoria **não aceitam escrita direta**: tudo passa por funções `SECURITY DEFINER` que validam permissões e dados (preços sempre do banco, quantidades de 1 a 99, estoque, limite de pedidos por minuto).
 - Toda Server Action e rota do admin confere de novo a sessão e o papel em `admin_users`. Esconder botões nunca é a única barreira.
+- **Pagamentos:** a chave de serviço do Supabase é usada só no servidor, para gravar resultados de pagamento já confirmados na API do Mercado Pago. Visitantes leem um recibo do pedido (`get_order_receipt`, pelo ID aleatório do pedido) sem telefone, e-mail, CEP ou observações.
 - Uploads: confere o tipo real pelos primeiros bytes do arquivo, limita o tamanho, recodifica com `sharp` (o que remove metadados e conteúdo embutido) e o bucket só aceita escrita de admins.
 - Auditoria automática por gatilhos (quem, o quê, quais campos) em `/admin/auditoria`.
 - CSV protegido contra injeção de fórmulas; JSON-LD escapado; Markdown das páginas renderizado sem HTML bruto.
@@ -177,6 +187,7 @@ O checklist também aparece no painel (`/admin`, card “Preparação para o lan
 8. **Páginas institucionais:** revisar privacidade, termos, envio e trocas com a assessoria e desmarcar “pendente de revisão”.
 9. **Entrega e frete:** informar o CEP de origem e criar as opções reais (faixas de CEP ou cidades, taxa, prazo) em Configurações. Para cotar Correios e transportadoras, gerar o token no Melhor Envio e cadastrar `MELHOR_ENVIO_TOKEN` na Vercel/Hostinger. Revisar as políticas de envio e de privacidade, que ganharam um parágrafo sobre a calculadora.
 10. **Domínio** e `NEXT_PUBLIC_SITE_URL`.
+10. **Pagamento pelo site:** ativar as credenciais de produção da aplicação “MIVORA Loja Online” no Mercado Pago, cadastrar `MERCADOPAGO_ACCESS_TOKEN`, `MERCADOPAGO_WEBHOOK_SECRET` e `SUPABASE_SERVICE_ROLE_KEY` na Vercel, fazer um novo deploy e ligar a opção em Configurações. Revisar a pergunta frequente sobre formas de pagamento e a política de trocas (estorno pelo Mercado Pago). Com vendas online, os dados legais (razão social, CNPJ, endereço) passam a ser essenciais.
 11. **Fotos editoriais da home:** para chegar ao nível do mockup, envie fotos licenciadas para o banner principal (horizontal, com espaço livre à esquerda, ou vertical com o produto no centro), “Rotinas de Skincare”, “Em breve”, cada necessidade e cada marca. Hoje essas áreas usam as fotos de campanha enviadas e fotos dos produtos.
 12. **Barra superior:** só troque a mensagem de frete para “Enviamos para todo o Brasil” depois de confirmar a cobertura (Configurações → Barra superior e newsletter).
 13. **Redes sociais:** preencha Instagram/TikTok/Facebook em Configurações para o “Siga a gente” do rodapé.

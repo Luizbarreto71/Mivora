@@ -785,3 +785,146 @@ describe("customer registration (lead capture)", () => {
     ).rejects.toThrow(/coupon_not_first_purchase/);
   });
 });
+
+
+describe("online payments (Mercado Pago)", () => {
+  type Online = { id: string; code: string; payment_method: string; amount_due_cents: number; subtotal_cents: number; discount_cents: number; items: { ref: string }[] };
+  const SEDEX = { cep: "01001000", city: "São Paulo", uf: "SP", service: "Correios SEDEX", fee_cents: 4100, estimate: "3 dias úteis" };
+  const online = (items: unknown, shipping: unknown, coupon: string | null = null, method = "mercadopago") =>
+    asRole(db, "anon", null, () =>
+      one<{ r: Online }>(`select create_order_intent($1::jsonb, null, null, null, null, $2, $3::jsonb, $4::jsonb, $5) as r`, [
+        JSON.stringify(items),
+        coupon,
+        shipping == null ? null : JSON.stringify(shipping),
+        newCustomer(),
+        method,
+      ]),
+    );
+  type Applied = { changed: boolean; status: string; payment_status: string };
+  const pay = (id: string, paymentId: string, status: string, amount: number | null, type = "pix") =>
+    asRole(db, "service_role", null, () =>
+      one<{ r: Applied }>(`select apply_payment_update($1, $2, $3, 'detail', $4, $5) as r`, [id, paymentId, status, type, amount]),
+    );
+  const order = (id: string) =>
+    one<{ status: string; inventory_state: string; payment_status: string; payment_id: string | null; amount_paid_cents: number | null; paid_at: string | null; payment_type: string | null }>(
+      `select status, inventory_state, payment_status, payment_id, amount_paid_cents, paid_at, payment_type from order_intents where id = $1`,
+      [id],
+    );
+  const notes = async (id: string) => (await all<{ note: string }>(`select note from order_status_history where order_id = $1 order by id`, [id])).map((h) => h.note);
+  let cream: string;
+  const stock = () => one<{ stock_quantity: number; reserved_quantity: number }>(`select stock_quantity, reserved_quantity from products where id = $1`, [cream]);
+
+  beforeAll(async () => {
+    cream = await productId("numbuzin-no9-volumetox-eye-cream");
+    await db.query(`update products set price_cents = 10000, track_inventory = true, stock_quantity = 5, reserved_quantity = 0, availability = 'in_stock' where id = $1`, [cream]);
+  });
+
+  it("starts disabled and only accepts a known total: priced items and a delivery with a fee", async () => {
+    expect(await one(`select online_payment_enabled, online_payment_max_installments from store_settings where id = 1`)).toEqual({ online_payment_enabled: false, online_payment_max_installments: 12 });
+    await expect(online([{ product_id: cream, quantity: 1 }], SEDEX)).rejects.toThrow(/online_payment_disabled/);
+    await db.query(`update store_settings set online_payment_enabled = true where id = 1`);
+    await expect(db.query(`update store_settings set online_payment_max_installments = 18 where id = 1`)).rejects.toThrow(/check/);
+
+    const vitac = await productId("medicube-deep-vita-c-pad"); // no price
+    await expect(online([{ product_id: cream, quantity: 1 }, { product_id: vitac, quantity: 1 }], SEDEX)).rejects.toThrow(/online_payment_unavailable/);
+    await expect(online([{ product_id: cream, quantity: 1 }], { cep: "01001000", city: "São Paulo", uf: "SP" })).rejects.toThrow(/delivery_required/);
+    await expect(online([{ product_id: cream, quantity: 1 }], null)).rejects.toThrow(/delivery_required/);
+    await expect(online([{ product_id: cream, quantity: 1 }], SEDEX, null, "boleto")).rejects.toThrow(/invalid_payment_method/);
+
+    const r = await online([{ product_id: cream, quantity: 2 }], SEDEX, "BEMVINDA10");
+    expect(r.r).toMatchObject({ payment_method: "mercadopago", subtotal_cents: 20000, discount_cents: 2000, amount_due_cents: 20000 - 2000 + 4100 });
+    expect(r.r.items[0].ref).toMatch(/^MV[0-9]{4}$/);
+    expect(await one(`select payment_method, payment_status, amount_due_cents from order_intents where id = $1`, [r.r.id])).toEqual({
+      payment_method: "mercadopago",
+      payment_status: "pending",
+      amount_due_cents: 22100,
+    });
+    expect(await stock()).toEqual({ stock_quantity: 5, reserved_quantity: 0 }); // nothing reserved before the payment
+
+    const whatsapp = await online([{ product_id: cream, quantity: 1 }], { cep: "01001000" }, null, "whatsapp");
+    expect(await one(`select payment_method, payment_status, amount_due_cents from order_intents where id = $1`, [whatsapp.r.id])).toEqual({ payment_method: "whatsapp", payment_status: "none", amount_due_cents: null });
+  });
+
+  it("is written only by the server, confirms the order and reserves stock once the full amount is approved", async () => {
+    const r = await online([{ product_id: cream, quantity: 2 }], SEDEX);
+    const due = r.r.amount_due_cents;
+    expect(due).toBe(24100);
+    for (const role of ["anon", "authenticated"] as const) {
+      await expect(
+        asRole(db, role, role === "anon" ? null : adminId, () => db.query(`select apply_payment_update($1, '1', 'approved', null, null, $2)`, [r.r.id, due])),
+      ).rejects.toThrow(/permission denied/);
+      await expect(
+        asRole(db, role, role === "anon" ? null : adminId, () => db.query(`select set_order_checkout($1, 'pref', 'https://mp.test/pay', now())`, [r.r.id])),
+      ).rejects.toThrow(/permission denied/);
+    }
+
+    expect((await pay(r.r.id, "101", "rejected", null, "credit_card")).r).toMatchObject({ changed: true, status: "started", payment_status: "rejected" });
+    expect((await pay(r.r.id, "101", "rejected", null)).r.changed).toBe(false);
+    await expect(pay(r.r.id, "102", "whatever", due)).rejects.toThrow(/invalid_payment_status/);
+    await expect(pay(r.r.id, "1 or 1=1", "approved", due)).rejects.toThrow(/invalid_payment_id/);
+
+    expect((await pay(r.r.id, "102", "approved", due)).r).toMatchObject({ changed: true, status: "confirmed", payment_status: "approved" });
+    expect(await order(r.r.id)).toMatchObject({ status: "confirmed", inventory_state: "reserved", payment_status: "approved", payment_id: "102", amount_paid_cents: due, payment_type: "pix" });
+    expect((await order(r.r.id)).paid_at).not.toBeNull();
+    expect(await stock()).toEqual({ stock_quantity: 5, reserved_quantity: 2 });
+
+    // repeated notification and a later failed attempt change nothing
+    expect((await pay(r.r.id, "102", "approved", due)).r.changed).toBe(false);
+    expect((await pay(r.r.id, "103", "rejected", null)).r.changed).toBe(false);
+    expect((await order(r.r.id)).payment_id).toBe("102");
+    expect(await stock()).toEqual({ stock_quantity: 5, reserved_quantity: 2 });
+
+    // refund: recorded for the owner, stock and status stay until the owner decides
+    expect((await pay(r.r.id, "102", "refunded", due)).r).toMatchObject({ changed: true, status: "confirmed", payment_status: "refunded" });
+    const history = await notes(r.r.id);
+    expect(history[0]).toMatch(/pagamento online/);
+    expect(history.some((n) => /recusado/.test(n))).toBe(true);
+    expect(history.some((n) => /confirmado automaticamente/.test(n))).toBe(true);
+    expect(history.at(-1)).toMatch(/devolvido/);
+    await asRole(db, "authenticated", adminId, () => db.query(`select admin_set_order_status($1, 'cancelled', 'Estorno')`, [r.r.id]));
+    expect(await stock()).toEqual({ stock_quantity: 5, reserved_quantity: 0 });
+  });
+
+  it("does not confirm an underpaid order, a WhatsApp order or an order whose stock is gone", async () => {
+    const under = await online([{ product_id: cream, quantity: 1 }], SEDEX);
+    expect((await pay(under.r.id, "201", "approved", 100)).r).toMatchObject({ status: "started", payment_status: "approved" });
+    expect((await notes(under.r.id)).at(-1)).toMatch(/valor menor/);
+    expect(await stock()).toEqual({ stock_quantity: 5, reserved_quantity: 0 });
+
+    const whatsapp = await online([{ product_id: cream, quantity: 1 }], { cep: "01001000" }, null, "whatsapp");
+    await expect(pay(whatsapp.r.id, "202", "approved", 14100)).rejects.toThrow(/not_online_order/);
+    await expect(pay("00000000-0000-0000-0000-000000000000", "203", "approved", 1)).rejects.toThrow(/order_not_found/);
+
+    const late = await online([{ product_id: cream, quantity: 2 }], SEDEX);
+    await db.query(`update products set stock_quantity = 1 where id = $1`, [cream]); // sold elsewhere meanwhile
+    expect((await pay(late.r.id, "204", "approved", late.r.amount_due_cents)).r).toMatchObject({ status: "started", payment_status: "approved" });
+    expect((await notes(late.r.id)).at(-1)).toMatch(/não foi possível reservar o estoque/);
+    expect(await order(late.r.id)).toMatchObject({ inventory_state: "none", amount_paid_cents: late.r.amount_due_cents });
+    await db.query(`update products set stock_quantity = 5 where id = $1`, [cream]);
+  });
+
+  it("shows the buyer a receipt without contact data, with the payment link while it is still payable", async () => {
+    const r = await online([{ product_id: cream, quantity: 1 }], SEDEX);
+    await asRole(db, "service_role", null, () =>
+      db.query(`select set_order_checkout($1, 'pref-1', 'https://www.mercadopago.com.br/checkout/v1/redirect?pref_id=pref-1', now() + interval '3 days')`, [r.r.id]),
+    );
+    type Receipt = Record<string, unknown> & { checkout_url: string | null; items: { name: string; quantity: number }[] };
+    const receipt = async () => (await asRole(db, "anon", null, () => one<{ r: Receipt }>(`select get_order_receipt($1) as r`, [r.r.id]))).r;
+
+    const before = await receipt();
+    expect(before).toMatchObject({ code: r.r.code, status: "started", payment_status: "pending", amount_due_cents: 14100, shipping_service: "Correios SEDEX", first_name: "Cliente" });
+    expect(before.checkout_url).toContain("pref_id=pref-1");
+    expect(before.items).toEqual([{ name: expect.stringContaining("Volumetox"), quantity: 1, line_total_cents: 10000 }]);
+    const keys = JSON.stringify(Object.keys(before));
+    for (const secret of ["customer_phone", "email", "shipping_cep", "customer_notes", "admin_notes"]) expect(keys).not.toContain(secret);
+
+    await pay(r.r.id, "301", "approved", 14100, "credit_card");
+    const after = await receipt();
+    expect(after).toMatchObject({ status: "confirmed", payment_status: "approved", payment_type: "credit_card", amount_paid_cents: 14100 });
+    expect(after.checkout_url).toBeNull();
+    expect((await asRole(db, "anon", null, () => one<{ r: unknown }>(`select get_order_receipt('00000000-0000-0000-0000-000000000000') as r`))).r).toBeNull();
+    // the anon role still cannot read orders directly
+    await asRole(db, "anon", null, async () => expect(await all(`select id from order_intents`)).toHaveLength(0));
+    await db.query(`update store_settings set online_payment_enabled = false where id = 1`);
+  });
+});

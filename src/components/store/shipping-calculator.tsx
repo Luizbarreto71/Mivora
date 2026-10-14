@@ -63,10 +63,12 @@ type Props = {
   /** Keep the chosen option for the next step (cart → checkout) */
   rememberChoice?: boolean;
   title?: string;
+  /** Replaces the note under the options */
+  note?: string;
   className?: string;
 };
 
-export function ShippingCalculator({ items, autoQuote = false, selectedId = null, onSelect, onQuote, rememberChoice = false, title = "Calcular frete e prazo", className }: Props) {
+export function ShippingCalculator({ items, autoQuote = false, selectedId = null, onSelect, onQuote, rememberChoice = false, title = "Calcular frete e prazo", note, className }: Props) {
   const inputId = useId();
   const [cep, setCep] = useState("");
   const [quote, setQuote] = useState<ShippingQuote | null>(null);
@@ -237,7 +239,7 @@ export function ShippingCalculator({ items, autoQuote = false, selectedId = null
               ))}
             </ul>
           )}
-          <p className="mt-3 text-xs leading-relaxed text-muted">Valores e prazos são estimativas e serão confirmados pelo nosso atendimento no WhatsApp antes do pagamento.</p>
+          <p className="mt-3 text-xs leading-relaxed text-muted">{note ?? "Valores e prazos são estimativas e serão confirmados pelo nosso atendimento no WhatsApp antes do pagamento."}</p>
         </div>
       ) : null}
     </div>

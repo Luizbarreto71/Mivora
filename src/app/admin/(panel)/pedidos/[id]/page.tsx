@@ -5,10 +5,11 @@ import { WhatsAppIcon } from "@/components/brand/social-icons";
 import { ActionForm, SubmitButton } from "@/components/admin/form-kit";
 import { AdminPage, Card, StatusPill, Table, Td, Th } from "@/components/admin/ui";
 import { Field, Input, Select, Textarea } from "@/components/ui/form";
-import { changeOrderStatus, saveOrderNotes } from "@/lib/admin/actions/orders";
+import { changeOrderStatus, refreshOrderPayment, saveOrderNotes } from "@/lib/admin/actions/orders";
 import { requireAdmin } from "@/lib/admin/auth";
 import { ORDER_STATUS_TONE } from "@/lib/admin/labels";
 import { formatBRL } from "@/lib/money";
+import { PAYMENT_STATUS_LABEL, paymentTypeLabel, type PaymentStatus } from "@/lib/payments/mercadopago-core";
 import { destinationLabel } from "@/lib/shipping/cep";
 import { DELIVERY_METHOD_LABEL, ORDER_STATUS_LABEL, type DeliveryMethod, type OrderStatus } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
@@ -33,6 +34,8 @@ export default async function OrderDetailPage({ params }: PageProps<"/admin/pedi
   const zoneName = (order.zone as { name: string } | null)?.name;
   const serviceName = zoneName ?? order.shipping_service ?? null;
   const customer = order.customer as { email: string; marketing_consent: boolean } | null;
+  const paymentStatus = order.payment_status as PaymentStatus;
+  const paymentTone = paymentStatus === "approved" ? "green" : paymentStatus === "rejected" || paymentStatus === "cancelled" ? "red" : paymentStatus === "refunded" || paymentStatus === "charged_back" ? "amber" : "blue";
 
   return (
     <AdminPage
@@ -108,7 +111,7 @@ export default async function OrderDetailPage({ params }: PageProps<"/admin/pedi
                 <span className="text-right">
                   {order.delivery_method ? DELIVERY_METHOD_LABEL[order.delivery_method as DeliveryMethod] : "A combinar"}
                   {serviceName ? ` · ${serviceName}` : ""}
-                  {order.delivery_fee_cents != null ? ` · ${formatBRL(order.delivery_fee_cents)} (estimado)` : ""}
+                  {order.delivery_fee_cents != null ? ` · ${formatBRL(order.delivery_fee_cents)}${order.payment_method === "mercadopago" ? "" : " (estimado)"}` : ""}
                   {order.shipping_estimate ? <span className="block text-xs">Prazo estimado: {order.shipping_estimate}</span> : null}
                 </span>
               </p>
@@ -161,6 +164,52 @@ export default async function OrderDetailPage({ params }: PageProps<"/admin/pedi
         </div>
 
         <div className="space-y-6">
+          {order.payment_method === "mercadopago" ? (
+            <Card title="Pagamento online">
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                <StatusPill tone={paymentTone}>{PAYMENT_STATUS_LABEL[paymentStatus]}</StatusPill>
+                <span className="text-xs text-muted">Mercado Pago</span>
+              </div>
+              <dl className="space-y-1.5 text-sm">
+                <div className="flex justify-between gap-3">
+                  <dt className="text-muted">Total do pedido</dt>
+                  <dd className="tabular-nums">{order.amount_due_cents != null ? formatBRL(order.amount_due_cents) : "—"}</dd>
+                </div>
+                {order.amount_paid_cents != null ? (
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-muted">Valor pago</dt>
+                    <dd className={order.amount_due_cents != null && order.amount_paid_cents < order.amount_due_cents ? "font-semibold text-danger tabular-nums" : "tabular-nums"}>{formatBRL(order.amount_paid_cents)}</dd>
+                  </div>
+                ) : null}
+                {order.payment_type ? (
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-muted">Forma</dt>
+                    <dd>{paymentTypeLabel(order.payment_type)}</dd>
+                  </div>
+                ) : null}
+                {order.paid_at ? (
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-muted">Pago em</dt>
+                    <dd>{formatDateTime(order.paid_at)}</dd>
+                  </div>
+                ) : null}
+                {order.payment_id ? (
+                  <div className="flex justify-between gap-3">
+                    <dt className="text-muted">ID no Mercado Pago</dt>
+                    <dd className="tabular-nums">{order.payment_id}</dd>
+                  </div>
+                ) : null}
+                {order.payment_detail ? <p className="text-xs text-muted">Detalhe: {order.payment_detail}</p> : null}
+              </dl>
+              <ActionForm action={refreshOrderPayment} className="mt-4">
+                <input type="hidden" name="orderId" value={order.id} />
+                <SubmitButton variant="outline" className="w-full" pendingLabel="Consultando…">
+                  Consultar no Mercado Pago
+                </SubmitButton>
+              </ActionForm>
+              <p className="mt-3 text-xs leading-relaxed text-muted">A situação é atualizada sozinha pelos avisos do Mercado Pago. Devoluções e contestações são feitas no painel do Mercado Pago e aparecem aqui.</p>
+            </Card>
+          ) : null}
           <Card title="Status">
             <div className="mb-4 flex flex-wrap items-center gap-2">
               <StatusPill tone={ORDER_STATUS_TONE[status]}>{ORDER_STATUS_LABEL[status]}</StatusPill>
@@ -192,7 +241,7 @@ export default async function OrderDetailPage({ params }: PageProps<"/admin/pedi
               {(history ?? []).map((h) => (
                 <li key={h.id} className="border-l-2 border-line pl-3">
                   <p>
-                    {h.from_status ? `${ORDER_STATUS_LABEL[h.from_status as OrderStatus]} → ` : ""}
+                    {h.from_status && h.from_status !== h.to_status ? `${ORDER_STATUS_LABEL[h.from_status as OrderStatus]} → ` : ""}
                     <strong>{ORDER_STATUS_LABEL[h.to_status as OrderStatus]}</strong>
                   </p>
                   <p className="text-xs text-muted">{formatDateTime(h.created_at)}</p>

@@ -645,3 +645,115 @@ test("Cadastro — obrigatório para comprar, lembrado no aparelho, visível em 
   await other.close();
   await ctx.close();
 });
+
+
+// ---------------------------------------------------------------------------
+// Pagamento online — Mercado Pago Checkout Pro (simulador local, nunca o Mercado Pago real)
+// ---------------------------------------------------------------------------
+test("Pagamento online — Mercado Pago: pagar pelo site, aviso assinado confirma o pedido, recusa e nova tentativa", async ({ browser, request }) => {
+  const MP = "http://localhost:54321/mercadopago";
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "http://localhost:54321";
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+  const receipt = async (id: string) => {
+    const r = await request.post(`${supabaseUrl}/rest/v1/rpc/get_order_receipt`, { headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` }, data: { p_order_id: id } });
+    return (await r.json()) as { status: string; payment_status: string; payment_type: string | null; amount_paid_cents: number | null };
+  };
+
+  // Admin: credentials detected, online payment switched on
+  await admin.goto("/admin/configuracoes");
+  await expect(admin.getByText(/Conectado ao Mercado Pago \(conta MIVORA-TESTE\) — credencial de TESTE/)).toBeVisible();
+  await expect(admin.getByText("Chave de serviço do Supabase configurada (registra os pagamentos aprovados).")).toBeVisible();
+  await expect(admin.getByText(/Assinatura dos avisos do Mercado Pago verificada/)).toBeVisible();
+  await admin.getByLabel("Oferecer pagamento pelo site (Pix, cartão e boleto)").check();
+  await admin.getByLabel("Parcelamento máximo no cartão").selectOption("6");
+  await admin.getByRole("button", { name: "Salvar configurações" }).click();
+  await expect(admin.getByText("Configurações salvas.")).toBeVisible();
+
+  const ctx = await browser.newContext({ storageState: RETURNING_VISITOR });
+  const page = await ctx.newPage();
+
+  // Product page → "Comprar agora" → checkout with the payment choice
+  await page.goto("/produtos/skin1004-madagascar-centella-ampoule");
+  await expect(page.getByText(/Pague pelo site com Pix, cartão ou boleto/)).toBeVisible();
+  await page.getByLabel("Calcular frete e prazo").fill("01001-000");
+  await expect(page.getByText("Correios SEDEX")).toBeVisible();
+  await page.getByRole("button", { name: "Comprar agora" }).click();
+  await expect(page).toHaveURL(/\/finalizar$/);
+  await expect(page.getByRole("heading", { name: "Finalizar compra" })).toBeVisible();
+  await register(page, "Bruna Online");
+
+  const onlineChoice = page.getByRole("radio", { name: /Pagar agora pelo site/ });
+  // a delivery "a combinar" has no price: paying on the site needs a defined fee
+  await page.getByRole("radio", { name: /Entrega a combinar|Combinar a entrega/ }).check();
+  await expect(onlineChoice).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Finalizar pelo WhatsApp" })).toBeVisible();
+  await page.getByRole("radio", { name: /Correios SEDEX/ }).check();
+  await expect(onlineChoice).toBeChecked();
+  await expect(page.getByText("Total a pagar", { exact: true })).toBeVisible();
+  await expect(page.getByText(brl(11990 + 4100)).first()).toBeVisible();
+  await page.getByRole("button", { name: "Pagar com Mercado Pago" }).click();
+
+  // Mercado Pago (simulator): Pix stays pending, the buyer is sent back to the order page
+  await expect(page.getByRole("heading", { name: "Mercado Pago — simulador local" })).toBeVisible();
+  await expect(page.getByText(`Total: ${brl(11990 + 4100)}`)).toBeVisible();
+  await page.getByRole("button", { name: "Pagar com Pix (fica pendente)" }).click();
+  await expect(page).toHaveURL(/\/pedido\/[0-9a-f-]{36}\?payment_id=\d+/);
+  await expect(page.getByText("Aguardando pagamento").filter({ visible: true }).first()).toBeVisible();
+  const code = (await page.getByRole("heading", { level: 1 }).textContent())!.trim();
+  expect(code).toMatch(/^MIV-\d{6}$/);
+  const orderId = page.url().match(/pedido\/([0-9a-f-]{36})/)![1];
+  const paymentId = new URL(page.url()).searchParams.get("payment_id")!;
+  expect((await receipt(orderId)).payment_status).toBe("pending");
+
+  // The Pix is paid: Mercado Pago sends a signed notification and the order is confirmed by the webhook alone
+  const approved = await request.post(`${MP}/test/payments/${paymentId}/approve`);
+  expect((await approved.json()).webhook).toBe(200);
+  expect(await receipt(orderId)).toMatchObject({ status: "confirmed", payment_status: "approved", payment_type: "bank_transfer", amount_paid_cents: 11990 + 4100 });
+  await page.reload();
+  await expect(page.getByText("Pagamento aprovado").filter({ visible: true }).first()).toBeVisible();
+  await expect(page.getByText(`Recebemos o pagamento de ${brl(11990 + 4100)} (Pix). Seu pedido está confirmado`, { exact: false }).filter({ visible: true }).first()).toBeVisible();
+
+  // Forged notifications are refused
+  const forged = await request.post(`/api/mercadopago/webhook?data.id=${paymentId}&type=payment`, {
+    headers: { "x-signature": `ts=1,v1=${"0".repeat(64)}`, "x-request-id": "forjado" },
+    data: { type: "payment", data: { id: paymentId } },
+  });
+  expect(forged.status()).toBe(401);
+
+  // The cart was emptied and the order is in "Minha conta" with its page
+  await page.goto("/minha-conta");
+  await expect(page.getByText(code)).toBeVisible();
+  await page.getByRole("link", { name: "Ver pedido e pagamento" }).first().click();
+  await expect(page.getByText("Pagamento aprovado").filter({ visible: true }).first()).toBeVisible();
+
+  // Admin: payment card, confirmed order
+  await admin.goto(`/admin/pedidos?q=${code}`);
+  await expect(admin.getByText("Pago · online")).toBeVisible();
+  await admin.getByRole("link", { name: code }).click();
+  await expect(admin.getByRole("heading", { name: "Pagamento online" })).toBeVisible();
+  await expect(admin.getByText("Valor pago")).toBeVisible();
+  await expect(admin.getByText("Pix", { exact: true })).toBeVisible();
+  await expect(admin.getByText(/Pedido confirmado automaticamente/)).toBeVisible();
+
+  // Second order: card refused → back on the order page → try again → approved on return
+  await page.goto("/produtos/skin1004-madagascar-centella-ampoule");
+  await page.getByRole("button", { name: "Comprar agora" }).click();
+  await page.getByRole("radio", { name: /Correios SEDEX/ }).check();
+  await page.getByRole("button", { name: "Pagar com Mercado Pago" }).click();
+  await page.getByRole("button", { name: "Recusar pagamento" }).click();
+  await expect(page.getByText("Pagamento não aprovado").filter({ visible: true }).first()).toBeVisible();
+  await page.getByRole("button", { name: "Tentar pagar novamente" }).click();
+  await expect(page.getByRole("heading", { name: "Mercado Pago — simulador local" })).toBeVisible();
+  await page.getByRole("button", { name: "Aprovar pagamento com cartão" }).click();
+  await expect(page.getByText("Pagamento aprovado").filter({ visible: true }).first()).toBeVisible();
+  await expect(page.getByText(/\(Cartão de crédito\)\. Seu pedido está confirmado/).filter({ visible: true }).first()).toBeVisible();
+
+  // Switched off again: the store goes back to WhatsApp only
+  await admin.goto("/admin/configuracoes");
+  await admin.getByLabel("Oferecer pagamento pelo site (Pix, cartão e boleto)").uncheck();
+  await admin.getByRole("button", { name: "Salvar configurações" }).click();
+  await expect(admin.getByText("Configurações salvas.")).toBeVisible();
+  await page.goto("/produtos/skin1004-madagascar-centella-ampoule");
+  await expect(page.getByRole("button", { name: "Comprar pelo WhatsApp" })).toBeVisible();
+  await ctx.close();
+});
