@@ -4,7 +4,7 @@ import { LogOut, MapPin, Package, Trash2, UserRound } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { formatBRL } from "@/lib/money";
-import { PAYMENT_STATUS_LABEL, type PaymentStatus } from "@/lib/payments/mercadopago-core";
+import { PAYMENT_STATUS_LABEL, type PaymentStatus } from "@/lib/payments/payment-labels";
 import { formatCep } from "@/lib/shipping/cep";
 import { deleteMyAddress, getMyAccount, getMyOrders, signOutAccount, type Account, type MyOrder } from "@/lib/store/account-actions";
 import { formatBrPhone } from "@/lib/store/customer";
