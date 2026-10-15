@@ -175,6 +175,101 @@ export function buildPreference(order: CheckoutOrder, opts: PreferenceOptions) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Payments API (card and Pix inside the site)
+// ---------------------------------------------------------------------------
+export type PaymentPayer = {
+  email: string;
+  firstName: string;
+  lastName: string;
+  cpf: string;
+  phone: string | null;
+  address: { cep: string; street: string | null; number: string | null; complement: string | null; district: string | null; city: string | null; uf: string | null } | null;
+};
+
+/** Mercado Pago date format with the Brasília offset (Brazil has no daylight saving time). */
+export function mpDate(date: Date) {
+  const local = new Date(date.getTime() - 3 * 3600_000);
+  return `${local.toISOString().slice(0, 23)}-03:00`;
+}
+
+function paymentExtras(order: Pick<CheckoutOrder, "id" | "code" | "items" | "discountCents">, payer: PaymentPayer, siteUrl: string) {
+  const phone = payer.phone?.replace(/\D/g, "") ?? "";
+  const a = payer.address;
+  return {
+    description: `Pedido ${order.code} - MIVORA`,
+    external_reference: order.id,
+    statement_descriptor: STATEMENT_DESCRIPTOR,
+    ...(isPublicHttps(siteUrl) ? { notification_url: `${siteUrl}/api/mercadopago/webhook?source_news=webhooks` } : {}),
+    additional_info: {
+      items: preferenceItems(order).map(({ id, title, description, category_id, quantity, unit_price }) => ({ id, title, description, category_id, quantity, unit_price })),
+      payer: {
+        first_name: payer.firstName,
+        last_name: payer.lastName,
+        ...(phone.length >= 10 ? { phone: { area_code: phone.slice(0, 2), number: phone.slice(2) } } : {}),
+        ...(a ? { address: { zip_code: a.cep, street_name: a.street ?? "", street_number: a.number ?? "" } } : {}),
+      },
+      ...(a?.street
+        ? {
+            shipments: {
+              receiver_address: { zip_code: a.cep, street_name: a.street, street_number: a.number ?? "", apartment: a.complement ?? "", city_name: a.city ?? "", state_name: a.uf ?? "" },
+            },
+          }
+        : {}),
+    },
+  };
+}
+
+const payerBlock = (payer: PaymentPayer) => ({
+  email: payer.email,
+  first_name: payer.firstName,
+  last_name: payer.lastName,
+  identification: { type: "CPF", number: payer.cpf.replace(/\D/g, "") },
+});
+
+/** POST /v1/payments with the card token from Mercado Pago's secure fields (the store never sees the card). */
+export function buildCardPayment(input: {
+  order: Pick<CheckoutOrder, "id" | "code" | "items" | "discountCents">;
+  amountCents: number;
+  card: { token: string; paymentMethodId: string; issuerId: string | null; installments: number };
+  payer: PaymentPayer;
+  siteUrl: string;
+}) {
+  return {
+    transaction_amount: Math.round(input.amountCents) / 100,
+    token: input.card.token,
+    installments: input.card.installments,
+    payment_method_id: input.card.paymentMethodId,
+    ...(input.card.issuerId ? { issuer_id: Number(input.card.issuerId) || input.card.issuerId } : {}),
+    payer: payerBlock(input.payer),
+    ...paymentExtras(input.order, input.payer, input.siteUrl),
+  };
+}
+
+/** POST /v1/payments for Pix: the response carries the QR code, the copy-and-paste code and the ticket page. */
+export function buildPixPayment(input: {
+  order: Pick<CheckoutOrder, "id" | "code" | "items" | "discountCents">;
+  amountCents: number;
+  payer: PaymentPayer;
+  siteUrl: string;
+  expiresAt: Date;
+}) {
+  return {
+    transaction_amount: Math.round(input.amountCents) / 100,
+    payment_method_id: "pix",
+    date_of_expiration: mpDate(input.expiresAt),
+    payer: payerBlock(input.payer),
+    ...paymentExtras(input.order, input.payer, input.siteUrl),
+  };
+}
+
+/** Pix code validity: one hour, never beyond the order's payment window and never under Mercado Pago's 30 minutes. */
+export function pixExpiry(createdAt: string, now = new Date()) {
+  const deadline = paymentDeadline(createdAt).getTime();
+  const end = Math.min(now.getTime() + 60 * 60_000, deadline);
+  return end - now.getTime() >= 30 * 60_000 ? new Date(end) : null;
+}
+
 export type MercadoPagoPayment = {
   id: number | string;
   status: string;

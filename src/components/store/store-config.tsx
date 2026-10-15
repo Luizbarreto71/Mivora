@@ -19,6 +19,13 @@ export type StoreConfig = {
   onlinePayment: boolean;
   /** Apple Pay (Mercado Pago): enabled and configured; the browser still has to support it */
   applePay: boolean;
+  /** Card typed on the site (Mercado Pago secure fields): needs the public key */
+  cardPayments: boolean;
+  /** Mercado Pago public key (public by design) and installments limit for the card form */
+  mercadoPagoPublicKey: string | null;
+  maxInstallments: number;
+  /** Sign-in providers switched on in Supabase Auth */
+  socialProviders: { google: boolean; apple: boolean };
 };
 
 const StoreConfigContext = createContext<StoreConfig>({
@@ -32,6 +39,10 @@ const StoreConfigContext = createContext<StoreConfig>({
   shippingCalculator: false,
   onlinePayment: false,
   applePay: false,
+  cardPayments: false,
+  mercadoPagoPublicKey: null,
+  maxInstallments: 12,
+  socialProviders: { google: false, apple: false },
 });
 
 export function StoreConfigProvider({ value, children }: { value: StoreConfig; children: ReactNode }) {

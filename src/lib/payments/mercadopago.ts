@@ -2,13 +2,17 @@ import "server-only";
 import { SITE_URL } from "@/lib/env";
 import { getServiceSupabase, isServiceRoleConfigured } from "@/lib/supabase/service";
 import {
+  buildCardPayment,
+  buildPixPayment,
   buildPreference,
   isUuid,
   paidCents,
   paymentDeadline,
+  pixExpiry,
   sortPayments,
   type CheckoutOrder,
   type MercadoPagoPayment,
+  type PaymentPayer,
 } from "./mercadopago-core";
 import { isMpOrderId, mapMpOrder, type MpOrder } from "./apple-pay-core";
 
@@ -71,26 +75,32 @@ type OrderRow = {
   shipping_cep: string | null;
   customer_name: string | null;
   customer_phone: string | null;
+  customer_cpf: string | null;
+  shipping_city: string | null;
+  shipping_uf: string | null;
+  shipping_street: string | null;
+  shipping_number: string | null;
+  shipping_complement: string | null;
+  shipping_district: string | null;
   payment_checkout_url: string | null;
   payment_expires_at: string | null;
-  customer: { name: string; email: string; phone: string } | null;
+  customer: { name: string; email: string; phone: string; first_name: string | null; last_name: string | null; cpf: string | null } | null;
   items: { name_snapshot: string; brand_snapshot: string | null; unit_price_cents: number | null; quantity: number; product_id: string | null; kit_id: string | null; sort_order: number; product: { code: string | null } | null }[];
 };
 
 export type CheckoutResult = { ok: true; url: string } | { ok: false; reason: "not_configured" | "not_found" | "not_payable" | "expired" | "provider_error" };
 
-/**
- * Opens (or reuses) the Mercado Pago checkout of an online order and returns its address.
- * Prices, discount and shipping come from the order registered in the database, never from the browser.
- */
-export async function openCheckout(orderId: string): Promise<CheckoutResult> {
+type Payable = { ok: true; order: OrderRow & { amount_due_cents: number }; checkout: CheckoutOrder; payer: PaymentPayer } | { ok: false; reason: "not_configured" | "not_found" | "not_payable" | "expired" | "provider_error" };
+
+/** Reads an online order that can still be paid, with the buyer data registered on it. */
+async function loadPayableOrder(orderId: string): Promise<Payable> {
   const config = mercadoPagoConfig();
   const sb = getServiceSupabase();
   if (!config.ready || !sb) return { ok: false, reason: "not_configured" };
   const { data, error } = await sb
     .from("order_intents")
     .select(
-      "id, code, created_at, status, payment_method, payment_status, amount_due_cents, discount_cents, delivery_fee_cents, shipping_cep, customer_name, customer_phone, payment_checkout_url, payment_expires_at, customer:customers(name, email, phone), items:order_intent_items(name_snapshot, brand_snapshot, unit_price_cents, quantity, product_id, kit_id, sort_order, product:products(code))",
+      "id, code, created_at, status, payment_method, payment_status, amount_due_cents, discount_cents, delivery_fee_cents, shipping_cep, shipping_city, shipping_uf, shipping_street, shipping_number, shipping_complement, shipping_district, customer_name, customer_phone, customer_cpf, payment_checkout_url, payment_expires_at, customer:customers(name, email, phone, first_name, last_name, cpf), items:order_intent_items(name_snapshot, brand_snapshot, unit_price_cents, quantity, product_id, kit_id, sort_order, product:products(code))",
     )
     .eq("id", orderId)
     .maybeSingle();
@@ -103,13 +113,18 @@ export async function openCheckout(orderId: string): Promise<CheckoutResult> {
   if (!["pending", "rejected", "cancelled"].includes(order.payment_status) || ["cancelled", "completed"].includes(order.status) || order.amount_due_cents == null) {
     return { ok: false, reason: "not_payable" };
   }
-  const deadline = paymentDeadline(order.created_at);
-  if (deadline.getTime() <= Date.now() + 5 * 60_000) return { ok: false, reason: "expired" };
-  if (order.payment_checkout_url && order.payment_expires_at && new Date(order.payment_expires_at).getTime() > Date.now() + 5 * 60_000) {
-    return { ok: true, url: order.payment_checkout_url };
-  }
-
-  const settings = await sb.from("store_settings").select("online_payment_max_installments").eq("id", 1).maybeSingle();
+  if (paymentDeadline(order.created_at).getTime() <= Date.now() + 5 * 60_000) return { ok: false, reason: "expired" };
+  const name = (order.customer_name ?? order.customer?.name ?? "").trim().split(/\s+/);
+  const payer: PaymentPayer = {
+    email: order.customer?.email ?? "",
+    firstName: name[0] ?? "",
+    lastName: name.slice(1).join(" "),
+    cpf: order.customer_cpf ?? "",
+    phone: order.customer_phone ?? order.customer?.phone ?? null,
+    address: order.shipping_cep
+      ? { cep: order.shipping_cep, street: order.shipping_street, number: order.shipping_number, complement: order.shipping_complement, district: order.shipping_district, city: order.shipping_city, uf: order.shipping_uf }
+      : null,
+  };
   const checkout: CheckoutOrder = {
     id: order.id,
     code: order.code,
@@ -126,12 +141,28 @@ export async function openCheckout(orderId: string): Promise<CheckoutResult> {
     discountCents: order.discount_cents,
     shippingFeeCents: order.delivery_fee_cents ?? 0,
     payer: {
-      name: order.customer?.name ?? order.customer_name ?? "",
+      name: order.customer_name ?? order.customer?.name ?? "",
       email: order.customer?.email ?? "",
-      phone: order.customer?.phone ?? order.customer_phone,
+      phone: order.customer_phone ?? order.customer?.phone ?? null,
       cep: order.shipping_cep,
     },
   };
+  return { ok: true, order: order as OrderRow & { amount_due_cents: number }, checkout, payer };
+}
+
+/**
+ * Opens (or reuses) the Mercado Pago checkout of an online order and returns its address.
+ * Prices, discount and shipping come from the order registered in the database, never from the browser.
+ */
+export async function openCheckout(orderId: string): Promise<CheckoutResult> {
+  const loaded = await loadPayableOrder(orderId);
+  if (!loaded.ok) return loaded;
+  const { order, checkout } = loaded;
+  const sb = getServiceSupabase()!;
+  if (order.payment_checkout_url && order.payment_expires_at && new Date(order.payment_expires_at).getTime() > Date.now() + 5 * 60_000) {
+    return { ok: true, url: order.payment_checkout_url };
+  }
+  const settings = await sb.from("store_settings").select("online_payment_max_installments").eq("id", 1).maybeSingle();
   const body = buildPreference(checkout, { siteUrl: SITE_URL, maxInstallments: settings.data?.online_payment_max_installments ?? 12 });
   try {
     const r = await mp<{ id?: string; init_point?: string }>("/checkout/preferences", {
@@ -263,4 +294,98 @@ export async function syncOrderPayments(orderId: string): Promise<SyncResult> {
     if (last.ok && last.changed) changed = true;
   }
   return last.ok ? { ...last, changed } : orderResult?.ok ? { ...orderResult, changed } : last;
+}
+
+// ---------------------------------------------------------------------------
+// Card and Pix inside the site (Payments API)
+// ---------------------------------------------------------------------------
+export type ChargeResult =
+  | { ok: true; status: string; detail: string | null }
+  | { ok: false; reason: "not_configured" | "not_found" | "not_payable" | "expired" | "provider_error" | "invalid_card" | "pix_unavailable" | "missing_cpf" };
+
+async function recordInfo(orderId: string, info: { installments: number | null; brand: string | null; qrCode: string | null; qrBase64: string | null; ticketUrl: string | null; expiresAt: string | null }) {
+  const { error } = await getServiceSupabase()!.rpc("set_order_payment_info", {
+    p_order_id: orderId,
+    p_installments: info.installments,
+    p_brand: info.brand,
+    p_qr_code: info.qrCode,
+    p_qr_base64: info.qrBase64,
+    p_ticket_url: info.ticketUrl,
+    p_qr_expires_at: info.expiresAt,
+  });
+  if (error) console.error("[mercadopago] não foi possível guardar os dados do pagamento", error.message);
+}
+
+type CreatedPayment = MercadoPagoPayment & {
+  installments?: number;
+  payment_method_id?: string;
+  point_of_interaction?: { transaction_data?: { qr_code?: string; qr_code_base64?: string; ticket_url?: string } };
+  cause?: { code?: string | number; description?: string }[];
+  message?: string;
+};
+
+/**
+ * Charges the order with the card token created by Mercado Pago's secure fields (the store never sees
+ * card numbers). The amount is the one registered in the database. The result is recorded like any payment.
+ */
+export async function chargeCard(orderId: string, card: { token: string; paymentMethodId: string; issuerId: string | null; installments: number }, attemptKey: string): Promise<ChargeResult> {
+  const loaded = await loadPayableOrder(orderId);
+  if (!loaded.ok) return loaded;
+  const { order, checkout, payer } = loaded;
+  if (!payer.cpf) return { ok: false, reason: "missing_cpf" };
+  const body = buildCardPayment({ order: checkout, amountCents: order.amount_due_cents, card, payer, siteUrl: SITE_URL });
+  try {
+    const r = await mp<CreatedPayment>("/v1/payments", {
+      method: "POST",
+      headers: { "X-Idempotency-Key": `card-${attemptKey}-${card.token.slice(-24)}`.slice(0, 128) },
+      body: JSON.stringify(body),
+    }, 20_000);
+    if (!r.ok || !r.body?.id) {
+      console.error("[mercadopago] cartão recusado na criação", r.status, JSON.stringify(r.body?.cause ?? r.body?.message ?? "")?.slice(0, 300));
+      return { ok: false, reason: r.status >= 400 && r.status < 500 ? "invalid_card" : "provider_error" };
+    }
+    const payment = r.body;
+    await applyPayment(payment, order.id).catch((e) => console.error("[mercadopago] registro do pagamento adiado", (e as Error).message));
+    await recordInfo(order.id, { installments: payment.installments ?? card.installments, brand: payment.payment_method_id ?? card.paymentMethodId, qrCode: null, qrBase64: null, ticketUrl: null, expiresAt: null });
+    return { ok: true, status: payment.status, detail: payment.status_detail ?? null };
+  } catch (e) {
+    console.error("[mercadopago] falha na cobrança com cartão", (e as Error).message);
+    return { ok: false, reason: "provider_error" };
+  }
+}
+
+/** Creates a Pix charge for the order: QR code and copy-and-paste code, valid for up to one hour. */
+export async function createPix(orderId: string, attemptKey: string): Promise<ChargeResult> {
+  const loaded = await loadPayableOrder(orderId);
+  if (!loaded.ok) return loaded;
+  const { order, checkout, payer } = loaded;
+  if (!payer.cpf) return { ok: false, reason: "missing_cpf" };
+  const expiresAt = pixExpiry(order.created_at);
+  if (!expiresAt) return { ok: false, reason: "expired" };
+  const body = buildPixPayment({ order: checkout, amountCents: order.amount_due_cents, payer, siteUrl: SITE_URL, expiresAt });
+  try {
+    const r = await mp<CreatedPayment>("/v1/payments", {
+      method: "POST",
+      headers: { "X-Idempotency-Key": `pix-${attemptKey}`.slice(0, 128) },
+      body: JSON.stringify(body),
+    }, 20_000);
+    const data = r.body?.point_of_interaction?.transaction_data;
+    if (!r.ok || !r.body?.id || !data?.qr_code) {
+      console.error("[mercadopago] Pix não criado", r.status, JSON.stringify(r.body?.cause ?? r.body?.message ?? "")?.slice(0, 300));
+      return { ok: false, reason: r.status >= 400 && r.status < 500 ? "pix_unavailable" : "provider_error" };
+    }
+    await recordInfo(order.id, {
+      installments: null,
+      brand: "pix",
+      qrCode: data.qr_code,
+      qrBase64: data.qr_code_base64 ?? null,
+      ticketUrl: data.ticket_url && /^https?:\/\//.test(data.ticket_url) ? data.ticket_url : null,
+      expiresAt: expiresAt.toISOString(),
+    });
+    await applyPayment(r.body, order.id).catch((e) => console.error("[mercadopago] registro do Pix adiado", (e as Error).message));
+    return { ok: true, status: r.body.status, detail: r.body.status_detail ?? null };
+  } catch (e) {
+    console.error("[mercadopago] falha ao criar o Pix", (e as Error).message);
+    return { ok: false, reason: "provider_error" };
+  }
 }

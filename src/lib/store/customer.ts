@@ -1,5 +1,5 @@
 /** Customer registration remembered on this device (the record itself lives in the database). */
-export type CustomerProfile = { name: string; email: string; phone: string; marketing: boolean };
+export type CustomerProfile = { name: string; email: string; phone: string; marketing: boolean; firstName?: string; lastName?: string; cpf?: string };
 
 const KEY = "mivora.customer";
 

@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import path from "node:path";
 import { RETURNING_VISITOR } from "../../playwright.config";
 
@@ -27,16 +27,68 @@ async function editProductBySlug(page: Page, slug: string) {
 }
 
 let customerSeq = 0;
-/** Fills the mandatory registration (step 1 of the checkout) with a new customer. */
-async function register(page: Page, name = "Cliente Teste") {
+const CPF = "52998224725";
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "http://localhost:54321";
+const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+
+/** Checkout step 2: the buyer's data, as a new customer. */
+async function fillIdentity(page: Page, name = "Cliente Teste", cpf = CPF) {
   customerSeq += 1;
   const email = `cliente${Date.now()}${customerSeq}@exemplo.com.br`;
-  await page.getByLabel("Nome completo").fill(name);
-  await page.getByLabel("WhatsApp com DDD").fill(`(11) 9${String(Date.now()).slice(-4)}-${String(1000 + customerSeq).slice(-4)}`);
+  const [first, ...last] = name.split(" ");
   await page.getByLabel("E-mail", { exact: true }).fill(email);
-  await page.getByRole("button", { name: "Continuar para a entrega" }).click();
-  await expect(page.getByRole("region", { name: "Seus dados" })).toBeVisible();
+  await page.getByLabel("Primeiro nome").fill(first);
+  await page.getByLabel("Sobrenome").fill(last.join(" ") || "Teste");
+  await page.getByLabel("CPF", { exact: true }).fill(cpf);
+  await page.getByLabel("Telefone com DDD").fill(`(11) 9${String(Date.now()).slice(-4)}-${String(1000 + customerSeq).slice(-4)}`);
   return email;
+}
+
+/** Checkout step 2: the address comes from the CEP (local ViaCEP double); then the number and, optionally, the delivery option. */
+async function fillAddress(page: Page, option?: RegExp, cep = "01001-000") {
+  const field = page.getByLabel("CEP", { exact: true });
+  if ((await field.inputValue()) !== cep) await field.fill(cep);
+  await expect(page.getByText(/^Endereço identificado:/)).toBeVisible();
+  const street = page.getByLabel("Rua", { exact: true });
+  if (!(await street.inputValue())) await street.fill("Rua das Flores");
+  await page.getByLabel("Número", { exact: true }).fill("100");
+  if (option) await page.getByRole("radio", { name: option }).check();
+}
+
+async function toPayment(page: Page) {
+  await page.getByRole("button", { name: "Continuar para o pagamento" }).click();
+  await expect(page.getByRole("heading", { name: "Pagamento", exact: true })).toBeVisible();
+}
+
+async function toReview(page: Page) {
+  await page.getByRole("button", { name: "Continuar para a revisão" }).click();
+  await expect(page.getByRole("heading", { name: "Revise seu pedido" })).toBeVisible();
+}
+
+/** Reads the local database with the service key (only the local stack runs these tests). */
+async function serviceGet(request: APIRequestContext, query: string) {
+  const r = await request.get(`${SUPABASE_URL}/rest/v1/${query}`, { headers: { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}` } });
+  expect(r.ok()).toBe(true);
+  return r.json();
+}
+
+async function setOnlinePayment(on: boolean) {
+  await admin.goto("/admin/configuracoes");
+  const box = admin.getByLabel("Oferecer pagamento pelo site (Pix, cartão e boleto)");
+  if (on) await box.check();
+  else await box.uncheck();
+  await admin.getByRole("button", { name: "Salvar configurações" }).click();
+  await expect(admin.getByText("Configurações salvas.")).toBeVisible();
+}
+
+/** "Continuar com Google/Apple" → the local OAuth simulator (never the real providers) → back to the store. */
+async function socialLogin(page: Page, provider: "Google" | "Apple", email: string, name: string) {
+  await page.getByRole("button", { name: `Continuar com ${provider}` }).click();
+  await expect(page.getByRole("heading", { name: `Login com ${provider} — simulador local` })).toBeVisible();
+  await page.getByLabel("E-mail").fill(email);
+  await page.getByLabel("Nome").fill(name);
+  await page.getByRole("button", { name: "Autorizar" }).click();
+  await expect(page.getByText(/Pronto, você entrou na sua conta/)).toBeVisible();
 }
 
 async function saveProduct(page: Page) {
@@ -159,17 +211,30 @@ test("Testes 3, 4, 5 e 13 — carrinho, subtotal, WhatsApp e intenção de pedid
   await increase.nth(2).click(); // celimax ×3
   const expected = 2 * 11990 + 15900 + 3 * 8990;
   await expect(page.getByText(brl(expected)).first()).toBeVisible();
-  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Seu carrinho (6 itens)");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Sacola (6 itens)");
 
   // Teste 13: survives reloads
   await page.reload();
   await expect(page.getByText(brl(expected)).first()).toBeVisible();
 
-  await page.goto("/finalizar");
-  // the order can only be finished after the registration
-  await expect(page.getByRole("button", { name: "Finalizar pelo WhatsApp" })).toBeDisabled();
-  await register(page);
-  await page.getByRole("button", { name: "Finalizar pelo WhatsApp" }).click();
+  // Step 1 → 2 (identification and delivery): nothing moves on without the buyer's data
+  await page.getByRole("link", { name: "Continuar para identificação" }).click();
+  await expect(page).toHaveURL(/\/finalizar\?etapa=identificacao$/);
+  await expect(page.getByRole("navigation", { name: "Etapas da compra" }).locator('[aria-current="step"]')).toContainText("Identificação e entrega");
+  await page.getByRole("button", { name: "Continuar para o pagamento" }).click();
+  await expect(page.getByText("Digite um e-mail válido, ex.: nome@exemplo.com.br.")).toBeVisible();
+  await expect(page.getByLabel("E-mail", { exact: true })).toHaveAttribute("aria-invalid", "true");
+  await fillIdentity(page);
+  // without carriers (Melhor Envio is set up later) the only option for the CEP, "Entrega a combinar", comes selected and needs no address
+  await page.getByLabel("CEP", { exact: true }).fill("01001-000");
+  await expect(page.getByRole("radio", { name: /Entrega a combinar/ })).toBeChecked();
+  await expect(page.getByLabel("Número", { exact: true })).toBeVisible();
+  await toPayment(page);
+  // online payment is off: the order goes to the team on WhatsApp
+  await expect(page.getByRole("radio", { name: /^Combinar pelo WhatsApp/ })).toBeChecked();
+  await expect(page.getByRole("radio", { name: /^Pix/ })).toHaveCount(0);
+  await toReview(page);
+  await page.getByRole("button", { name: "Confirmar e enviar pelo WhatsApp" }).click();
   await expect.poll(() => whatsappUrl, { timeout: 15_000 }).toContain("https://wa.me/5511912345678?text=");
 
   const message = decodeURIComponent(whatsappUrl.split("text=")[1]);
@@ -179,7 +244,7 @@ test("Testes 3, 4, 5 e 13 — carrinho, subtotal, WhatsApp e intenção de pedid
   expect(message).toContain(brl(11990));
   expect(message).toContain(brl(15900));
   expect(message).toContain(`*Subtotal dos produtos:* ${brl(expected)}`);
-  expect(message).toContain("*Entrega:* a combinar.");
+  expect(message).toContain("*Entrega:* a combinar — CEP 01001-000 (São Paulo/SP).");
   expect(message).toMatch(/Código: MV\d{4}/);
   const code = message.match(/MIV-\d{6}/)?.[0];
   expect(code).toBeTruthy();
@@ -364,8 +429,13 @@ test("Boas-vindas — apresentação na primeira visita e cupom de 10% aplicado 
   await page.goto("/finalizar");
   await expect(page.getByText("BEMVINDA10", { exact: true })).toBeVisible();
   await expect(page.getByText(/Desconto \(BEMVINDA10\)/)).toBeVisible();
-  await register(page, "Nova Cliente");
-  await page.getByRole("button", { name: "Finalizar pelo WhatsApp" }).click();
+  await fillIdentity(page, "Nova Cliente");
+  await page.getByLabel("CEP", { exact: true }).fill("01001-000");
+  await expect(page.getByRole("radio", { name: /Entrega a combinar/ })).toBeChecked();
+  await toPayment(page);
+  await toReview(page);
+  await expect(page.getByRole("region", { name: "Revise seu pedido" })).toContainText("Desconto (BEMVINDA10)");
+  await page.getByRole("button", { name: "Confirmar e enviar pelo WhatsApp" }).click();
   await expect.poll(() => whatsappUrl, { timeout: 15_000 }).toContain("https://wa.me/");
   const message = decodeURIComponent(whatsappUrl.split("text=")[1]);
   expect(message).toContain("*Cupom:* BEMVINDA10 (10% na primeira compra)");
@@ -451,14 +521,30 @@ test("Frete — admin configura origem e zona por CEP; cliente calcula no produt
   await expect(page.getByText("Total estimado", { exact: true })).toBeVisible();
   await expect(page.getByText(brl(11990 + 4100)).first()).toBeVisible();
 
-  // Checkout: after the registration, SEDEX comes pre-selected and the fee is in the total
-  await page.goto("/finalizar");
-  await register(page);
+  // Checkout: the CEP fills the address, SEDEX comes pre-selected and the fee is in the total
+  await page.getByRole("link", { name: "Continuar para identificação" }).click();
+  await fillIdentity(page);
+  await expect(page.getByLabel("CEP", { exact: true })).toHaveValue("01001-000");
+  await expect(page.getByLabel("Rua", { exact: true })).toHaveValue("Praça da Sé");
+  await expect(page.getByLabel("Bairro")).toHaveValue("Sé");
+  await expect(page.getByLabel("Cidade")).toHaveValue("São Paulo");
+  await expect(page.getByLabel("Estado")).toHaveValue("SP");
+  await expect(page.getByLabel("Nome de quem vai receber")).toHaveValue("Cliente Teste");
   const sedex = page.getByRole("radio", { name: /Correios SEDEX/ });
   await expect(sedex).toBeChecked();
-  await expect(page.getByText("Total estimado", { exact: true })).toBeVisible();
-  await expect(page.getByText(brl(11990 + 4100)).first()).toBeVisible();
-  await page.getByRole("button", { name: "Finalizar pelo WhatsApp" }).click();
+  await expect(page.getByRole("complementary", { name: "Resumo do pedido" }).getByText("Total estimado", { exact: true })).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "Resumo do pedido" }).getByText(brl(11990 + 4100)).filter({ visible: true })).toBeVisible();
+  // a delivery needs the house number
+  await page.getByRole("button", { name: "Continuar para o pagamento" }).click();
+  await expect(page.getByText("Informe o número (ou S/N).")).toBeVisible();
+  await page.getByLabel("Número", { exact: true }).fill("100");
+  await page.getByLabel("Complemento (opcional)").fill("Apto 12");
+  await toPayment(page);
+  await toReview(page);
+  const review = page.getByRole("region", { name: "Revise seu pedido" });
+  await expect(review).toContainText("Praça da Sé, 100 · Apto 12");
+  await expect(review).toContainText("Correios SEDEX · R$ 41,00 · prazo estimado: 2 a 3 dias úteis");
+  await page.getByRole("button", { name: "Confirmar e enviar pelo WhatsApp" }).click();
   await expect.poll(() => whatsappUrl, { timeout: 15_000 }).toContain("https://wa.me/");
   const message = decodeURIComponent(whatsappUrl.split("text=")[1]);
   expect(message).toContain("*Entrega:* Envio (Correios SEDEX) — taxa estimada R$ 41,00 (sujeita a confirmação) — prazo estimado: 2 a 3 dias úteis — CEP 01001-000 (São Paulo/SP).");
@@ -469,6 +555,7 @@ test("Frete — admin configura origem e zona por CEP; cliente calcula no produt
   await admin.getByRole("link", { name: code }).click();
   await expect(admin.getByText("CEP 01001-000 (São Paulo/SP)")).toBeVisible();
   await expect(admin.getByText(/Envio · Correios SEDEX · R\$ 41,00 \(estimado\)/)).toBeVisible();
+  await expect(admin.getByText("Praça da Sé, 100 · Apto 12")).toBeVisible();
   await ctx.close();
 });
 
@@ -592,26 +679,36 @@ test("Cadastro — obrigatório para comprar, lembrado no aparelho, visível em 
   await page.goto("/produtos/dr-althea-345-relief-cream");
   await page.getByRole("button", { name: "Comprar pelo WhatsApp" }).click();
   await expect(page).toHaveURL(/\/finalizar$/);
-  await expect(page.getByRole("heading", { name: "Seu cadastro" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Finalizar pelo WhatsApp" })).toBeDisabled();
+  await expect(page.getByRole("heading", { name: "Seus dados" })).toBeVisible();
 
-  // validation
-  await page.getByLabel("Nome completo").fill("Helena Prado");
-  await page.getByLabel("WhatsApp com DDD").fill("1234");
-  await page.getByLabel("E-mail", { exact: true }).fill("helena@exemplo.com.br");
-  await page.getByRole("button", { name: "Continuar para a entrega" }).click();
-  await expect(page.getByText("Digite um WhatsApp com DDD, ex.: (11) 91234-5678.")).toBeVisible();
+  // validation, next to each field
+  await page.getByLabel("E-mail", { exact: true }).fill("helena@");
+  await page.getByLabel("Primeiro nome").fill("Helena");
+  await page.getByLabel("Sobrenome").fill("Prado");
+  await page.getByLabel("CPF", { exact: true }).fill("111.111.111-11");
+  await page.getByLabel("Telefone com DDD").fill("1234");
+  await page.getByRole("button", { name: "Continuar para o pagamento" }).click();
+  await expect(page.getByText("Digite um e-mail válido, ex.: nome@exemplo.com.br.")).toBeVisible();
+  await expect(page.getByText("CPF inválido. Confira os números.")).toBeVisible();
+  await expect(page.getByText("Digite um telefone com DDD, ex.: (11) 91234-5678.")).toBeVisible();
+  await expect(page.getByText("Informe o CEP para calcular a entrega.")).toBeVisible();
+  await expect(page.getByLabel("E-mail", { exact: true })).toBeFocused();
 
-  // valid registration with marketing opt-in
+  // valid data (with masks) and marketing opt-in
   const email = `helena${Date.now()}@exemplo.com.br`;
-  await page.getByLabel("WhatsApp com DDD").fill("(27) 99876-5432");
   await page.getByLabel("E-mail", { exact: true }).fill(email);
+  await page.getByLabel("CPF", { exact: true }).fill("52998224725");
+  await expect(page.getByLabel("CPF", { exact: true })).toHaveValue("529.982.247-25");
+  await page.getByLabel("Telefone com DDD").fill("27998765432");
+  await expect(page.getByLabel("Telefone com DDD")).toHaveValue("(27) 99876-5432");
   await page.getByLabel(/Quero receber novidades/).check();
-  await page.getByRole("button", { name: "Continuar para a entrega" }).click();
-  const summary = page.getByRole("region", { name: "Seus dados" });
-  await expect(summary).toContainText("Helena Prado");
-  await expect(summary).toContainText("(27) 99876-5432");
-  await page.getByRole("button", { name: "Finalizar pelo WhatsApp" }).click();
+  await fillAddress(page, /Correios PAC/);
+  await toPayment(page);
+  await toReview(page);
+  const review = page.getByRole("region", { name: "Revise seu pedido" });
+  await expect(review).toContainText("Helena Prado");
+  await expect(review).toContainText("(27) 99876-5432 · CPF ***.***.247-25");
+  await page.getByRole("button", { name: "Confirmar e enviar pelo WhatsApp" }).click();
   await expect.poll(() => whatsappUrl, { timeout: 15_000 }).toContain("https://wa.me/");
   expect(decodeURIComponent(whatsappUrl.split("text=")[1])).toContain("Helena Prado");
 
@@ -650,29 +747,30 @@ test("Cadastro — obrigatório para comprar, lembrado no aparelho, visível em 
 // ---------------------------------------------------------------------------
 // Pagamento online — Mercado Pago Checkout Pro (simulador local, nunca o Mercado Pago real)
 // ---------------------------------------------------------------------------
-test("Pagamento online — Mercado Pago: pagar pelo site, aviso assinado confirma o pedido, recusa e nova tentativa", async ({ browser, request }) => {
+test("Pagamento online — Pix com QR Code aprovado pelo webhook, clique duplo sem pedido duplicado, cartão recusado e aprovado no mesmo pedido, Mercado Pago", async ({ browser, request }) => {
   const MP = "http://localhost:54321/mercadopago";
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "http://localhost:54321";
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
   const receipt = async (id: string) => {
-    const r = await request.post(`${supabaseUrl}/rest/v1/rpc/get_order_receipt`, { headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` }, data: { p_order_id: id } });
+    const r = await request.post(`${SUPABASE_URL}/rest/v1/rpc/get_order_receipt`, { headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` }, data: { p_order_id: id } });
     return (await r.json()) as { status: string; payment_status: string; payment_type: string | null; amount_paid_cents: number | null };
   };
+  const total = 11990 + 4100;
 
-  // Admin: credentials detected, online payment switched on
+  // Admin: credentials detected, online payment switched on; the card form needs the public key
   await admin.goto("/admin/configuracoes");
   await expect(admin.getByText(/Conectado ao Mercado Pago \(conta MIVORA-TESTE\) — credencial de TESTE/)).toBeVisible();
   await expect(admin.getByText("Chave de serviço do Supabase configurada (registra os pagamentos aprovados).")).toBeVisible();
   await expect(admin.getByText(/Assinatura dos avisos do Mercado Pago verificada/)).toBeVisible();
   await admin.getByLabel("Oferecer pagamento pelo site (Pix, cartão e boleto)").check();
   await admin.getByLabel("Parcelamento máximo no cartão").selectOption("6");
+  await admin.getByLabel("Public Key do Mercado Pago").fill("TEST-00000000-0000-4000-8000-000000000001");
   await admin.getByRole("button", { name: "Salvar configurações" }).click();
   await expect(admin.getByText("Configurações salvas.")).toBeVisible();
 
   const ctx = await browser.newContext({ storageState: RETURNING_VISITOR });
   const page = await ctx.newPage();
 
-  // Product page → "Comprar agora" → checkout with the payment choice
+  // Product page → "Comprar agora" → checkout
   await page.goto("/produtos/skin1004-madagascar-centella-ampoule");
   await expect(page.getByText(/Pague pelo site com Pix, cartão ou boleto/).filter({ visible: true }).first()).toBeVisible();
   await page.getByLabel("Calcular frete e prazo").fill("01001-000");
@@ -680,43 +778,55 @@ test("Pagamento online — Mercado Pago: pagar pelo site, aviso assinado confirm
   await page.getByRole("button", { name: "Comprar agora" }).click();
   await expect(page).toHaveURL(/\/finalizar$/);
   await expect(page.getByRole("heading", { name: "Finalizar compra" })).toBeVisible();
-  await register(page, "Bruna Online");
+  const email = await fillIdentity(page, "Bruna Online");
+  await fillAddress(page);
 
-  const onlineChoice = page.getByRole("radio", { name: /Pagar agora pelo site/ });
   // a delivery "a combinar" has no price: paying on the site needs a defined fee
   await page.getByRole("radio", { name: /Entrega a combinar|Combinar a entrega/ }).check();
-  await expect(onlineChoice).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Finalizar pelo WhatsApp" })).toBeVisible();
+  await toPayment(page);
+  await expect(page.getByText("Para pagar pelo site, escolha uma entrega com valor definido.")).toBeVisible();
+  await expect(page.getByRole("radio", { name: /^Pix/ })).toHaveCount(0);
+  await expect(page.getByRole("radio", { name: /^Combinar pelo WhatsApp/ })).toBeChecked();
+  await page.getByRole("button", { name: "Voltar para identificação e entrega" }).click();
   await page.getByRole("radio", { name: /Correios SEDEX/ }).check();
-  await expect(onlineChoice).toBeChecked();
-  await expect(page.getByText("Total a pagar", { exact: true })).toBeVisible();
-  await expect(page.getByText(brl(11990 + 4100)).first()).toBeVisible();
-  await page.getByRole("button", { name: "Pagar com Mercado Pago" }).click();
+  await toPayment(page);
+  for (const method of [/^Pix/, /^Cartão de crédito/, /^Boleto ou saldo no Mercado Pago/, /^Combinar pelo WhatsApp/]) await expect(page.getByRole("radio", { name: method })).toBeVisible();
+  await page.getByRole("radio", { name: /^Pix/ }).check();
+  await expect(page.getByRole("complementary", { name: "Resumo do pedido" }).getByText("Total a pagar", { exact: true })).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "Resumo do pedido" }).getByText(brl(total)).filter({ visible: true })).toBeVisible();
+  await toReview(page);
+  await expect(page.getByRole("region", { name: "Revise seu pedido" })).toContainText(`Valor final${brl(total)}`);
 
-  // Mercado Pago (simulator): Pix stays pending, the buyer is sent back to the order page
-  await expect(page.getByRole("heading", { name: "Mercado Pago — simulador local" })).toBeVisible();
-  await expect(page.getByText(`Total: ${brl(11990 + 4100)}`)).toBeVisible();
-  await page.getByRole("button", { name: "Pagar com Pix (fica pendente)" }).click();
-  await expect(page).toHaveURL(/\/pedido\/[0-9a-f-]{36}\?payment_id=\d+/);
-  await expect(page.getByText("Aguardando pagamento").filter({ visible: true }).first()).toBeVisible();
+  // A double click on "confirm" registers a single order with a single Pix
+  await page.getByRole("button", { name: "Confirmar e gerar o Pix" }).dblclick();
+  await expect(page).toHaveURL(/\/pedido\/[0-9a-f-]{36}$/);
+  const orderId = page.url().match(/pedido\/([0-9a-f-]{36})/)![1];
   const code = (await page.getByRole("heading", { level: 1 }).textContent())!.trim();
   expect(code).toMatch(/^MIV-\d{6}$/);
-  const orderId = page.url().match(/pedido\/([0-9a-f-]{36})/)![1];
-  const paymentId = new URL(page.url()).searchParams.get("payment_id")!;
-  expect((await receipt(orderId)).payment_status).toBe("pending");
+  await expect(page.getByText("Aguardando pagamento").filter({ visible: true }).first()).toBeVisible();
+  await expect(page.getByRole("img", { name: "QR Code do Pix" })).toBeVisible();
+  await expect(page.getByLabel("Pix copia e cola")).toHaveValue(/^00020126/);
+  await expect(page.getByRole("button", { name: "Copiar código Pix" })).toBeVisible();
+  await expect(page.getByText(/O código vale até \d{2}:\d{2}/).filter({ visible: true }).first()).toBeVisible();
 
-  // The Pix is paid: Mercado Pago sends a signed notification and the order is confirmed by the webhook alone
-  const approved = await request.post(`${MP}/test/payments/${paymentId}/approve`);
+  const [order] = await serviceGet(request, `order_intents?id=eq.${orderId}&select=payment_id,payment_status,payment_type,customer_cpf,shipping_recipient,shipping_street,shipping_number,amount_due_cents`);
+  expect(order).toMatchObject({ payment_status: "pending", payment_type: "bank_transfer", customer_cpf: CPF, shipping_recipient: "Bruna Online", shipping_street: "Praça da Sé", shipping_number: "100", amount_due_cents: total });
+  expect(await serviceGet(request, `customers?email=eq.${encodeURIComponent(email)}&select=orders_count`)).toEqual([{ orders_count: 1 }]);
+
+  // The Pix is paid: Mercado Pago's signed notification alone confirms the order
+  const approved = await request.post(`${MP}/test/payments/${order.payment_id}/approve`);
   expect((await approved.json()).webhook).toBe(200);
-  expect(await receipt(orderId)).toMatchObject({ status: "confirmed", payment_status: "approved", payment_type: "bank_transfer", amount_paid_cents: 11990 + 4100 });
+  expect(await receipt(orderId)).toMatchObject({ status: "confirmed", payment_status: "approved", payment_type: "bank_transfer", amount_paid_cents: total });
   await page.reload();
   await expect(page.getByText("Pagamento aprovado").filter({ visible: true }).first()).toBeVisible();
-  await expect(page.getByText(`Recebemos o pagamento de ${brl(11990 + 4100)} (Pix). Seu pedido está confirmado`, { exact: false }).filter({ visible: true }).first()).toBeVisible();
+  await expect(page.getByText(`Recebemos o pagamento de ${brl(total)} (Pix). Seu pedido está confirmado`, { exact: false }).filter({ visible: true }).first()).toBeVisible();
+  await expect(page.getByText("Próximos passos").filter({ visible: true }).first()).toBeVisible();
+  await expect(page.getByLabel("Pix copia e cola")).toHaveCount(0);
 
   // Forged notifications are refused
-  const forged = await request.post(`/api/mercadopago/webhook?data.id=${paymentId}&type=payment`, {
+  const forged = await request.post(`/api/mercadopago/webhook?data.id=${order.payment_id}&type=payment`, {
     headers: { "x-signature": `ts=1,v1=${"0".repeat(64)}`, "x-request-id": "forjado" },
-    data: { type: "payment", data: { id: paymentId } },
+    data: { type: "payment", data: { id: order.payment_id } },
   });
   expect(forged.status()).toBe(401);
 
@@ -726,7 +836,7 @@ test("Pagamento online — Mercado Pago: pagar pelo site, aviso assinado confirm
   await page.getByRole("link", { name: "Ver pedido e pagamento" }).first().click();
   await expect(page.getByText("Pagamento aprovado").filter({ visible: true }).first()).toBeVisible();
 
-  // Admin: payment card, confirmed order
+  // Admin: payment card, confirmed order, address and CPF for the invoice
   await admin.goto(`/admin/pedidos?q=${code}`);
   await expect(admin.getByText("Pago · online")).toBeVisible();
   await admin.getByRole("link", { name: code }).click();
@@ -734,12 +844,55 @@ test("Pagamento online — Mercado Pago: pagar pelo site, aviso assinado confirm
   await expect(admin.getByText("Valor pago")).toBeVisible();
   await expect(admin.getByText("Pix", { exact: true })).toBeVisible();
   await expect(admin.getByText(/Pedido confirmado automaticamente/)).toBeVisible();
+  await expect(admin.getByText("Endereço de entrega")).toBeVisible();
+  await expect(admin.getByText("529.982.247-25")).toBeVisible();
 
-  // Second order: card refused → back on the order page → try again → approved on return
+  // Second order: the card is refused, then another card is approved — on the same order
   await page.goto("/produtos/skin1004-madagascar-centella-ampoule");
   await page.getByRole("button", { name: "Comprar agora" }).click();
-  await page.getByRole("radio", { name: /Correios SEDEX/ }).check();
-  await page.getByRole("button", { name: "Pagar com Mercado Pago" }).click();
+  // the buyer's data is remembered on this device
+  await expect(page.getByLabel("E-mail", { exact: true })).toHaveValue(email);
+  await expect(page.getByLabel("CPF", { exact: true })).toHaveValue("529.982.247-25");
+  await fillAddress(page, /Correios SEDEX/);
+  await toPayment(page);
+  await page.getByRole("radio", { name: /^Cartão de crédito/ }).check();
+  const brick = page.locator('[data-mp-brick="cardPayment"]');
+  const typeCard = async (number: string) => {
+    await brick.getByLabel("Número do cartão").fill(number);
+    await brick.getByLabel("Nome do titular").fill("BRUNA ONLINE");
+    await brick.getByLabel("Validade").fill("12/30");
+    await brick.getByLabel("Código de segurança").fill("123");
+  };
+  // incomplete card data does not move on
+  await page.getByRole("button", { name: "Continuar para a revisão" }).click();
+  await expect(page.getByText("Confira os dados do cartão para continuar.")).toBeVisible();
+  await typeCard("4000 0000 0000 0002");
+  await brick.getByLabel("Parcelas").selectOption("3");
+  await toReview(page);
+  await expect(page.getByText("Visa final 0002 · 3x")).toBeVisible();
+  await page.getByRole("button", { name: `Confirmar e pagar ${brl(total)}` }).click();
+  // back on the card form with the reason; the refused card has to be replaced
+  await expect(page.getByRole("heading", { name: "Pagamento", exact: true })).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: "O cartão não tem limite suficiente. Tente outro cartão ou pague com Pix." })).toBeVisible();
+  await typeCard("5031 4332 1540 6351");
+  await toReview(page);
+  await expect(page.getByText("Mastercard final 6351 · à vista")).toBeVisible();
+  await page.getByRole("button", { name: `Confirmar e pagar ${brl(total)}` }).click();
+  await expect(page).toHaveURL(/\/pedido\/[0-9a-f-]{36}$/);
+  await expect(page.getByText("Pagamento aprovado").filter({ visible: true }).first()).toBeVisible();
+  await expect(page.getByText(/\(Cartão de crédito Mastercard\)\. Seu pedido está confirmado/).filter({ visible: true }).first()).toBeVisible();
+  expect(await serviceGet(request, `customers?email=eq.${encodeURIComponent(email)}&select=orders_count`)).toEqual([{ orders_count: 2 }]);
+
+  // Third order: boleto / Mercado Pago balance on Mercado Pago's page; refused, then paid from the order page
+  await page.goto("/produtos/skin1004-madagascar-centella-ampoule");
+  await page.getByRole("button", { name: "Comprar agora" }).click();
+  await fillAddress(page, /Correios SEDEX/);
+  await toPayment(page);
+  await page.getByRole("radio", { name: /^Boleto ou saldo no Mercado Pago/ }).check();
+  await toReview(page);
+  await page.getByRole("button", { name: "Confirmar e ir para o Mercado Pago" }).click();
+  await expect(page.getByRole("heading", { name: "Mercado Pago — simulador local" })).toBeVisible();
+  await expect(page.getByText(`Total: ${brl(total)}`)).toBeVisible();
   await page.getByRole("button", { name: "Recusar pagamento" }).click();
   await expect(page.getByText("Pagamento não aprovado").filter({ visible: true }).first()).toBeVisible();
   await page.getByRole("button", { name: "Tentar pagar novamente" }).click();
@@ -749,10 +902,7 @@ test("Pagamento online — Mercado Pago: pagar pelo site, aviso assinado confirm
   await expect(page.getByText(/\(Cartão de crédito\)\. Seu pedido está confirmado/).filter({ visible: true }).first()).toBeVisible();
 
   // Switched off again: the store goes back to WhatsApp only
-  await admin.goto("/admin/configuracoes");
-  await admin.getByLabel("Oferecer pagamento pelo site (Pix, cartão e boleto)").uncheck();
-  await admin.getByRole("button", { name: "Salvar configurações" }).click();
-  await expect(admin.getByText("Configurações salvas.")).toBeVisible();
+  await setOnlinePayment(false);
   await page.goto("/produtos/skin1004-madagascar-centella-ampoule");
   await expect(page.getByRole("button", { name: "Comprar pelo WhatsApp" })).toBeVisible();
   await ctx.close();
@@ -820,8 +970,6 @@ function fakeApplePay() {
 
 test("Apple Pay — painel, arquivo da Apple, CPF, recusa sem pedido duplicado, aprovação e devolução avisada pelo webhook", async ({ browser, request }) => {
   const MP = "http://localhost:54321/mercadopago";
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "http://localhost:54321";
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 
   // Admin: the public key refuses an access token; then Apple Pay is configured and switched on
@@ -854,10 +1002,11 @@ test("Apple Pay — painel, arquivo da Apple, CPF, recusa sem pedido duplicado, 
   await visitor.getByLabel("Calcular frete e prazo").fill("01001-000");
   await expect(visitor.getByText("Correios SEDEX")).toBeVisible();
   await visitor.getByRole("button", { name: "Comprar agora" }).click();
-  await register(visitor, "Davi Sem Apple");
-  await visitor.getByRole("radio", { name: /Correios SEDEX/ }).check();
-  await expect(visitor.getByRole("radio", { name: /Pagar agora pelo site/ })).toBeChecked();
-  await expect(visitor.getByRole("radio", { name: /Apple Pay/ })).toHaveCount(0);
+  await fillIdentity(visitor, "Davi Sem Apple");
+  await fillAddress(visitor, /Correios SEDEX/);
+  await toPayment(visitor);
+  await expect(visitor.getByRole("radio", { name: /^Pix/ })).toBeChecked();
+  await expect(visitor.getByRole("radio", { name: /^Apple Pay/ })).toHaveCount(0);
   await plain.close();
 
   // Safari with Apple Pay (simulated)
@@ -868,17 +1017,19 @@ test("Apple Pay — painel, arquivo da Apple, CPF, recusa sem pedido duplicado, 
   await page.getByLabel("Calcular frete e prazo").fill("01001-000");
   await expect(page.getByText("Correios SEDEX")).toBeVisible();
   await page.getByRole("button", { name: "Comprar agora" }).click();
-  const email = await register(page, "Carla Apple");
-  await page.getByRole("radio", { name: /Correios SEDEX/ }).check();
-  await page.getByRole("radio", { name: /Apple Pay/ }).check();
-  await expect(page.getByText("Informe seu CPF para pagar com Apple Pay.")).toBeVisible();
-  const appleButton = page.getByRole("button", { name: "Pagar com Apple Pay" });
-  await expect(appleButton).toBeDisabled();
-  await page.getByLabel("Seu CPF").fill("123.456.789-00");
+  // the CPF Mercado Pago needs for Apple Pay is asked with the buyer's data
+  const email = await fillIdentity(page, "Carla Apple", "12345678900");
+  await fillAddress(page, /Correios SEDEX/);
+  await page.getByRole("button", { name: "Continuar para o pagamento" }).click();
   await expect(page.getByText("CPF inválido. Confira os números.")).toBeVisible();
-  await page.getByLabel("Seu CPF").fill("52998224725");
-  await expect(page.getByLabel("Seu CPF")).toHaveValue("529.982.247-25");
-  await expect(page.getByText("Total a pagar", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("CPF", { exact: true })).toHaveAttribute("aria-invalid", "true");
+  await page.getByLabel("CPF", { exact: true }).fill("52998224725");
+  await expect(page.getByLabel("CPF", { exact: true })).toHaveValue("529.982.247-25");
+  await toPayment(page);
+  await page.getByRole("radio", { name: /^Apple Pay/ }).check();
+  await expect(page.getByRole("complementary", { name: "Resumo do pedido" }).getByText("Total a pagar", { exact: true })).toBeVisible();
+  await toReview(page);
+  const appleButton = page.getByRole("button", { name: "Pagar com Apple Pay" });
 
   // First the card is refused: the message shows and the order is kept for the next attempt
   await page.evaluate(() => localStorage.setItem("__applePayDecline", "1"));
@@ -905,10 +1056,7 @@ test("Apple Pay — painel, arquivo da Apple, CPF, recusa sem pedido duplicado, 
   expect(sheet.result).toBe(0);
 
   // The refused attempt did not create a second order
-  const customers = await request.get(`${supabaseUrl}/rest/v1/customers?email=eq.${encodeURIComponent(email)}&select=orders_count`, {
-    headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
-  });
-  expect(await customers.json()).toEqual([{ orders_count: 1 }]);
+  expect(await serviceGet(request, `customers?email=eq.${encodeURIComponent(email)}&select=orders_count`)).toEqual([{ orders_count: 1 }]);
 
   // Admin: the payment card shows Apple Pay and the Mercado Pago order
   const code = (await page.getByRole("heading", { level: 1 }).textContent())!.trim();
@@ -922,7 +1070,7 @@ test("Apple Pay — painel, arquivo da Apple, CPF, recusa sem pedido duplicado, 
   // A refund at Mercado Pago arrives as a signed "order" notification
   const refunded = await request.post(`${MP}/test/orders/${mpOrderId}/refund`);
   expect((await refunded.json()).webhook).toBe(200);
-  const receipt = await request.post(`${supabaseUrl}/rest/v1/rpc/get_order_receipt`, { headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` }, data: { p_order_id: orderId } });
+  const receipt = await request.post(`${SUPABASE_URL}/rest/v1/rpc/get_order_receipt`, { headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` }, data: { p_order_id: orderId } });
   expect(await receipt.json()).toMatchObject({ payment_status: "refunded", payment_type: "apple_pay" });
   await page.reload();
   await expect(page.getByText("Pagamento devolvido").filter({ visible: true }).first()).toBeVisible();
@@ -934,4 +1082,238 @@ test("Apple Pay — painel, arquivo da Apple, CPF, recusa sem pedido duplicado, 
   await admin.getByRole("button", { name: "Salvar configurações" }).click();
   await expect(admin.getByText("Configurações salvas.")).toBeVisible();
   await ctx.close();
+});
+
+// ---------------------------------------------------------------------------
+// Checkout em 4 etapas + login com Google e Apple (simulador OAuth local, nunca os provedores reais)
+// ---------------------------------------------------------------------------
+test("Checkout — sacola vazia, dados mantidos ao atualizar a página e ao voltar pelo navegador, produto que fica indisponível", async ({ browser }) => {
+  const ctx = await browser.newContext({ storageState: RETURNING_VISITOR });
+  const page = await ctx.newPage();
+
+  await page.goto("/finalizar");
+  await expect(page.getByText("Sua sacola está vazia")).toBeVisible();
+
+  await page.goto("/produtos/celimax-pore-dark-spot-brightening-cream");
+  await page.getByRole("button", { name: "Adicionar ao carrinho" }).click();
+  await page.getByRole("button", { name: "Fechar" }).click();
+  await page.goto("/finalizar?etapa=identificacao");
+  // an unknown CEP is reported next to the field
+  await page.getByLabel("CEP", { exact: true }).fill("99999-999");
+  await expect(page.getByText("Não encontramos este CEP. Confira os números e tente de novo.")).toBeVisible();
+  const email = await fillIdentity(page, "Lia Refresh");
+  await fillAddress(page, /Correios PAC/);
+
+  // a refresh in the middle of the checkout keeps everything
+  await page.reload();
+  await expect(page.getByLabel("E-mail", { exact: true })).toHaveValue(email);
+  await expect(page.getByLabel("Primeiro nome")).toHaveValue("Lia");
+  await expect(page.getByLabel("Número", { exact: true })).toHaveValue("100");
+  await expect(page.getByRole("radio", { name: /Correios PAC/ })).toBeChecked();
+  await toPayment(page);
+  await expect(page).toHaveURL(/etapa=pagamento/);
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Pagamento", exact: true })).toBeVisible();
+  // the browser's back button returns to step 2 with the data
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "Seus dados" })).toBeVisible();
+  await expect(page.getByLabel("Sobrenome")).toHaveValue("Refresh");
+
+  // A product that becomes unavailable blocks the checkout, with a link back to the bag
+  await editProductBySlug(admin, "celimax-pore-dark-spot-brightening-cream");
+  await admin.getByLabel("Disponibilidade", { exact: true }).selectOption("out_of_stock");
+  await saveProduct(admin);
+  await page.goto("/finalizar?etapa=identificacao");
+  await expect(page.getByRole("alert").filter({ hasText: "Um ou mais produtos ficaram indisponíveis." })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Continuar para o pagamento" })).toBeDisabled();
+  await expect(page.getByRole("link", { name: "Revisar sacola" })).toHaveAttribute("href", "/carrinho");
+  await editProductBySlug(admin, "celimax-pore-dark-spot-brightening-cream");
+  await admin.getByLabel("Disponibilidade", { exact: true }).selectOption("in_stock");
+  await saveProduct(admin);
+  await ctx.close();
+});
+
+test("Login com Google — cliente nova volta à finalização com a sacola, completa só o que falta e salva o endereço; em outro aparelho usa o endereço salvo", async ({ browser, request }) => {
+  const googleEmail = `ana${Date.now()}@exemplo.com.br`;
+  const ctx = await browser.newContext({ storageState: RETURNING_VISITOR });
+  const page = await ctx.newPage();
+  let whatsappUrl = "";
+  await ctx.route("https://wa.me/**", async (route) => {
+    whatsappUrl = route.request().url();
+    await route.fulfill({ status: 200, body: "whatsapp" });
+  });
+
+  await page.goto("/produtos/dr-althea-345-relief-cream");
+  await page.getByRole("button", { name: "Adicionar ao carrinho" }).click();
+  await page.getByRole("button", { name: "Fechar" }).click();
+  await page.goto("/carrinho");
+  await page.getByRole("link", { name: "Continuar para identificação" }).click();
+  await expect(page.getByText("ou continue com seus dados")).toBeVisible();
+  await socialLogin(page, "Google", googleEmail, "Ana Google");
+  await expect(page).toHaveURL(/\/finalizar\?etapa=identificacao/);
+  await expect(page.getByRole("complementary", { name: "Resumo do pedido" })).toContainText("345 Relief Cream");
+
+  // the account brings the e-mail and the name; only CPF, phone and address are asked
+  await expect(page.getByText("Conectada com Google")).toBeVisible();
+  await expect(page.getByLabel("E-mail", { exact: true })).toHaveValue(googleEmail);
+  await expect(page.getByLabel("E-mail", { exact: true })).toBeDisabled();
+  await expect(page.getByLabel("Primeiro nome")).toHaveValue("Ana");
+  await expect(page.getByLabel("Sobrenome")).toHaveValue("Google");
+  await expect(page.getByText(/Complete os dados que faltam para finalizar a compra/)).toBeVisible();
+  await page.getByLabel("CPF", { exact: true }).fill(CPF);
+  await page.getByLabel("Telefone com DDD").fill("(21) 98765-4321");
+  await fillAddress(page, /Correios SEDEX/);
+  await expect(page.getByLabel("Nome de quem vai receber")).toHaveValue("Ana Google");
+  await page.getByLabel("Salvar este endereço na minha conta").check();
+  await toPayment(page);
+  await toReview(page);
+  await page.getByRole("button", { name: "Confirmar e enviar pelo WhatsApp" }).click();
+  await expect.poll(() => whatsappUrl, { timeout: 15_000 }).toContain("https://wa.me/");
+  const code = decodeURIComponent(whatsappUrl.split("text=")[1]).match(/MIV-\d{6}/)![0];
+
+  // The order belongs to the account; the account page shows the saved address and the order
+  const [order] = await serviceGet(request, `order_intents?code=eq.${code}&select=user_id,customer_cpf,shipping_street`);
+  expect(order).toMatchObject({ customer_cpf: CPF, shipping_street: "Praça da Sé" });
+  expect(order.user_id).toMatch(/^[0-9a-f-]{36}$/);
+  await page.goto("/minha-conta");
+  const account = page.getByRole("region", { name: "Sua conta" });
+  await expect(account).toContainText(googleEmail);
+  await expect(account).toContainText("Conectada com Google");
+  await expect(account).toContainText("Praça da Sé, 100");
+  await expect(account.getByRole("link", { name: code })).toBeVisible();
+
+  // Another device: the same Google account brings the saved data and address
+  const other = await browser.newContext({ storageState: RETURNING_VISITOR });
+  const phone = await other.newPage();
+  await phone.goto("/produtos/dr-althea-345-relief-cream");
+  await phone.getByRole("button", { name: "Adicionar ao carrinho" }).click();
+  await phone.getByRole("button", { name: "Fechar" }).click();
+  await phone.goto("/finalizar");
+  await socialLogin(phone, "Google", googleEmail, "Ana Google");
+  const data = phone.getByRole("region", { name: "Dados da conta" });
+  await expect(data).toContainText("Ana Google");
+  await expect(data).toContainText("CPF ***.***.247-25");
+  await expect(phone.getByRole("radio", { name: /Ana Google.*Praça da Sé, 100/ })).toBeChecked();
+  await phone.getByRole("radio", { name: /Correios SEDEX/ }).check();
+  await toPayment(phone);
+  await toReview(phone);
+  await expect(phone.getByRole("region", { name: "Revise seu pedido" })).toContainText("Praça da Sé, 100");
+
+  // Signing out on a shared device clears the account's data from the checkout
+  await phone.getByRole("button", { name: "Alterar seus dados" }).click();
+  await phone.getByRole("button", { name: "Sair da conta" }).click();
+  await expect(phone.getByText("Você saiu da sua conta neste aparelho.")).toBeVisible();
+  await expect(phone.getByLabel("E-mail", { exact: true })).toHaveValue("");
+  await expect(phone.getByRole("button", { name: "Continuar com Google" })).toBeVisible();
+  await other.close();
+  await ctx.close();
+});
+
+test("Login com Apple — cancelar volta sem perder a sacola; sem nome e com e-mail privado da Apple, pede só o que falta", async ({ browser }) => {
+  const relay = `x${Date.now()}@privaterelay.appleid.com`;
+  const ctx = await browser.newContext({ storageState: RETURNING_VISITOR });
+  const page = await ctx.newPage();
+  await page.goto("/produtos/skin1004-madagascar-centella-ampoule");
+  await page.getByRole("button", { name: "Adicionar ao carrinho" }).click();
+  await page.getByRole("button", { name: "Fechar" }).click();
+  await page.goto("/finalizar");
+
+  await page.getByRole("button", { name: "Continuar com Apple" }).click();
+  await expect(page.getByRole("heading", { name: "Login com Apple — simulador local" })).toBeVisible();
+  await page.getByRole("button", { name: "Cancelar" }).click();
+  await expect(page.getByText("O login foi cancelado. Você pode tentar de novo ou continuar com seus dados.")).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "Resumo do pedido" })).toContainText("Madagascar Centella Ampoule");
+
+  // Apple shares no name here and hides the real e-mail behind its relay address
+  await socialLogin(page, "Apple", relay, "");
+  await expect(page.getByText("Conectada com Apple")).toBeVisible();
+  await expect(page.getByLabel("E-mail", { exact: true })).toHaveValue(relay);
+  await expect(page.getByLabel("Primeiro nome")).toHaveValue("");
+  await page.getByRole("button", { name: "Continuar para o pagamento" }).click();
+  await expect(page.getByText("Informe seu primeiro nome.")).toBeVisible();
+  await expect(page.getByText("Informe seu sobrenome.")).toBeVisible();
+  await page.getByLabel("Primeiro nome").fill("Bia");
+  await page.getByLabel("Sobrenome").fill("Maçã");
+  await page.getByLabel("CPF", { exact: true }).fill(CPF);
+  await page.getByLabel("Telefone com DDD").fill("(31) 97777-1234");
+  await fillAddress(page, /Correios SEDEX/);
+  await toPayment(page);
+
+  // the name typed once stays in the account
+  await page.goto("/minha-conta");
+  const account = page.getByRole("region", { name: "Sua conta" });
+  await expect(account).toContainText("Bia Maçã");
+  await expect(account).toContainText(relay);
+  await expect(account).toContainText("Conectada com Apple");
+  await ctx.close();
+});
+
+test("Sessão expirada — a finalização avisa, mantém os dados digitados e segue como visitante", async ({ browser }) => {
+  const email = `sessao${Date.now()}@exemplo.com.br`;
+  const ctx = await browser.newContext({ storageState: RETURNING_VISITOR });
+  const page = await ctx.newPage();
+  await page.goto("/produtos/skin1004-madagascar-centella-ampoule");
+  await page.getByRole("button", { name: "Adicionar ao carrinho" }).click();
+  await page.getByRole("button", { name: "Fechar" }).click();
+  await page.goto("/finalizar");
+  await socialLogin(page, "Google", email, "Rita Sessão");
+  await page.getByLabel("CPF", { exact: true }).fill(CPF);
+  await page.getByLabel("Telefone com DDD").fill("(41) 96666-1234");
+  await fillAddress(page, /Correios PAC/);
+
+  // the session ends (cookies gone) before the data is saved
+  await ctx.clearCookies();
+  await page.getByRole("button", { name: "Continuar para o pagamento" }).click();
+  await expect(page.getByText("Sua sessão expirou. Entre de novo ou continue como visitante: seus dados foram mantidos.")).toBeVisible();
+  await expect(page.getByLabel("E-mail", { exact: true })).toBeEnabled();
+  await expect(page.getByLabel("E-mail", { exact: true })).toHaveValue(email);
+  await expect(page.getByLabel("Primeiro nome")).toHaveValue("Rita");
+  await expect(page.getByLabel("CPF", { exact: true })).toHaveValue("529.982.247-25");
+  await expect(page.getByLabel("Número", { exact: true })).toHaveValue("100");
+  await expect(page.getByRole("button", { name: "Continuar com Google" })).toBeVisible();
+  await toPayment(page);
+  await ctx.close();
+});
+
+test("Checkout no celular (390 px) — resumo recolhível e nenhuma etapa com rolagem horizontal", async ({ browser }) => {
+  await setOnlinePayment(true);
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, storageState: RETURNING_VISITOR });
+  const page = await ctx.newPage();
+  const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+
+  await page.goto("/produtos/skin1004-madagascar-centella-ampoule");
+  await page.waitForLoadState("networkidle");
+  await page.getByRole("button", { name: "Adicionar ao carrinho" }).filter({ visible: true }).first().click();
+  await expect(page.getByRole("button", { name: "Fechar" })).toBeVisible();
+  await page.goto("/carrinho");
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText("Sacola (1 item)");
+  expect(await overflow(), "sacola").toBeLessThanOrEqual(0);
+  await page.getByRole("link", { name: "Continuar para identificação" }).click();
+
+  // on phones the summary sits collapsed at the top, with the total
+  const toggle = page.getByRole("button", { name: /Resumo do pedido/ });
+  await expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("complementary", { name: "Resumo do pedido" }).getByText("Madagascar Centella Ampoule")).toBeVisible();
+
+  await page.getByRole("button", { name: "Continuar para o pagamento" }).click();
+  await expect(page.getByText("Informe seu primeiro nome.")).toBeVisible();
+  expect(await overflow(), "identificação com erros").toBeLessThanOrEqual(0);
+  await fillIdentity(page, "Mila Celular");
+  await fillAddress(page, /Correios SEDEX/);
+  expect(await overflow(), "entrega").toBeLessThanOrEqual(0);
+  await toPayment(page);
+  await page.getByRole("radio", { name: /^Cartão de crédito/ }).check();
+  await expect(page.locator('[data-mp-brick="cardPayment"]')).toBeVisible();
+  expect(await overflow(), "pagamento").toBeLessThanOrEqual(0);
+  await page.getByRole("radio", { name: /^Pix/ }).check();
+  await toReview(page);
+  expect(await overflow(), "revisão").toBeLessThanOrEqual(0);
+  await page.getByRole("button", { name: "Confirmar e gerar o Pix" }).click();
+  await expect(page).toHaveURL(/\/pedido\/[0-9a-f-]{36}$/);
+  await expect(page.getByRole("button", { name: "Copiar código Pix" })).toBeVisible();
+  expect(await overflow(), "pedido com Pix").toBeLessThanOrEqual(0);
+  await ctx.close();
+  await setOnlinePayment(false);
 });

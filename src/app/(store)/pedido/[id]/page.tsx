@@ -4,7 +4,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { WhatsAppIcon } from "@/components/brand/social-icons";
-import { PaymentAutoRefresh, PayOrderButton } from "@/components/store/order/order-payment-actions";
+import { PaymentAutoRefresh, PayOrderButton, PixPayment, RenewPixButton } from "@/components/store/order/order-payment-actions";
 import { buttonClasses } from "@/components/ui/button";
 import { getStoreSettings } from "@/lib/catalog/queries";
 import { formatBRL } from "@/lib/money";
@@ -13,6 +13,8 @@ import { isUuid, paymentTypeLabel, paymentWindowOpen, type PaymentStatus } from 
 import { getPublicSupabase } from "@/lib/supabase/public";
 import { DELIVERY_METHOD_LABEL, type DeliveryMethod } from "@/lib/types";
 import { buildWhatsAppUrl, normalizeWhatsAppNumber } from "@/lib/whatsapp";
+
+const BRANDS: Record<string, string> = { master: "Mastercard", visa: "Visa", elo: "Elo", amex: "American Express", hipercard: "Hipercard" };
 
 export const metadata: Metadata = {
   title: "Seu pedido",
@@ -28,6 +30,9 @@ type Receipt = {
   payment_method: "whatsapp" | "mercadopago";
   payment_status: PaymentStatus;
   payment_type: string | null;
+  payment_installments: number | null;
+  payment_brand: string | null;
+  pix: { qr_code: string; qr_base64: string | null; ticket_url: string | null; expires_at: string | null } | null;
   amount_due_cents: number | null;
   amount_paid_cents: number | null;
   subtotal_cents: number;
@@ -87,7 +92,10 @@ async function OrderContent({ params, searchParams }: PageProps<"/pedido/[id]">)
   const ps = receipt.payment_status;
   const confirmed = ["confirmed", "completed"].includes(receipt.status);
   const canPay = online && ["pending", "rejected", "cancelled"].includes(ps) && !["cancelled", "completed"].includes(receipt.status) && paymentWindowOpen(receipt.created_at);
-  const type = paymentTypeLabel(receipt.payment_type);
+  const brand = receipt.payment_brand && receipt.payment_brand !== "pix" ? (BRANDS[receipt.payment_brand] ?? receipt.payment_brand) : null;
+  const type = [paymentTypeLabel(receipt.payment_type), brand, receipt.payment_installments && receipt.payment_installments > 1 ? `em ${receipt.payment_installments}x` : null].filter(Boolean).join(" ") || null;
+  const isPix = receipt.payment_brand === "pix" || receipt.payment_type === "bank_transfer";
+  const pixExpired = online && isPix && ps === "pending" && !receipt.pix && canPay;
   const total = receipt.amount_due_cents ?? (receipt.delivery_fee_cents != null ? receipt.subtotal_cents - receipt.discount_cents + receipt.delivery_fee_cents : null);
 
   const state = !online
@@ -108,9 +116,13 @@ async function OrderContent({ params, searchParams }: PageProps<"/pedido/[id]">)
               tone: "wait",
               icon: Clock,
               eyebrow: "Aguardando pagamento",
-              text: canPay
-                ? "Se você já pagou com Pix, a confirmação costuma chegar em instantes; boleto pode levar até 3 dias úteis. Esta página se atualiza sozinha. Se ainda não pagou, é só continuar pelo botão abaixo."
-                : "O prazo para pagamento deste pedido terminou. Faça um novo pedido ou fale com a gente pelo WhatsApp.",
+              text: receipt.pix
+                ? "Pague com Pix para concluir o pedido. Assim que o Mercado Pago confirmar o pagamento, esta página mostra a aprovação sozinha."
+                : pixExpired
+                  ? "O código Pix deste pedido expirou. Gere um novo código para pagar."
+                  : canPay
+                    ? "Se você já pagou com Pix, a confirmação costuma chegar em instantes; boleto pode levar até 3 dias úteis. Esta página se atualiza sozinha. Se ainda não pagou, é só continuar pelo botão abaixo."
+                    : "O prazo para pagamento deste pedido terminou. Faça um novo pedido ou fale com a gente pelo WhatsApp.",
             }
           : ps === "rejected"
             ? { tone: "error", icon: AlertCircle, eyebrow: "Pagamento não aprovado", text: canPay ? "O pagamento foi recusado. Nenhum valor foi cobrado por esta tentativa. Você pode tentar de novo com outro cartão ou pagar com Pix." : "O pagamento foi recusado e o prazo deste pedido terminou. Faça um novo pedido ou fale com a gente pelo WhatsApp." }
@@ -142,8 +154,20 @@ async function OrderContent({ params, searchParams }: PageProps<"/pedido/[id]">)
         <p className="mx-auto mt-4 max-w-md text-sm leading-relaxed text-muted" role="status">
           {state.text}
         </p>
+        {receipt.pix && ps === "pending" ? <PixPayment qrCode={receipt.pix.qr_code} qrBase64={receipt.pix.qr_base64} ticketUrl={receipt.pix.ticket_url} expiresAt={receipt.pix.expires_at} /> : null}
+        {ps === "approved" && confirmed ? (
+          <div className="mx-auto mt-6 max-w-md border-t border-line pt-5 text-left text-sm">
+            <p className="font-semibold">Próximos passos</p>
+            <ol className="mt-2 list-decimal space-y-1 pl-5 text-muted">
+              <li>Nossa equipe separa e embala os seus produtos.</li>
+              <li>O pedido segue pela entrega escolhida{receipt.shipping_estimate ? `, com prazo estimado de ${receipt.shipping_estimate}` : ""}.</li>
+              <li>Para qualquer dúvida, fale com a gente informando o código {receipt.code}.</li>
+            </ol>
+          </div>
+        ) : null}
         <div className="mx-auto mt-8 grid max-w-sm grid-cols-[minmax(0,1fr)] gap-3">
-          {canPay ? <PayOrderButton orderId={receipt.id} label={ps === "pending" ? "Pagar agora" : "Tentar pagar novamente"} /> : null}
+          {pixExpired ? <RenewPixButton orderId={receipt.id} /> : null}
+          {canPay && !receipt.pix ? <PayOrderButton orderId={receipt.id} label={pixExpired ? "Pagar de outra forma" : ps === "pending" ? "Pagar agora" : "Tentar pagar novamente"} /> : null}
           {online && (ps === "pending" || ps === "in_process") ? (
             <Link href={`/pedido/${receipt.id}`} className={buttonClasses("outline", "md", "w-full")}>
               Atualizar situação

@@ -9,6 +9,7 @@ import { forgetDeviceCustomer, formatBrPhone, readDeviceCustomer, type CustomerP
 import { forgetDeviceOrders, readDeviceOrders, type DeviceOrder } from "@/lib/store/order-history";
 import { buildWhatsAppUrl } from "@/lib/whatsapp";
 import { useCart } from "./cart-context";
+import { AccountSession } from "./account-session";
 import { CustomerForm } from "./customer-form";
 import { useStoreConfig } from "./store-config";
 
@@ -37,6 +38,7 @@ export function AccountOverview() {
   return (
     <div className="grid gap-8 lg:grid-cols-[1fr_22rem] lg:gap-12">
       <div className="space-y-8">
+        <AccountSession />
         <section id="cadastro" aria-labelledby="cadastro-titulo" className="scroll-mt-40 border border-line">
           <header className="flex items-center justify-between gap-4 border-b border-line px-5 py-4">
             <h2 id="cadastro-titulo" className="flex items-center gap-2.5 text-[0.9375rem] font-semibold">

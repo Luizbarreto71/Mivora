@@ -2,9 +2,9 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 /**
- * Refreshes the Supabase session cookie for the admin area and performs an
- * optimistic redirect to the login page. Real authorization happens on the
- * server (requireAdmin) and in the database (RLS) — never only here.
+ * Refreshes the Supabase session cookie (admin area, checkout and customer account) and, for the admin area
+ * only, performs an optimistic redirect to the login page. Real authorization happens on the server
+ * (requireAdmin, account actions) and in the database (RLS) — never only here.
  */
 export async function proxy(request: NextRequest) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -26,8 +26,8 @@ export async function proxy(request: NextRequest) {
   });
 
   const { data } = await supabase.auth.getUser();
-  const isLogin = request.nextUrl.pathname.startsWith("/admin/login");
-  if (!data.user && !isLogin) {
+  const path = request.nextUrl.pathname;
+  if (path.startsWith("/admin") && !path.startsWith("/admin/login") && !data.user) {
     const login = request.nextUrl.clone();
     login.pathname = "/admin/login";
     login.search = "";
@@ -37,5 +37,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/admin/:path*"],
+  matcher: ["/admin/:path*", "/finalizar", "/minha-conta"],
 };

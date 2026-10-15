@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { WhatsAppIcon } from "@/components/brand/social-icons";
 import { buttonClasses } from "@/components/ui/button";
 import { formatBRL } from "@/lib/money";
 import type { ShippingOption, ShippingQuote } from "@/lib/shipping/types";
@@ -11,10 +10,11 @@ import { useCart } from "../cart-context";
 import { CartLineItem, CartSummary, useCartRefresh } from "../cart-lines";
 import { ShippingCalculator, shippingFeeLabel } from "../shipping-calculator";
 import { useStoreConfig } from "../store-config";
+import { CheckoutSteps } from "./steps";
 
 export function CartPageContent() {
   const { lines, totals, hydrated, clear } = useCart();
-  const { shippingCalculator, onlinePayment } = useStoreConfig();
+  const { shippingCalculator, onlinePayment, whatsappNumber } = useStoreConfig();
   const [, setShippingQuote] = useState<ShippingQuote | null>(null);
   const [shippingOption, setShippingOption] = useState<ShippingOption | null>(null);
   useCartRefresh(true);
@@ -24,7 +24,7 @@ export function CartPageContent() {
   if (lines.length === 0) {
     return (
       <EmptyState
-        title="Seu carrinho está vazio"
+        title="Sua sacola está vazia"
         description="Explore a curadoria MIVORA e adicione seus produtos favoritos."
         action={
           <Link href="/produtos" className={buttonClasses("primary")}>
@@ -41,10 +41,11 @@ export function CartPageContent() {
 
   return (
     <>
-      <h1 className="heading-display mb-8 text-[1.75rem] sm:text-[2.125rem]">
-        Seu carrinho <span className="font-normal text-muted">({units} {units === 1 ? "item" : "itens"})</span>
+      <CheckoutSteps current="sacola" />
+      <h1 className="heading-display mb-8 mt-8 text-[1.75rem] sm:text-[2.125rem]">
+        Sacola <span className="font-normal text-muted">({units} {units === 1 ? "item" : "itens"})</span>
       </h1>
-      <div className="grid gap-10 lg:grid-cols-[1fr_24rem] lg:gap-12">
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-10 lg:grid-cols-[minmax(0,1fr)_24rem] lg:gap-12">
         <div>
           <ul className="divide-y divide-line border border-line px-4 sm:px-6">
             {lines.map((line) => (
@@ -56,7 +57,7 @@ export function CartPageContent() {
               Continuar comprando
             </Link>
             <button type="button" onClick={clear} className="text-xs text-muted underline underline-offset-4 hover:text-ink">
-              Esvaziar carrinho
+              Esvaziar sacola
             </button>
           </div>
         </div>
@@ -89,17 +90,13 @@ export function CartPageContent() {
                   <span className="tabular-nums">{formatBRL(totals.subtotalCents + shippingFee)}</span>
                 </div>
               ) : null}
-              <p className="text-xs leading-relaxed text-muted">A opção escolhida segue para a finalização. Cupom de primeira compra é aplicado lá.</p>
+              <p className="text-xs leading-relaxed text-muted">A opção escolhida segue para a próxima etapa. O cupom de primeira compra pode ser aplicado no resumo.</p>
             </div>
           ) : null}
           <div className="mt-7">
             {canCheckout ? (
-              <Link href="/finalizar" className={buttonClasses("primary", "lg", "w-full")}>
-                {onlinePayment ? "Finalizar compra" : (
-                  <>
-                    <WhatsAppIcon className="h-4 w-4" /> Finalizar pelo WhatsApp
-                  </>
-                )}
+              <Link href="/finalizar?etapa=identificacao" className={buttonClasses("primary", "lg", "w-full whitespace-normal px-5 text-center")}>
+                Continuar para identificação
               </Link>
             ) : (
               <p className="text-sm text-danger">Remova os itens indisponíveis para finalizar o pedido.</p>
@@ -107,8 +104,8 @@ export function CartPageContent() {
           </div>
           <p className="mt-4 text-xs leading-relaxed text-muted">
             {onlinePayment
-              ? "Na finalização, você paga pelo site com Pix, cartão ou boleto (Mercado Pago) ou, se preferir, envia o pedido para a nossa equipe pelo WhatsApp."
-              : "Ao finalizar, abriremos uma conversa no WhatsApp com a lista do seu pedido. A compra é confirmada pela nossa equipe."}
+              ? `Próximas etapas: seus dados e entrega, pagamento (Pix, cartão ou boleto pelo Mercado Pago${whatsappNumber ? " ou combinado pelo WhatsApp" : ""}) e revisão do pedido.`
+              : "Próximas etapas: seus dados e entrega, a forma de pagamento e a revisão do pedido, enviado para a nossa equipe pelo WhatsApp."}
           </p>
         </aside>
       </div>

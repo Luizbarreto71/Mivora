@@ -9,7 +9,7 @@ import { useStoreConfig } from "./store-config";
 export function FloatingWhatsApp() {
   const pathname = usePathname();
   const { whatsappNumber, whatsappGreeting } = useStoreConfig();
-  const hidden = !whatsappNumber || pathname.startsWith("/produtos/") || pathname === "/carrinho" || pathname === "/finalizar";
+  const hidden = !whatsappNumber || pathname.startsWith("/produtos/") || pathname === "/carrinho" || pathname === "/finalizar" || pathname.startsWith("/pedido/");
   if (hidden) return null;
   return (
     <a

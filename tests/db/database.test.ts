@@ -789,7 +789,7 @@ describe("customer registration (lead capture)", () => {
 
 describe("online payments (Mercado Pago)", () => {
   type Online = { id: string; code: string; payment_method: string; amount_due_cents: number; subtotal_cents: number; discount_cents: number; items: { ref: string }[] };
-  const SEDEX = { cep: "01001000", city: "São Paulo", uf: "SP", service: "Correios SEDEX", fee_cents: 4100, estimate: "3 dias úteis" };
+  const SEDEX = { cep: "01001000", city: "São Paulo", uf: "SP", service: "Correios SEDEX", fee_cents: 4100, estimate: "3 dias úteis", recipient: "Cliente Teste", street: "Praça da Sé", number: "100", district: "Sé" };
   const online = (items: unknown, shipping: unknown, coupon: string | null = null, method = "mercadopago") =>
     asRole(db, "anon", null, () =>
       one<{ r: Online }>(`select create_order_intent($1::jsonb, null, null, null, null, $2, $3::jsonb, $4::jsonb, $5) as r`, [
@@ -955,7 +955,12 @@ describe("Apple Pay (Mercado Pago Orders API)", () => {
     await db.query(`update store_settings set apple_pay_merchant_id = null, mercadopago_public_key = null, apple_pay_certificate_id = null, apple_pay_product_id = null, apple_pay_domain_association = null where id = 1`);
     const privacy = await one<{ body: string }>(`select body from pages where slug = 'politica-de-privacidade'`);
     expect(privacy.body).toContain("## Apple Pay");
-    expect(privacy.body).toMatch(/CPF.*não fica salvo/);
+    expect(privacy.body).toMatch(/CPF.*fica registrado no pedido/);
+    // the first version's sentences no longer describe the checkout
+    expect(privacy.body).toContain("## Conta, CPF e endereço");
+    expect(privacy.body).toContain("CPF e endereço de entrega) e das observações");
+    expect(privacy.body).not.toContain("Não coletamos dados de pagamento");
+    expect(privacy.body).not.toContain("são opcionais e só são registrados");
   });
 
   it("records Orders API payments (ORD ids, type apple_pay): a refused attempt, then approval, then a refund", async () => {
@@ -965,7 +970,7 @@ describe("Apple Pay (Mercado Pago Orders API)", () => {
     const r = await asRole(db, "anon", null, () =>
       one<{ r: { id: string; amount_due_cents: number } }>(`select create_order_intent($1::jsonb, null, null, null, null, null, $2::jsonb, $3::jsonb, 'mercadopago') as r`, [
         JSON.stringify([{ product_id: pid, quantity: 1 }]),
-        JSON.stringify({ cep: "01001000", city: "São Paulo", uf: "SP", service: "Correios SEDEX", fee_cents: 4100, estimate: "3 dias úteis" }),
+        JSON.stringify({ cep: "01001000", city: "São Paulo", uf: "SP", service: "Correios SEDEX", fee_cents: 4100, estimate: "3 dias úteis", recipient: "Cliente Teste", street: "Praça da Sé", number: "100", district: "Sé" }),
         newCustomer(),
       ]),
     );
@@ -981,6 +986,142 @@ describe("Apple Pay (Mercado Pago Orders API)", () => {
       amount_paid_cents: 15999 + 4100,
     });
     expect((await pay("ORD01BBBBBBBBBBBBBBBBBBBBBBBB", "refunded", r.r.amount_due_cents)).r).toMatchObject({ status: "confirmed", payment_status: "refunded" });
+    await db.query(`update store_settings set online_payment_enabled = false where id = 1`);
+  });
+});
+
+
+describe("checkout accounts, saved addresses and checkout attempts", () => {
+  type Account = { email: string; email_verified: boolean; provider: string; provider_name: string | null; saved: boolean; first_name: string | null; last_name: string | null; phone: string | null; cpf: string | null; marketing: boolean };
+  const ADDRESS = { recipient: "Ana Souza", street: "Praça da Sé", number: "100", complement: "ap 12", reference: "perto do metrô", district: "Sé" };
+  const SEDEX = { cep: "01001000", city: "São Paulo", uf: "SP", service: "Correios SEDEX", fee_cents: 4100, estimate: "3 dias úteis", ...ADDRESS };
+  let ana: string;
+  let bia: string;
+  let unverified: string;
+  let product: string;
+  const account = (uid: string) => asRole(db, "authenticated", uid, async () => (await one<{ a: Account }>(`select get_my_account() as a`)).a);
+  const order = (uid: string | null, customer: Record<string, unknown>, opts: { shipping?: unknown; requestId?: string | null; method?: string } = {}) =>
+    asRole(db, uid ? "authenticated" : "anon", uid, () =>
+      one<{ r: { id: string; code: string; duplicate?: boolean; amount_due_cents: number } }>(
+        `select create_order_intent($1::jsonb, null, null, null, null, null, $2::jsonb, $3::jsonb, $4, $5::uuid) as r`,
+        [JSON.stringify([{ product_id: product, quantity: 1 }]), JSON.stringify(opts.shipping === undefined ? SEDEX : opts.shipping), JSON.stringify(customer), opts.method ?? "mercadopago", opts.requestId ?? null],
+      ),
+    );
+
+  beforeAll(async () => {
+    const user = async (email: string, confirmed: boolean, meta: object, provider: string) =>
+      (await one<{ id: string }>(
+        `insert into auth.users (email, email_confirmed_at, raw_user_meta_data, raw_app_meta_data) values ($1, case when $2 then now() end, $3::jsonb, $4::jsonb) returning id`,
+        [email, confirmed, JSON.stringify(meta), JSON.stringify({ provider })],
+      )).id;
+    ana = await user("ana@conta.com", true, { full_name: "Ana Google", email: "ana@conta.com" }, "google");
+    bia = await user("bia@privaterelay.appleid.com", true, {}, "apple");
+    unverified = await user("sem-confirmacao@conta.com", false, {}, "email");
+    product = await productId("skin1004-madagascar-centella-ampoule");
+    await db.query(`update products set price_cents = 12999, track_inventory = false, availability = 'in_stock' where id = $1`, [product]);
+    await db.query(`update store_settings set online_payment_enabled = true where id = 1`);
+  });
+
+  it("validates CPF check digits in the database", async () => {
+    expect(await one(`select is_valid_cpf('529.982.247-25') as a, is_valid_cpf('12345678900') as b, is_valid_cpf('11111111111') as c, is_valid_cpf('5299822472') as d`)).toEqual({ a: true, b: false, c: false, d: false });
+  });
+
+  it("an account sees only what it saved itself; a visitor's record with the same e-mail is never shown or overwritten", async () => {
+    // a visitor buys with Ana's e-mail before she has an account
+    await order(null, { name: "Outra Pessoa", email: "ana@conta.com", phone: "11911112222", cpf: "529.982.247-25" });
+    await expect(asRole(db, "anon", null, () => db.query(`select get_my_account()`))).rejects.toThrow(/permission denied/);
+    expect(await account(ana)).toMatchObject({ email: "ana@conta.com", email_verified: true, provider: "google", provider_name: "Ana Google", saved: false, phone: null, cpf: null });
+    expect(await account(bia)).toMatchObject({ email: "bia@privaterelay.appleid.com", provider: "apple", provider_name: null, saved: false });
+
+    // saving links the verified e-mail's record to the account
+    const saved = await asRole(db, "authenticated", ana, async () =>
+      (await one<{ a: Account }>(`select save_my_account('Ana', 'Souza', '(11) 98888-7777', '529.982.247-25', true) as a`)).a,
+    );
+    expect(saved).toMatchObject({ saved: true, first_name: "Ana", last_name: "Souza", phone: "11988887777", cpf: "52998224725", marketing: true });
+    expect(await one(`select name, user_id = $1 as linked from customers where email = 'ana@conta.com'`, [ana])).toEqual({ name: "Ana Souza", linked: true });
+
+    // later visitors using that e-mail do not change the account holder's data; their order keeps what they typed
+    const visitor = await order(null, { first_name: "Outra", last_name: "Pessoa", email: "ana@conta.com", phone: "(21) 95555-4444", cpf: "529.982.247-25" });
+    expect(await one(`select name, phone from customers where email = 'ana@conta.com'`)).toEqual({ name: "Ana Souza", phone: "11988887777" });
+    expect(await one(`select customer_name, customer_phone, user_id from order_intents where id = $1`, [visitor.r.id])).toEqual({ customer_name: "Outra Pessoa", customer_phone: "21955554444", user_id: null });
+
+    // unverified e-mails cannot claim a record; invalid data is refused
+    await expect(asRole(db, "authenticated", unverified, () => db.query(`select save_my_account('Sem', 'Confirmacao', '11911112222', null)`))).rejects.toThrow(/email_not_verified/);
+    await expect(asRole(db, "authenticated", bia, () => db.query(`select save_my_account('Bia', 'Lima', '11911112222', '123.456.789-00')`))).rejects.toThrow(/invalid_cpf/);
+    await expect(asRole(db, "authenticated", bia, () => db.query(`select save_my_account('Bia', '', '11911112222', null)`))).rejects.toThrow(/invalid_name/);
+  });
+
+  it("saved addresses belong to one account: 10 at most and a single default", async () => {
+    const insert = (uid: string, extra: Record<string, unknown> = {}) =>
+      asRole(db, "authenticated", uid, () =>
+        one<{ id: string }>(
+          `insert into customer_addresses (recipient, cep, street, number, complement, district, city, uf, is_default) values ($1, $2, $3, $4, $5, $6, $7, $8, $9) returning id`,
+          [extra.recipient ?? "Ana Souza", extra.cep ?? "01001000", "Praça da Sé", "100", null, "Sé", "São Paulo", "SP", extra.is_default ?? false],
+        ),
+      );
+    const first = await insert(ana, { is_default: true });
+    const second = await insert(ana, { is_default: true, recipient: "Ana no trabalho" });
+    expect(await all(`select recipient, is_default from customer_addresses where user_id = $1 order by created_at`, [ana])).toEqual([
+      { recipient: "Ana Souza", is_default: false },
+      { recipient: "Ana no trabalho", is_default: true },
+    ]);
+    await asRole(db, "authenticated", bia, async () => {
+      expect(await all(`select id from customer_addresses`)).toHaveLength(0);
+      const upd = await db.query(`update customer_addresses set recipient = 'Invasor' where id = $1`, [first.id]);
+      expect(upd.affectedRows ?? 0).toBe(0);
+      await expect(db.query(`insert into customer_addresses (user_id, recipient, cep, street, number, district, city, uf) values ($1, 'X', '01001000', 'Rua', '1', 'B', 'São Paulo', 'SP')`, [ana])).rejects.toThrow(/row-level security/);
+    });
+    await asRole(db, "anon", null, async () => expect(await all(`select id from customer_addresses`)).toHaveLength(0));
+    await expect(insert(ana, { cep: "0100100" })).rejects.toThrow(/check/);
+    for (let i = 0; i < 8; i++) await insert(ana);
+    await expect(insert(ana)).rejects.toThrow(/too_many_addresses/);
+    await asRole(db, "authenticated", ana, () => db.query(`delete from customer_addresses where id = $1`, [second.id]));
+    expect((await all(`select id from customer_addresses where user_id = $1`, [ana])).length).toBe(9);
+  });
+
+  it("one order per checkout attempt; online deliveries need the full address; orders belong to the signed-in account", async () => {
+    const customer = { first_name: "Ana", last_name: "Souza", email: "ana@conta.com", phone: "11988887777", cpf: "52998224725" };
+    const attempt = "7d3c1f0e-1111-4c4c-9a9a-000000000001";
+    const first = await order(ana, customer, { requestId: attempt });
+    const again = await order(ana, customer, { requestId: attempt });
+    expect(again.r).toMatchObject({ id: first.r.id, code: first.r.code, duplicate: true, amount_due_cents: 12999 + 4100 });
+    expect(await one(`select count(*)::int as n from order_intents where client_request_id = $1`, [attempt])).toEqual({ n: 1 });
+    expect(await one(`select user_id = $2 as mine, customer_cpf, shipping_recipient, shipping_street, shipping_number, shipping_complement, shipping_reference, shipping_district from order_intents where id = $1`, [first.r.id, ana])).toEqual({
+      mine: true,
+      customer_cpf: "52998224725",
+      shipping_recipient: "Ana Souza",
+      shipping_street: "Praça da Sé",
+      shipping_number: "100",
+      shipping_complement: "ap 12",
+      shipping_reference: "perto do metrô",
+      shipping_district: "Sé",
+    });
+
+    await expect(order(ana, customer, { shipping: { cep: "01001000", city: "São Paulo", uf: "SP", service: "Correios SEDEX", fee_cents: 4100 } })).rejects.toThrow(/address_required/);
+    await expect(order(null, { ...customer, cpf: "11111111111" })).rejects.toThrow(/invalid_cpf/);
+    // WhatsApp orders keep working without the full address
+    await order(null, { name: "Cliente WhatsApp", email: "whats@teste.com", phone: "11977776666" }, { shipping: { cep: "01001000" }, method: "whatsapp" });
+
+    const mine = await asRole(db, "authenticated", ana, async () => (await one<{ o: { code: string; total_cents: number }[] }>(`select get_my_orders() as o`)).o);
+    expect(mine.map((o) => o.code)).toContain(first.r.code);
+    expect(mine.find((o) => o.code === first.r.code)?.total_cents).toBe(12999 + 4100);
+    expect(await asRole(db, "authenticated", bia, async () => (await one<{ o: unknown[] }>(`select get_my_orders() as o`)).o)).toEqual([]);
+  });
+
+  it("the receipt shows the Pix code while it can be paid; payment details are written by the server only", async () => {
+    const r = await order(null, { first_name: "Caio", last_name: "Pix", email: "caio@pix.com", phone: "11966665555", cpf: "52998224725" });
+    await expect(
+      asRole(db, "anon", null, () => db.query(`select set_order_payment_info($1, null, null, 'x', null, null, null)`, [r.r.id])),
+    ).rejects.toThrow(/permission denied/);
+    await asRole(db, "service_role", null, () =>
+      db.query(`select set_order_payment_info($1, null, null, '00020126pix', 'iVBORw0', 'https://www.mercadopago.com.br/payments/1/ticket', now() + interval '1 hour')`, [r.r.id]),
+    );
+    const receipt = async () => (await asRole(db, "anon", null, () => one<{ r: { pix: { qr_code: string } | null; payment_installments: number | null } }>(`select get_order_receipt($1) as r`, [r.r.id]))).r;
+    expect((await receipt()).pix).toMatchObject({ qr_code: "00020126pix", qr_base64: "iVBORw0", ticket_url: "https://www.mercadopago.com.br/payments/1/ticket" });
+    await asRole(db, "service_role", null, () => db.query(`select apply_payment_update($1, '777', 'approved', 'accredited', 'bank_transfer', $2)`, [r.r.id, r.r.amount_due_cents]));
+    expect((await receipt()).pix).toBeNull();
+    await asRole(db, "service_role", null, () => db.query(`select set_order_payment_info($1, 3, 'master', null, null, null, null)`, [r.r.id]));
+    expect(await receipt()).toMatchObject({ payment_installments: 3, payment_brand: "master" });
     await db.query(`update store_settings set online_payment_enabled = false where id = 1`);
   });
 });

@@ -18,14 +18,14 @@ export async function GET(request: NextRequest) {
 
   let query = session.supabase
     .from("order_intents")
-    .select("code, created_at, status, payment_method, payment_status, payment_type, amount_paid_cents, paid_at, item_count, subtotal_cents, coupon_code, discount_cents, has_unpriced_items, delivery_method, delivery_fee_cents, shipping_service, shipping_estimate, shipping_cep, shipping_city, shipping_uf, customer_name, customer_phone, customer:customers(email), customer_notes, admin_notes, items:order_intent_items(name_snapshot, quantity, unit_price_cents)")
+    .select("code, created_at, status, payment_method, payment_status, payment_type, amount_paid_cents, paid_at, item_count, subtotal_cents, coupon_code, discount_cents, has_unpriced_items, delivery_method, delivery_fee_cents, shipping_service, shipping_estimate, shipping_cep, shipping_city, shipping_uf, shipping_recipient, shipping_street, shipping_number, shipping_complement, shipping_reference, shipping_district, customer_cpf, customer_name, customer_phone, customer:customers(email), customer_notes, admin_notes, items:order_intent_items(name_snapshot, quantity, unit_price_cents)")
     .order("created_at", { ascending: false })
     .limit(10000);
   if (status && status in ORDER_STATUS_LABEL) query = query.eq("status", status);
   const { data, error } = await query;
   if (error) return NextResponse.json({ error: "query_failed" }, { status: 500 });
 
-  const header = ["Pedido", "Data", "Status", "Pagamento", "Situação do pagamento", "Forma de pagamento", "Valor pago (R$)", "Pago em", "Itens", "Subtotal (R$)", "Cupom", "Desconto (R$)", "Itens sob consulta", "Entrega", "Taxa estimada (R$)", "Serviço de entrega", "Prazo estimado", "CEP", "Cidade/UF", "Nome", "Telefone", "E-mail", "Observações do cliente", "Anotações internas", "Produtos"];
+  const header = ["Pedido", "Data", "Status", "Pagamento", "Situação do pagamento", "Forma de pagamento", "Valor pago (R$)", "Pago em", "Itens", "Subtotal (R$)", "Cupom", "Desconto (R$)", "Itens sob consulta", "Entrega", "Taxa estimada (R$)", "Serviço de entrega", "Prazo estimado", "CEP", "Cidade/UF", "Destinatário", "Endereço", "Bairro", "Referência", "Nome", "CPF", "Telefone", "E-mail", "Observações do cliente", "Anotações internas", "Produtos"];
   const lines = (data ?? []).map((o) =>
     [
       o.code,
@@ -47,7 +47,12 @@ export async function GET(request: NextRequest) {
       o.shipping_estimate ?? "",
       o.shipping_cep ? formatCep(o.shipping_cep) : "",
       o.shipping_city ? `${o.shipping_city}${o.shipping_uf ? `/${o.shipping_uf}` : ""}` : "",
+      o.shipping_recipient ?? "",
+      o.shipping_street ? `${o.shipping_street}, ${o.shipping_number ?? ""}${o.shipping_complement ? ` - ${o.shipping_complement}` : ""}` : "",
+      o.shipping_district ?? "",
+      o.shipping_reference ?? "",
       o.customer_name,
+      o.customer_cpf ?? "",
       o.customer_phone,
       (o.customer as unknown as { email: string } | null)?.email ?? "",
       o.customer_notes,

@@ -9,12 +9,14 @@ import { TopBar } from "@/components/store/top-bar";
 import { WelcomeIntro } from "@/components/store/welcome-intro";
 import { getBrands, getCategories, getKits, getStoreSettings } from "@/lib/catalog/queries";
 import { SITE_URL } from "@/lib/env";
+import { getSocialProviders } from "@/lib/auth/providers";
 import { applePayConfig } from "@/lib/payments/apple-pay";
 import { mercadoPagoConfig } from "@/lib/payments/mercadopago";
 import { normalizeWhatsAppNumber } from "@/lib/whatsapp";
 
 export default async function StoreLayout({ children }: { children: React.ReactNode }) {
-  const [settings, categories, brands, kits] = await Promise.all([getStoreSettings(), getCategories(), getBrands(), getKits()]);
+  const [settings, categories, brands, kits, socialProviders] = await Promise.all([getStoreSettings(), getCategories(), getBrands(), getKits(), getSocialProviders()]);
+  const onlinePayment = settings.online_payment_enabled && mercadoPagoConfig().ready;
 
   const nav: NavData = {
     productTypes: categories.filter((c) => c.kind === "product_type" && !c.parent_id && c.productCount > 0).map(({ slug, name }) => ({ slug, name })),
@@ -34,8 +36,12 @@ export default async function StoreLayout({ children }: { children: React.ReactN
         comingSoonInquiry: settings.coming_soon_inquiry_enabled,
         welcomeOffer: settings.welcome_offer_enabled ? { code: settings.welcome_offer_code, percent: settings.welcome_offer_percent } : null,
         shippingCalculator: settings.shipping_calculator_enabled,
-        onlinePayment: settings.online_payment_enabled && mercadoPagoConfig().ready,
+        onlinePayment,
         applePay: applePayConfig(settings).ready,
+        cardPayments: onlinePayment && Boolean(settings.mercadopago_public_key),
+        mercadoPagoPublicKey: settings.mercadopago_public_key,
+        maxInstallments: settings.online_payment_max_installments,
+        socialProviders,
       }}
     >
       <CartProvider>

@@ -8,7 +8,7 @@ export const APPLE_PAY_VERSION = 3;
 export const APPLE_PAY_NETWORKS = ["visa", "masterCard"] as const;
 
 // ---------------------------------------------------------------------------
-// CPF (required by Mercado Pago for this payment; never stored by the store)
+// CPF (required by Mercado Pago for this payment)
 // ---------------------------------------------------------------------------
 export function normalizeCpf(value: string | null | undefined) {
   return (value ?? "").replace(/\D/g, "").slice(0, 11);

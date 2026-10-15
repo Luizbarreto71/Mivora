@@ -10,7 +10,8 @@ import { requireAdmin } from "@/lib/admin/auth";
 import { ORDER_STATUS_TONE } from "@/lib/admin/labels";
 import { formatBRL } from "@/lib/money";
 import { PAYMENT_STATUS_LABEL, paymentTypeLabel, type PaymentStatus } from "@/lib/payments/mercadopago-core";
-import { destinationLabel } from "@/lib/shipping/cep";
+import { destinationLabel, formatCep } from "@/lib/shipping/cep";
+import { formatCpf } from "@/lib/payments/apple-pay-core";
 import { DELIVERY_METHOD_LABEL, ORDER_STATUS_LABEL, type DeliveryMethod, type OrderStatus } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils";
 import { buildWhatsAppUrl, normalizeWhatsAppNumber } from "@/lib/whatsapp";
@@ -121,6 +122,27 @@ export default async function OrderDetailPage({ params }: PageProps<"/admin/pedi
                   <span className="text-right">{destinationLabel({ cep: order.shipping_cep, city: order.shipping_city, uf: order.shipping_uf })}</span>
                 </p>
               ) : null}
+              {order.shipping_street ? (
+                <div className="mt-2 rounded-md bg-ivory p-3 text-ink">
+                  <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">Endereço de entrega</p>
+                  <p className="mt-1 font-medium">{order.shipping_recipient}</p>
+                  <p>
+                    {order.shipping_street}, {order.shipping_number}
+                    {order.shipping_complement ? ` · ${order.shipping_complement}` : ""}
+                  </p>
+                  <p>
+                    {order.shipping_district} · {order.shipping_city}/{order.shipping_uf} · CEP {order.shipping_cep ? formatCep(order.shipping_cep) : ""}
+                  </p>
+                  {order.shipping_reference ? <p className="text-muted">Referência: {order.shipping_reference}</p> : null}
+                </div>
+              ) : null}
+              {order.customer_cpf ? (
+                <p className="flex justify-between gap-4 text-muted">
+                  <span>CPF</span>
+                  <span className="tabular-nums">{formatCpf(order.customer_cpf)}</span>
+                </p>
+              ) : null}
+              {order.user_id ? <p className="text-xs text-muted">Pedido feito com conta (login Google/Apple).</p> : null}
             </div>
           </Card>
 
@@ -184,7 +206,11 @@ export default async function OrderDetailPage({ params }: PageProps<"/admin/pedi
                 {order.payment_type ? (
                   <div className="flex justify-between gap-3">
                     <dt className="text-muted">Forma</dt>
-                    <dd>{paymentTypeLabel(order.payment_type)}</dd>
+                    <dd>
+                      {paymentTypeLabel(order.payment_type)}
+                      {order.payment_brand && order.payment_brand !== "pix" ? ` · ${order.payment_brand}` : ""}
+                      {order.payment_installments && order.payment_installments > 1 ? ` · ${order.payment_installments}x` : ""}
+                    </dd>
                   </div>
                 ) : null}
                 {order.paid_at ? (

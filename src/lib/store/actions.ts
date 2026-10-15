@@ -5,8 +5,12 @@ import { z } from "zod";
 import { getKits, getProductsByIds, getStoreSettings } from "@/lib/catalog/queries";
 import { applePayConfig, applePayDomain, chargeWithApplePay, createApplePaySession } from "@/lib/payments/apple-pay";
 import type { ApplePayLines } from "@/lib/payments/apple-pay-core";
-import { mercadoPagoConfig, openCheckout } from "@/lib/payments/mercadopago";
+import { isSupabaseConfigured } from "@/lib/env";
+import { chargeCard, createPix, mercadoPagoConfig, openCheckout } from "@/lib/payments/mercadopago";
 import { getPublicSupabase } from "@/lib/supabase/public";
+import { createServerSupabase } from "@/lib/supabase/server";
+import { saveMyAddress } from "./account-actions";
+import { cardRejectionMessage, isValidCpf } from "./checkout-data";
 import { lineKey } from "@/lib/cart/math";
 import { destinationLabel, normalizeCep } from "@/lib/shipping/cep";
 import { getShippingQuote } from "@/lib/shipping/quote";
@@ -101,21 +105,39 @@ export async function trackCartAdd(productId: string) {
   await sb.rpc("track_cart_add", { p_product_id: id.data });
 }
 
+const lineWithQuantity = lineRef.extend({ quantity: z.number().int().min(1).max(99) });
+
 const checkoutSchema = z.object({
-  items: z
-    .array(lineRef.extend({ quantity: z.number().int().min(1).max(99) }))
-    .min(1, "Seu carrinho está vazio.")
-    .max(60, "Carrinho muito grande. Fale com a gente pelo WhatsApp."),
-  // mandatory registration (lead capture); validated again by the database
+  /** One id per checkout attempt: repeated clicks reuse the same order */
+  requestId: z.uuid().optional(),
+  items: z.array(lineWithQuantity).min(1, "Seu carrinho está vazio.").max(60, "Carrinho muito grande. Fale com a gente pelo WhatsApp."),
+  // validated again by the database (CPF digits, phone, e-mail)
   customer: z.object(
     {
-      name: z.string().trim().min(2, "Informe seu nome completo.").max(120),
+      firstName: z.string().trim().min(1, "Informe seu primeiro nome.").max(60),
+      lastName: z.string().trim().min(1, "Informe seu sobrenome.").max(80),
       email: z.string().trim().max(254),
       phone: z.string().trim().max(30),
+      cpf: z.string().trim().max(20).optional().default(""),
       marketing: z.boolean().optional(),
     },
-    { error: "Faça seu cadastro para finalizar a compra." },
+    { error: "Informe seus dados para finalizar a compra." },
   ),
+  /** Delivery address (not needed for pickup or a delivery arranged on WhatsApp) */
+  address: z
+    .object({
+      recipient: z.string().trim().max(120),
+      cep: z.string().trim().max(12),
+      street: z.string().trim().max(120),
+      number: z.string().trim().max(20),
+      complement: z.string().trim().max(80).optional().default(""),
+      reference: z.string().trim().max(120).optional().default(""),
+      district: z.string().trim().max(80),
+      city: z.string().trim().max(80),
+      uf: z.string().trim().max(2),
+    })
+    .nullable()
+    .optional(),
   customerNotes: z.string().trim().max(1000).optional().default(""),
   deliveryZoneId: z.uuid().nullable().optional(),
   /** Option chosen in the CEP calculator; quoted again on the server */
@@ -131,18 +153,7 @@ const checkoutSchema = z.object({
     .optional()
     .default(""),
 });
-
-export type CheckoutResult =
-  | {
-      ok: true;
-      code: string;
-      whatsappUrl: string;
-      summarized: boolean;
-      subtotalCents: number;
-      discountCents: number;
-      hasUnpricedItems: boolean;
-    }
-  | { ok: false; error: string; retryable: boolean };
+type CheckoutInput = z.infer<typeof checkoutSchema>;
 
 const ERROR_MESSAGES: Record<string, string> = {
   empty_cart: "Seu carrinho está vazio",
@@ -155,17 +166,19 @@ const ERROR_MESSAGES: Record<string, string> = {
   rate_limited: "Muitos pedidos ao mesmo tempo. Tente novamente em instantes",
   coupon_invalid: "Este cupom não é válido no momento. Remova-o para continuar",
   coupon_not_first_purchase: "O cupom de boas-vindas vale apenas para a primeira compra. Remova-o para continuar",
-  customer_required: "Faça seu cadastro para finalizar a compra",
-  invalid_name: "Revise o nome do cadastro",
-  invalid_email: "Revise o e-mail do cadastro",
-  invalid_phone: "Revise o WhatsApp do cadastro (com DDD)",
+  customer_required: "Informe seus dados para finalizar a compra",
+  invalid_name: "Revise nome e sobrenome",
+  invalid_email: "Revise o e-mail",
+  invalid_phone: "Revise o telefone (com DDD)",
+  invalid_cpf: "Revise o CPF",
   invalid_cep: "CEP inválido. Confira os números",
   invalid_shipping: "Não foi possível validar a entrega escolhida. Calcule o frete novamente",
   delivery_zone_unavailable: "A opção de entrega escolhida não atende este CEP. Calcule o frete novamente",
+  address_required: "Informe o endereço completo de entrega (rua, número, bairro e destinatário)",
   invalid_payment_method: "Forma de pagamento inválida",
-  online_payment_disabled: "O pagamento pelo site não está disponível no momento. Você pode finalizar pelo WhatsApp",
-  online_payment_unavailable: "Há itens com preço sob consulta no carrinho. Para eles, finalize pelo WhatsApp",
-  delivery_required: "Para pagar pelo site, escolha uma entrega com valor definido (calcule o frete pelo CEP)",
+  online_payment_disabled: "O pagamento pelo site não está disponível no momento",
+  online_payment_unavailable: "Há itens com preço sob consulta no carrinho. Para eles, combine o pagamento pelo WhatsApp",
+  delivery_required: "Para pagar pelo site, escolha uma entrega com valor definido",
 };
 
 function describeRpcError(message: string) {
@@ -178,6 +191,7 @@ function describeRpcError(message: string) {
 type OrderRpcResult = {
   id: string;
   code: string;
+  duplicate?: boolean;
   subtotal_cents: number;
   discount_cents: number;
   coupon_code: string | null;
@@ -189,21 +203,20 @@ type OrderRpcResult = {
   items: { name: string; brand: string | null; code: string | null; quantity: number; unit_price_cents: number | null; line_total_cents: number | null }[];
 };
 
-type Registered = { ok: true; data: z.infer<typeof checkoutSchema>; r: OrderRpcResult } | { ok: false; error: string; retryable: boolean };
+type Registered = { ok: true; r: OrderRpcResult } | { ok: false; error: string; retryable: boolean };
 
-/** Validates the cart, quotes the delivery again and registers the order with server-side prices. */
-async function registerOrder(input: unknown, paymentMethod: "whatsapp" | "mercadopago"): Promise<Registered> {
-  const parsed = checkoutSchema.safeParse(input);
-  if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message ?? "Dados inválidos.", retryable: false };
-  }
-  const data = parsed.data;
-  const sb = getPublicSupabase();
-  if (!sb) return { ok: false, error: "A loja ainda não está conectada ao banco de dados.", retryable: false };
+/**
+ * Quotes the delivery again and registers the order with server-side prices. When the customer is signed in,
+ * the call carries their session, so the order is linked to the account (auth.uid() in the database).
+ */
+async function registerOrder(data: CheckoutInput, paymentMethod: "whatsapp" | "mercadopago"): Promise<Registered> {
+  if (!isSupabaseConfigured) return { ok: false, error: "A loja ainda não está conectada ao banco de dados.", retryable: false };
+  const sb = await createServerSupabase();
 
   // Delivery chosen in the CEP calculator: quoted again here, never trusted from the browser
   let deliveryZoneId = data.deliveryZoneId ?? null;
   let shipping: Record<string, unknown> | null = null;
+  const address = data.address ?? null;
   if (data.shipping) {
     const cep = normalizeCep(data.shipping.cep);
     if (!cep) return { ok: false, error: "CEP inválido. Confira os números.", retryable: false };
@@ -211,7 +224,14 @@ async function registerOrder(input: unknown, paymentMethod: "whatsapp" | "mercad
     const option = quote.options.find((o) => o.id === data.shipping!.optionId);
     if (!option) return { ok: false, error: "A opção de entrega escolhida não está mais disponível para este CEP. Calcule o frete novamente.", retryable: false };
     if (option.unavailableReason) return { ok: false, error: `${option.unavailableReason}.`, retryable: false };
-    const place = { cep, city: quote.address?.city ?? null, uf: quote.address?.uf ?? null };
+    const place = {
+      cep,
+      city: quote.address?.city ?? (address?.city || null),
+      uf: quote.address?.uf ?? (address?.uf ? address.uf.toUpperCase() : null),
+      ...(address && option.method !== "pickup" && option.method !== "to_arrange"
+        ? { recipient: address.recipient, street: address.street, number: address.number, complement: address.complement, reference: address.reference, district: address.district }
+        : {}),
+    };
     deliveryZoneId = option.kind === "zone" && option.method !== "to_arrange" ? option.zoneId : null;
     shipping = option.kind === "carrier" ? { ...place, service: option.name, fee_cents: option.feeCents, estimate: option.estimate } : place;
   }
@@ -222,8 +242,17 @@ async function registerOrder(input: unknown, paymentMethod: "whatsapp" | "mercad
     p_delivery_zone_id: deliveryZoneId,
     p_coupon_code: data.couponCode || null,
     p_shipping: shipping,
-    p_customer: data.customer,
+    p_customer: {
+      first_name: data.customer.firstName,
+      last_name: data.customer.lastName,
+      name: `${data.customer.firstName} ${data.customer.lastName}`,
+      email: data.customer.email,
+      phone: data.customer.phone,
+      ...(data.customer.cpf ? { cpf: data.customer.cpf } : {}),
+      ...(data.customer.marketing !== undefined ? { marketing: data.customer.marketing } : {}),
+    },
     p_payment_method: paymentMethod,
+    p_request_id: data.requestId ?? null,
   });
 
   if (error) {
@@ -232,107 +261,189 @@ async function registerOrder(input: unknown, paymentMethod: "whatsapp" | "mercad
     console.error("[checkout] create_order_intent failed", error.message);
     return { ok: false, error: "Não foi possível registrar o pedido agora.", retryable: true };
   }
-  return { ok: true, data, r: result as OrderRpcResult };
+  return { ok: true, r: result as OrderRpcResult };
 }
 
-/**
- * Registers an order intent (server-side prices) and returns the WhatsApp link.
- * An intent is not a sale: stock only moves when the store confirms it.
- */
-export async function submitOrder(input: unknown): Promise<CheckoutResult> {
-  const settings = await getStoreSettings();
-  const number = normalizeWhatsAppNumber(settings.whatsapp_number);
-  if (!number) return { ok: false, error: "O WhatsApp da loja ainda não foi configurado.", retryable: false };
+async function clientIp() {
+  return (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
+}
 
-  const registered = await registerOrder(input, "whatsapp");
-  if (!registered.ok) return registered;
-  const { data, r } = registered;
-
-  const destination = r.destination ? destinationLabel(r.destination) : null;
-  const { url, summarized } = buildOrderWhatsAppLink(number, {
-    greeting: settings.whatsapp_greeting,
-    code: r.code,
-    items: r.items.map((i) => ({
-      name: i.brand && !i.name.toLowerCase().includes(i.brand.toLowerCase()) ? `${i.brand} ${i.name}` : i.name,
-      code: i.code,
-      quantity: i.quantity,
-      unitPriceCents: i.unit_price_cents,
-      lineTotalCents: i.line_total_cents,
-    })),
-    subtotalCents: r.subtotal_cents,
-    hasUnpricedItems: r.has_unpriced_items,
-    discount: r.coupon_code && r.discount_percent ? { code: r.coupon_code, percent: r.discount_percent, cents: r.discount_cents } : null,
-    delivery:
-      r.delivery && r.delivery.method !== "to_arrange"
-        ? { label: `${DELIVERY_METHOD_LABEL[r.delivery.method]} (${r.delivery.name})`, feeCents: r.delivery.fee_cents, estimate: r.delivery.estimate, destination }
-        : destination
-          ? { label: null, feeCents: null, destination }
-          : null,
-    customerName: data.customer.name,
-    customerNotes: data.customerNotes || null,
-  });
-
-  return {
-    ok: true,
-    code: r.code,
-    whatsappUrl: url,
-    summarized,
-    subtotalCents: r.subtotal_cents,
-    discountCents: r.discount_cents ?? 0,
-    hasUnpricedItems: r.has_unpriced_items,
+function makeLimiter(perMinute: number) {
+  const hits = new Map<string, { count: number; reset: number }>();
+  return (key: string) => {
+    const now = Date.now();
+    const entry = hits.get(key);
+    if (!entry || entry.reset < now) {
+      if (hits.size > 5000) hits.clear();
+      hits.set(key, { count: 1, reset: now + 60_000 });
+      return true;
+    }
+    entry.count += 1;
+    return entry.count <= perMinute;
   };
 }
+const allowPlace = makeLimiter(20);
+const allowPay = makeLimiter(10);
 
-export type OnlineCheckoutResult =
-  | { ok: true; code: string; orderUrl: string; checkoutUrl: string | null }
-  | { ok: false; error: string; retryable: boolean };
+const paymentSchema = z.discriminatedUnion("method", [
+  z.object({ method: z.literal("pix") }),
+  z.object({
+    method: z.literal("card"),
+    token: z.string().trim().min(8).max(200),
+    paymentMethodId: z.string().regex(/^[a-z0-9_]{2,30}$/),
+    issuerId: z.string().max(20).nullable().optional(),
+    installments: z.number().int().min(1).max(24),
+  }),
+  z.object({ method: z.literal("checkout_pro") }),
+  z.object({ method: z.literal("whatsapp") }),
+]);
+
+const placeSchema = checkoutSchema.extend({
+  requestId: z.uuid(),
+  saveAddress: z.boolean().optional(),
+  payment: paymentSchema,
+});
+
+export type PlaceOrderResult =
+  | { ok: true; kind: "order"; code: string; orderId: string; url: string }
+  | { ok: true; kind: "redirect"; code: string; orderId: string; url: string; orderUrl: string }
+  | { ok: true; kind: "whatsapp"; code: string; url: string; summarized: boolean }
+  | { ok: false; error: string; retryable: boolean; step?: "identificacao" | "pagamento"; orderId?: string };
+
+type Receipt = { payment_status: string; pix: { qr_code: string } | null };
+async function readReceipt(orderId: string) {
+  const { data } = (await getPublicSupabase()?.rpc("get_order_receipt", { p_order_id: orderId })) ?? { data: null };
+  return (data as Receipt | null) ?? null;
+}
 
 /**
- * Pay on the site: registers the order (total = products − discount + delivery, all computed by the
- * database) and opens the Mercado Pago checkout. The order is confirmed only when Mercado Pago approves.
+ * Review step → "Confirmar pedido". Registers the order (server prices, one order per attempt) and starts the
+ * chosen payment: Pix (QR code), card (Mercado Pago token), Mercado Pago's page (boleto, balance) or WhatsApp.
+ * An order is confirmed only when Mercado Pago approves the payment.
  */
-export async function startOnlinePayment(input: unknown): Promise<OnlineCheckoutResult> {
+export async function placeOrder(input: unknown): Promise<PlaceOrderResult> {
+  const parsed = placeSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Dados inválidos.", retryable: false };
+  const data = parsed.data;
+  if (!allowPlace(await clientIp())) return { ok: false, error: "Muitas tentativas seguidas. Aguarde um minuto e tente de novo.", retryable: true };
   const settings = await getStoreSettings();
-  if (!settings.online_payment_enabled || !mercadoPagoConfig().ready) {
-    return { ok: false, error: "O pagamento pelo site não está disponível no momento. Você pode finalizar pelo WhatsApp.", retryable: false };
+  const method = data.payment.method;
+  const online = method !== "whatsapp";
+  const whatsapp = normalizeWhatsAppNumber(settings.whatsapp_number);
+
+  if (online && (!settings.online_payment_enabled || !mercadoPagoConfig().ready)) {
+    return { ok: false, error: "O pagamento pelo site não está disponível no momento. Escolha outra forma de pagamento.", retryable: false, step: "pagamento" };
   }
-  const registered = await registerOrder(input, "mercadopago");
+  if (method === "card" && !settings.mercadopago_public_key) return { ok: false, error: "O pagamento com cartão não está disponível no momento.", retryable: false, step: "pagamento" };
+  if ((method === "pix" || method === "card") && !isValidCpf(data.customer.cpf)) return { ok: false, error: "Informe um CPF válido para pagar pelo site.", retryable: false, step: "identificacao" };
+  if (method === "whatsapp" && !whatsapp) return { ok: false, error: "O WhatsApp da loja ainda não foi configurado.", retryable: false, step: "pagamento" };
+
+  const registered = await registerOrder(data, online ? "mercadopago" : "whatsapp");
   if (!registered.ok) return registered;
-  const checkout = await openCheckout(registered.r.id);
-  return { ok: true, code: registered.r.code, orderUrl: `/pedido/${registered.r.id}`, checkoutUrl: checkout.ok ? checkout.url : null };
-}
+  const r = registered.r;
+  const orderUrl = `/pedido/${r.id}`;
 
-// per-IP limit for opening checkouts again from the order page
-const payHits = new Map<string, { count: number; reset: number }>();
-function allowPay(ip: string) {
-  const now = Date.now();
-  const entry = payHits.get(ip);
-  if (!entry || entry.reset < now) {
-    if (payHits.size > 5000) payHits.clear();
-    payHits.set(ip, { count: 1, reset: now + 60_000 });
-    return true;
+  // address saved in the account for the next purchases (signed-in customers who asked for it)
+  if (data.saveAddress && data.address && !r.duplicate) {
+    await saveMyAddress({ ...data.address, isDefault: false }).catch(() => null);
   }
-  entry.count += 1;
-  return entry.count <= 10;
+
+  if (method === "whatsapp") {
+    const destination = r.destination ? destinationLabel(r.destination) : null;
+    const { url, summarized } = buildOrderWhatsAppLink(whatsapp!, {
+      greeting: settings.whatsapp_greeting,
+      code: r.code,
+      items: r.items.map((i) => ({
+        name: i.brand && !i.name.toLowerCase().includes(i.brand.toLowerCase()) ? `${i.brand} ${i.name}` : i.name,
+        code: i.code,
+        quantity: i.quantity,
+        unitPriceCents: i.unit_price_cents,
+        lineTotalCents: i.line_total_cents,
+      })),
+      subtotalCents: r.subtotal_cents,
+      hasUnpricedItems: r.has_unpriced_items,
+      discount: r.coupon_code && r.discount_percent ? { code: r.coupon_code, percent: r.discount_percent, cents: r.discount_cents } : null,
+      delivery:
+        r.delivery && r.delivery.method !== "to_arrange"
+          ? { label: `${DELIVERY_METHOD_LABEL[r.delivery.method]} (${r.delivery.name})`, feeCents: r.delivery.fee_cents, estimate: r.delivery.estimate, destination }
+          : destination
+            ? { label: null, feeCents: null, destination }
+            : null,
+      customerName: `${data.customer.firstName} ${data.customer.lastName}`,
+      customerNotes: data.customerNotes || null,
+    });
+    return { ok: true, kind: "whatsapp", code: r.code, url, summarized };
+  }
+
+  if (method === "checkout_pro") {
+    const checkout = await openCheckout(r.id);
+    return { ok: true, kind: "redirect", code: r.code, orderId: r.id, url: checkout.ok ? checkout.url : orderUrl, orderUrl };
+  }
+
+  // a repeated confirmation of an order already charged goes straight to its page
+  if (r.duplicate) {
+    const receipt = await readReceipt(r.id);
+    if (receipt && (["approved", "in_process"].includes(receipt.payment_status) || (method === "pix" && receipt.pix))) {
+      return { ok: true, kind: "order", code: r.code, orderId: r.id, url: orderUrl };
+    }
+  }
+
+  if (method === "pix") {
+    const pix = await createPix(r.id, data.requestId);
+    if (!pix.ok) {
+      return {
+        ok: false,
+        orderId: r.id,
+        step: "pagamento",
+        retryable: pix.reason === "provider_error",
+        error: pix.reason === "pix_unavailable" ? "O Pix não está disponível no momento. Escolha outra forma de pagamento." : "Não foi possível gerar o Pix agora. Tente novamente em instantes.",
+      };
+    }
+    return { ok: true, kind: "order", code: r.code, orderId: r.id, url: orderUrl };
+  }
+
+  const card = data.payment as Extract<z.infer<typeof paymentSchema>, { method: "card" }>;
+  const charged = await chargeCard(r.id, { token: card.token, paymentMethodId: card.paymentMethodId, issuerId: card.issuerId ?? null, installments: card.installments }, data.requestId);
+  if (!charged.ok) {
+    return {
+      ok: false,
+      orderId: r.id,
+      step: "pagamento",
+      retryable: charged.reason === "provider_error",
+      error: charged.reason === "invalid_card" ? "Confira os dados do cartão e tente de novo." : "Não foi possível concluir o pagamento com cartão agora. Tente novamente em instantes.",
+    };
+  }
+  if (charged.status === "rejected" || charged.status === "cancelled") {
+    return { ok: false, orderId: r.id, step: "pagamento", retryable: false, error: cardRejectionMessage(charged.detail) };
+  }
+  return { ok: true, kind: "order", code: r.code, orderId: r.id, url: orderUrl };
 }
 
-/** "Pagar agora" / "Tentar novamente" on the order page. */
+function payError(reason: string) {
+  return reason === "expired"
+    ? "O prazo para pagar este pedido terminou. Faça um novo pedido ou fale com a gente pelo WhatsApp."
+    : reason === "not_payable"
+      ? "Este pedido não está aguardando pagamento."
+      : "Não foi possível abrir o pagamento agora. Tente novamente em instantes.";
+}
+
+/** "Pagar agora" / "Tentar novamente" on the order page (Mercado Pago's page). */
 export async function payOrder(orderId: unknown): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
   const id = z.uuid().safeParse(orderId);
   if (!id.success) return { ok: false, error: "Pedido inválido." };
-  const ip = (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
-  if (!allowPay(ip)) return { ok: false, error: "Muitas tentativas seguidas. Aguarde um minuto e tente de novo." };
+  if (!allowPay(await clientIp())) return { ok: false, error: "Muitas tentativas seguidas. Aguarde um minuto e tente de novo." };
   const result = await openCheckout(id.data);
-  if (result.ok) return result;
-  return {
-    ok: false,
-    error:
-      result.reason === "expired"
-        ? "O prazo para pagar este pedido terminou. Faça um novo pedido ou fale com a gente pelo WhatsApp."
-        : result.reason === "not_payable"
-          ? "Este pedido não está aguardando pagamento."
-          : "Não foi possível abrir o pagamento agora. Tente novamente em instantes.",
-  };
+  return result.ok ? result : { ok: false, error: payError(result.reason) };
+}
+
+/** "Gerar novo código Pix" on the order page (the previous code expired). */
+export async function renewPix(orderId: unknown): Promise<{ ok: true } | { ok: false; error: string }> {
+  const id = z.uuid().safeParse(orderId);
+  if (!id.success) return { ok: false, error: "Pedido inválido." };
+  if (!allowPay(await clientIp())) return { ok: false, error: "Muitas tentativas seguidas. Aguarde um minuto e tente de novo." };
+  const result = await createPix(id.data, `${id.data}-${Date.now()}`);
+  if (result.ok) return { ok: true };
+  return { ok: false, error: result.reason === "pix_unavailable" ? "O Pix não está disponível no momento." : payError(result.reason) };
 }
 
 // ---------------------------------------------------------------------------
@@ -361,7 +472,10 @@ export async function startApplePayOrder(input: unknown): Promise<ApplePayStart>
   const settings = await getStoreSettings();
   if (!applePayConfig(settings).ready) return { ok: false, error: "O Apple Pay não está disponível no momento. Escolha outra forma de pagamento." };
   if (!(await allowApplePay())) return { ok: false, error: "Muitas tentativas seguidas. Aguarde um minuto e tente de novo." };
-  const registered = await registerOrder(input, "mercadopago");
+  const parsed = checkoutSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
+  if (!isValidCpf(parsed.data.customer.cpf)) return { ok: false, error: "Informe um CPF válido para pagar com Apple Pay." };
+  const registered = await registerOrder(parsed.data, "mercadopago");
   if (!registered.ok) return { ok: false, error: registered.error };
   const r = registered.r;
   if (r.amount_due_cents == null) return { ok: false, error: "Não foi possível calcular o total do pedido. Escolha outra forma de pagamento." };
