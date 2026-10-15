@@ -2,7 +2,6 @@
 
 import { ShoppingBag } from "lucide-react";
 import Link from "next/link";
-import { WhatsAppIcon } from "@/components/brand/social-icons";
 import { buttonClasses } from "@/components/ui/button";
 import { Sheet } from "@/components/ui/sheet";
 import { useCart } from "./cart-context";
@@ -23,14 +22,8 @@ export function CartDrawer() {
           <div className="space-y-4">
             <CartSummary />
             <div className="grid gap-2">
-              {canCheckout ? (
-                <Link href="/finalizar" onClick={close} className={buttonClasses("primary", "lg", "w-full")}>
-                  <WhatsAppIcon className="h-4 w-4" /> Finalizar pelo WhatsApp
-                </Link>
-              ) : (
-                <p className="text-center text-xs text-danger">Remova os itens indisponíveis para finalizar.</p>
-              )}
-              <Link href="/carrinho" onClick={close} className={buttonClasses("ghost", "md", "w-full")}>
+              {canCheckout ? null : <p className="text-center text-xs text-danger">Remova os itens indisponíveis para finalizar.</p>}
+              <Link href="/carrinho" onClick={close} className={buttonClasses("primary", "lg", "w-full")}>
                 Ver carrinho completo
               </Link>
             </div>
