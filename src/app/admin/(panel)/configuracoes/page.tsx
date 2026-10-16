@@ -376,8 +376,8 @@ export default async function SettingsPage() {
               <Checkbox name="skin_analysis_enabled" label="Mostrar a Análise de Pele com IA na loja" defaultChecked={v.skin_analysis_enabled ?? true} />
               <p className={cn("text-xs leading-relaxed", skinStatus.tone)}>{skinStatus.text}</p>
             </div>
-            <Field label="Intervalo do pop-up (dias)" htmlFor="skin_popup_interval_days" hint="Depois de fechado (ou de iniciada a análise), o pop-up só volta a aparecer nesse navegador após este prazo. De 1 a 90.">
-              <Input id="skin_popup_interval_days" name="skin_popup_interval_days" inputMode="numeric" defaultValue={v.skin_popup_interval_days ?? 7} />
+            <Field label="Intervalo do pop-up (dias)" htmlFor="skin_popup_interval_days" hint="0 = o pop-up aparece toda vez que o site é carregado ou recarregado. De 1 a 90 = depois de fechado, só volta nesse navegador após esse número de dias.">
+              <Input id="skin_popup_interval_days" name="skin_popup_interval_days" inputMode="numeric" defaultValue={v.skin_popup_interval_days ?? 0} />
             </Field>
             <Field
               label="Limite de análises por dia"

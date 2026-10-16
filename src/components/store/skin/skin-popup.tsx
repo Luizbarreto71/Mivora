@@ -10,10 +10,13 @@ import { welcomeSeen } from "@/lib/store/welcome";
 import type { Banner } from "@/lib/types";
 import { SkinVisual } from "./skin-visual";
 
+/** Opened once per page load at most: navigating inside the site never reopens it, a reload does (interval 0). */
+let shownThisLoad = false;
+
 /**
- * Launch pop-up of the skin analysis. Opens on an eligible visit (not during a purchase, never together with the
- * welcome intro), at most once per session and again only after the interval set in the admin. Closes with the X,
- * Escape or a click outside; the buttons lead to the analysis or to the home section.
+ * Launch pop-up of the skin analysis. Never during a purchase nor on the same load as the welcome intro.
+ * Interval 0 (admin): opens on every load or reload of the site. 1–90 days: once per session, and again only that many
+ * days after being closed. Closes with the X, Escape or a click outside; the buttons lead to the analysis or the home section.
  */
 export function SkinLaunchPopup({ banner, intervalDays }: { banner: Banner; intervalDays: number }) {
   const pathname = usePathname();
@@ -22,10 +25,11 @@ export function SkinLaunchPopup({ banner, intervalDays }: { banner: Banner; inte
   const returnFocus = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
-    if (quietPath(pathname) || !welcomeSeen() || welcomeShownThisSession() || popupShownThisSession()) return;
-    if (!popupDue(readPopupMemory(), Date.now(), intervalDays)) return;
+    if (shownThisLoad || quietPath(pathname) || !welcomeSeen()) return;
+    if (intervalDays > 0 && (welcomeShownThisSession() || popupShownThisSession() || !popupDue(readPopupMemory(), Date.now(), intervalDays))) return;
     // a short pause lets the page settle before the campaign appears
     const timer = window.setTimeout(() => {
+      shownThisLoad = true;
       markPopupSession();
       returnFocus.current = document.activeElement as HTMLElement | null;
       setOpen(true);

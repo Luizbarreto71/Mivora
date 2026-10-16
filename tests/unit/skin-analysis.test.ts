@@ -163,6 +163,8 @@ describe("skin analysis — launch pop-up frequency", () => {
     expect(popupDue({ dismissedAt: now - 7 * day }, now, 7)).toBe(true);
     expect(popupDue({ dismissedAt: now - 30 * day, startedAt: now - day }, now, 7)).toBe(false);
     expect(popupDue({ dismissedAt: now - 2 * day }, now, 1)).toBe(true);
+    // interval 0: every load, even right after closing it
+    expect(popupDue({ dismissedAt: now, startedAt: now }, now, 0)).toBe(true);
   });
   it("stays away from buying, paying, the analysis itself and sign-in returns", () => {
     for (const path of ["/carrinho", "/finalizar", "/pedido/abc", "/analise-de-pele", "/auth/callback", "/minha-conta"]) expect(quietPath(path), path).toBe(true);

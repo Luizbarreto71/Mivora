@@ -1154,10 +1154,10 @@ describe("skin analysis: campaign, recommendation profiles, daily quota and save
     await expect(db.query(`update banners set highlights = array['1','2','3','4','5','6'] where placement = 'skin_popup'`)).rejects.toThrow(/banners_highlights_check/);
     expect(await one(`select skin_analysis_enabled, skin_popup_interval_days, skin_analysis_daily_limit from store_settings where id = 1`)).toEqual({
       skin_analysis_enabled: true,
-      skin_popup_interval_days: 7,
+      skin_popup_interval_days: 0,
       skin_analysis_daily_limit: 200,
     });
-    await expect(db.query(`update store_settings set skin_popup_interval_days = 0 where id = 1`)).rejects.toThrow(/skin_popup_interval/);
+    await expect(db.query(`update store_settings set skin_popup_interval_days = 91 where id = 1`)).rejects.toThrow(/skin_popup_interval/);
   });
 
   it("recommendation profiles: public for published products, written only by admins", async () => {

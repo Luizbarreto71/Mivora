@@ -374,8 +374,8 @@ export async function saveSettings(_: ActionState, fd: FormData): Promise<Action
   if (apProduct && !/^[A-Za-z0-9_.-]{1,120}$/.test(apProduct)) return fail("Product ID inválido.", { apple_pay_product_id: "Inválido" });
   const apDomainFile = formNullable(fd, "apple_pay_domain_association");
   if (apDomainFile && (apDomainFile.length > 20000 || /[<>]/.test(apDomainFile))) return fail("O arquivo de verificação da Apple parece inválido. Cole apenas o conteúdo do arquivo .txt.");
-  const skinInterval = formInt(fd, "skin_popup_interval_days", 7);
-  if (skinInterval < 1 || skinInterval > 90) return fail("O intervalo do pop-up da análise de pele deve ficar entre 1 e 90 dias.", { skin_popup_interval_days: "Entre 1 e 90" });
+  const skinInterval = formInt(fd, "skin_popup_interval_days", 0);
+  if (skinInterval < 0 || skinInterval > 90) return fail("O intervalo do pop-up da análise de pele deve ficar entre 0 (toda vez) e 90 dias.", { skin_popup_interval_days: "Entre 0 e 90" });
   const skinLimit = formInt(fd, "skin_analysis_daily_limit", 200);
   if (skinLimit < 1 || skinLimit > 5000) return fail("O limite diário de análises de pele deve ficar entre 1 e 5.000.", { skin_analysis_daily_limit: "Entre 1 e 5.000" });
   const maxInstallments = formInt(fd, "online_payment_max_installments", 12);

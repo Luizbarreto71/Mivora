@@ -119,6 +119,9 @@ test("login do administrador e configuração do WhatsApp", async () => {
 
   await admin.goto("/admin/configuracoes");
   await admin.getByLabel("Número do WhatsApp da loja").fill("11 91234-5678");
+  // the skin-analysis pop-up opens on every load by default (interval 0); the suite uses 7 days so returning
+  // visitors who already closed it are not interrupted — the pop-up tests switch the modes explicitly
+  await admin.getByLabel("Intervalo do pop-up (dias)").fill("7");
   await admin.getByRole("button", { name: "Salvar configurações" }).click();
   await expect(admin.getByText("Configurações salvas.")).toBeVisible();
 });
@@ -1340,6 +1343,35 @@ const FIRST_VISIT_DONE = (memory?: object) => ({
 const DAY = 86_400_000;
 
 test("Análise de pele — pop-up de lançamento: X, Esc, clique fora, frequência, CTA e seção permanente na home", async ({ browser }) => {
+  // interval 0 (the store's default): the pop-up opens every time the site is loaded or reloaded, even right after
+  // being closed — but navigating inside the site does not reopen it
+  const setInterval = async (days: string) => {
+    await admin.goto("/admin/configuracoes");
+    await admin.getByLabel("Intervalo do pop-up (dias)").fill(days);
+    await admin.getByRole("button", { name: "Salvar configurações" }).click();
+    await expect(admin.getByText("Configurações salvas.")).toBeVisible();
+  };
+  await setInterval("0");
+  const every = await browser.newContext({ storageState: RETURNING_VISITOR });
+  const reloads = await every.newPage();
+  await reloads.goto("/");
+  const again = reloads.getByRole("dialog", { name: "Sua pele fala. A gente te ouve." });
+  await expect(again).toBeVisible();
+  await again.getByRole("button", { name: "Fechar" }).click();
+  await expect(again).toBeHidden();
+  await reloads.reload();
+  await expect(again).toBeVisible();
+  await again.getByRole("button", { name: "Fechar" }).click();
+  await reloads.getByRole("navigation", { name: "Principal" }).getByRole("link", { name: "Novidades", exact: true }).click();
+  await expect(reloads).toHaveURL(/\/novidades$/);
+  await reloads.waitForTimeout(1500);
+  await expect(again).toHaveCount(0);
+  await reloads.goto("/produtos");
+  await expect(again).toBeVisible();
+  await every.close();
+  // from here on: 7 days, remembered per browser
+  await setInterval("7");
+
   // eligible visit: the pop-up opens, the X closes it, and it does not come back on the next visit
   const ctx = await browser.newContext({ storageState: FIRST_VISIT_DONE() });
   const page = await ctx.newPage();
@@ -1539,7 +1571,9 @@ test("Análise de pele — consentimento obrigatório, foto inadequada, falha do
   await ctx.close();
 });
 
-test("Análise de pele — relatório salvo na conta (consentimento à parte), painel: textos, intervalo, classificação e desligar", async ({ browser }) => {
+test("Análise de pele — relatório salvo na conta (consentimento à parte), painel: textos, intervalo, classificação e desligar", async ({ browser, request }) => {
+  // switching the feature off waits for the cached pages to renew (up to about a minute)
+  test.setTimeout(240_000);
   // signed in with Google (local OAuth simulator), the report can be kept — text only
   const email = `relatorio${Date.now()}@exemplo.com.br`;
   const ctx = await browser.newContext({ storageState: RETURNING_VISITOR });
@@ -1574,9 +1608,9 @@ test("Análise de pele — relatório salvo na conta (consentimento à parte), p
   await admin.goto("/admin/configuracoes");
   await expect(admin.getByText(/No ar: pop-up de lançamento, seção da home, menu e página \/analise-de-pele/)).toBeVisible();
   await expect(admin.getByText(/Hoje: \d+ análises?\./)).toBeVisible();
-  await admin.getByLabel("Intervalo do pop-up (dias)").fill("0");
+  await admin.getByLabel("Intervalo do pop-up (dias)").fill("91");
   await admin.getByRole("button", { name: "Salvar configurações" }).click();
-  await expect(admin.getByText("O intervalo do pop-up da análise de pele deve ficar entre 1 e 90 dias.")).toBeVisible();
+  await expect(admin.getByText("O intervalo do pop-up da análise de pele deve ficar entre 0 (toda vez) e 90 dias.")).toBeVisible();
   await admin.getByLabel("Intervalo do pop-up (dias)").fill("3");
   await admin.getByRole("button", { name: "Salvar configurações" }).click();
   await expect(admin.getByText("Configurações salvas.")).toBeVisible();
@@ -1621,12 +1655,16 @@ test("Análise de pele — relatório salvo na conta (consentimento à parte), p
   await admin.getByLabel("Mostrar a Análise de Pele com IA na loja").uncheck();
   await admin.getByRole("button", { name: "Salvar configurações" }).click();
   await expect(admin.getByText("Configurações salvas.")).toBeVisible();
-  // cached pages are regenerated on the next visits (stale-while-revalidate): reload until the change shows
+  // the analysis itself stops at once: the server refuses new photos as soon as the feature is off
+  const refused = await request.post("/api/analise-de-pele", { multipart: { consent: "aceito", photo: await photo(230, 200, 180) } });
+  expect(refused.status()).toBe(404);
+  expect(await refused.json()).toMatchObject({ ok: false, error: "disabled" });
+  // cached pages renew on the next visits (at most about a minute): reload until the change shows
   const reloadUntil = (url: string, check: () => Promise<void>) =>
     expect(async () => {
       await v.goto(url);
       await check();
-    }).toPass({ timeout: 45_000, intervals: [1_000, 2_000, 3_000] });
+    }).toPass({ timeout: 100_000, intervals: [2_000, 3_000, 5_000] });
   await reloadUntil("/", async () => {
     await expect(v.getByRole("region", { name: "Sua pele é única. Sua rotina também deveria ser." })).toHaveCount(0, { timeout: 1_000 });
     await expect(v.getByRole("navigation", { name: "Principal" }).getByRole("link", { name: /Análise de pele/ })).toHaveCount(0, { timeout: 1_000 });

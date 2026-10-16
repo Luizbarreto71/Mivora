@@ -76,7 +76,7 @@ export const DEFAULT_SETTINGS: StoreSettings = {
   mercadopago_public_key: null,
   apple_pay_domain_association: null,
   skin_analysis_enabled: true,
-  skin_popup_interval_days: 7,
+  skin_popup_interval_days: 0,
   skin_analysis_daily_limit: 200,
   about_headline: null,
   about_text: null,
