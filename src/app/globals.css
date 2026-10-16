@@ -38,6 +38,7 @@
   --animate-intro-reveal: intro-reveal 1.2s var(--ease-soft) both;
   --animate-intro-line: intro-line 0.9s var(--ease-soft) both;
   --animate-intro-glow: intro-glow 4s ease-in-out infinite;
+  --animate-skin-scan: skin-scan 3.4s ease-in-out infinite alternate;
 
   @keyframes intro-flame {
     from { opacity: 0; transform: translateY(14px) scale(0.92); filter: blur(6px); }
@@ -50,6 +51,14 @@
   @keyframes intro-line {
     from { transform: scaleX(0); }
     to { transform: scaleX(1); }
+  }
+  @keyframes skin-scan {
+    from {
+      top: 14%;
+    }
+    to {
+      top: 82%;
+    }
   }
   @keyframes intro-glow {
     0%, 100% { opacity: 0.55; transform: scale(1); }

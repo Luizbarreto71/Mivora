@@ -14,7 +14,8 @@ export function isServiceRoleConfigured() {
 
 /**
  * Server-only client with the service role (bypasses RLS). Used exclusively to record payment
- * results already confirmed with the Mercado Pago API and to read an order to open its checkout.
+ * results already confirmed with the Mercado Pago API, to read an order to open its checkout and
+ * to take a slot of the daily skin-analysis quota.
  * The key comes from SUPABASE_SERVICE_ROLE_KEY (or SUPABASE_SECRET_KEY) and never reaches the browser.
  */
 export function getServiceSupabase(): SupabaseClient | null {

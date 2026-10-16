@@ -1,6 +1,6 @@
 "use server";
 
-import { updateTag } from "next/cache";
+import { updateTag, revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { dbErrorMessage, fail, formBool, formInt, formNullable, formString, success, type ActionState } from "@/lib/admin/action-state";
@@ -181,7 +181,7 @@ export async function deleteKit(id: string) {
 // ---------------------------------------------------------------------------
 // Banners & ritual
 // ---------------------------------------------------------------------------
-const BANNER_PLACEMENTS = ["hero", "editorial", "routines", "coming_soon"];
+const BANNER_PLACEMENTS = ["hero", "editorial", "routines", "coming_soon", "skin_popup", "skin_home"];
 
 /** "2026-11-20T09:00" (Brasília, from datetime-local) → ISO with offset; "" → null; invalid → undefined */
 function brasiliaDateTime(value: string) {
@@ -204,6 +204,13 @@ export async function saveBanner(_: ActionState, fd: FormData): Promise<ActionSt
   const endsAt = brasiliaDateTime(formString(fd, "ends_at"));
   if (startsAt === undefined || endsAt === undefined) return fail("Data da campanha inválida.");
   if (startsAt && endsAt && new Date(startsAt) >= new Date(endsAt)) return fail("O fim da campanha deve ser depois do início.");
+  const highlights = formString(fd, "highlights")
+    .split(/\r?\n/)
+    .map((h) => h.trim())
+    .filter(Boolean);
+  if (highlights.length > 5 || highlights.some((h) => h.length > 90)) return fail("Use até 5 destaques, com até 90 caracteres cada.");
+  const footnote = formNullable(fd, "footnote");
+  if (footnote && footnote.length > 300) return fail("O texto auxiliar deve ter até 300 caracteres.");
   const layout = formString(fd, "layout") === "full" ? "full" : "split";
   if (layout === "full" && !formNullable(fd, "image_desktop_url")) return fail("A arte completa precisa de uma imagem.");
   const row = {
@@ -218,6 +225,8 @@ export async function saveBanner(_: ActionState, fd: FormData): Promise<ActionSt
     image_desktop_url: safeImage(formNullable(fd, "image_desktop_url")),
     image_mobile_url: safeImage(formNullable(fd, "image_mobile_url")),
     image_alt: formNullable(fd, "image_alt"),
+    highlights,
+    footnote,
     background_color: color ? color.toUpperCase() : null,
     layout,
     product_id: productId,
@@ -365,6 +374,10 @@ export async function saveSettings(_: ActionState, fd: FormData): Promise<Action
   if (apProduct && !/^[A-Za-z0-9_.-]{1,120}$/.test(apProduct)) return fail("Product ID inválido.", { apple_pay_product_id: "Inválido" });
   const apDomainFile = formNullable(fd, "apple_pay_domain_association");
   if (apDomainFile && (apDomainFile.length > 20000 || /[<>]/.test(apDomainFile))) return fail("O arquivo de verificação da Apple parece inválido. Cole apenas o conteúdo do arquivo .txt.");
+  const skinInterval = formInt(fd, "skin_popup_interval_days", 7);
+  if (skinInterval < 1 || skinInterval > 90) return fail("O intervalo do pop-up da análise de pele deve ficar entre 1 e 90 dias.", { skin_popup_interval_days: "Entre 1 e 90" });
+  const skinLimit = formInt(fd, "skin_analysis_daily_limit", 200);
+  if (skinLimit < 1 || skinLimit > 5000) return fail("O limite diário de análises de pele deve ficar entre 1 e 5.000.", { skin_analysis_daily_limit: "Entre 1 e 5.000" });
   const maxInstallments = formInt(fd, "online_payment_max_installments", 12);
   if (maxInstallments < 1 || maxInstallments > 12) return fail("O parcelamento máximo deve ficar entre 1x e 12x.");
   const defaultWeight = formInt(fd, "shipping_default_weight_g", 300);
@@ -433,6 +446,9 @@ export async function saveSettings(_: ActionState, fd: FormData): Promise<Action
       apple_pay_certificate_id: apCertificate,
       apple_pay_product_id: apProduct,
       apple_pay_domain_association: apDomainFile,
+      skin_analysis_enabled: formBool(fd, "skin_analysis_enabled"),
+      skin_popup_interval_days: skinInterval,
+      skin_analysis_daily_limit: skinLimit,
       about_headline: formNullable(fd, "about_headline"),
       about_text: formNullable(fd, "about_text"),
       whatsapp_section_title: formNullable(fd, "whatsapp_section_title"),
@@ -443,6 +459,8 @@ export async function saveSettings(_: ActionState, fd: FormData): Promise<Action
     .eq("id", 1);
   if (error) return fail(dbErrorMessage(error));
   updateTag(TAGS.settings);
+  // settings show on every store page (top bar, menu, campaigns): refresh the cached pages too
+  revalidatePath("/", "layout");
   return success("Configurações salvas.");
 }
 

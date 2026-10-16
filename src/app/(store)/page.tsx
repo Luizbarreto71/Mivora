@@ -4,11 +4,13 @@ import { BrandTiles } from "@/components/store/home/brand-tiles";
 import { CampaignBanner } from "@/components/store/home/campaign-banner";
 import { Hero } from "@/components/store/home/hero";
 import { NeedTiles } from "@/components/store/home/need-tiles";
+import { SkinHomeSection } from "@/components/store/skin/skin-home-section";
 import { Testimonials } from "@/components/store/home/testimonials";
 import { ProductRail } from "@/components/store/product-card";
 import { SectionHeading } from "@/components/store/section";
 import { getBrands, getHomeContent, getHomeNeeds, getStoreSettings, getSuggestedRitual, getTestimonials, listProducts } from "@/lib/catalog/queries";
 import { SITE_URL, isSupabaseConfigured } from "@/lib/env";
+import { skinAiConfigured } from "@/lib/skin/ai";
 import type { ImageRef } from "@/lib/types";
 import { buildWhatsAppUrl, normalizeWhatsAppNumber } from "@/lib/whatsapp";
 
@@ -46,6 +48,8 @@ export default async function HomePage() {
   return (
     <>
       <Hero banners={content.hero} fallbackProduct={heroProduct} />
+
+      {settings.skin_analysis_enabled && skinAiConfigured() && content.skinHome ? <SkinHomeSection banner={content.skinHome} /> : null}
 
       {!isSupabaseConfigured ? (
         <div className="container-page mt-10">

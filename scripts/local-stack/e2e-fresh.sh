@@ -42,6 +42,11 @@ case "${MERCADOPAGO_BASE_URL:-}" in
   http://localhost:*) ;;
   *) echo "Refusing to run E2E without the local Mercado Pago double"; exit 1 ;;
 esac
+# The skin analysis must hit the local Anthropic double, never the real API
+case "${ANTHROPIC_BASE_URL:-}" in
+  http://localhost:*) ;;
+  *) echo "Refusing to run E2E without the local Anthropic double"; exit 1 ;;
+esac
 # Same build as Vercel (npm run build uses webpack): Turbopack accepts imports that webpack refuses
 npm run build > .next-build.log 2>&1 || { tail -40 .next-build.log; exit 1; }
 npx next start -p 3000 > .next-start.log 2>&1 &

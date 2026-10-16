@@ -11,7 +11,12 @@ const safe = <T>(fn: () => T, fallback: T) => {
 };
 
 export const welcomeSeen = () => safe(() => window.localStorage.getItem(SEEN_KEY) === "1", false);
-export const markWelcomeSeen = () => safe(() => window.localStorage.setItem(SEEN_KEY, "1"), undefined);
+export const markWelcomeSeen = () =>
+  safe(() => {
+    window.localStorage.setItem(SEEN_KEY, "1");
+    // the skin-analysis pop-up waits for another session instead of following this intro
+    window.sessionStorage.setItem("mivora.welcome.session", "1");
+  }, undefined);
 
 export const savedCoupon = () => safe(() => window.localStorage.getItem(COUPON_KEY) ?? "", "");
 export const saveCoupon = (code: string) => safe(() => window.localStorage.setItem(COUPON_KEY, code), undefined);

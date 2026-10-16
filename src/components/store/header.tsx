@@ -19,7 +19,13 @@ export type NavData = {
   concerns: { slug: string; name: string }[];
   brands: { slug: string; name: string }[];
   hasKits: boolean;
+  /** "Análise de Pele com IA" is on and the AI is configured */
+  skinAnalysis: boolean;
 };
+
+function AiBadge() {
+  return <span className="rounded-full bg-rose px-1.5 py-px text-[0.625rem] font-semibold tracking-[0.08em] text-rose-ink">IA</span>;
+}
 
 const ICON_BUTTON = "relative flex h-11 w-11 items-center justify-center rounded-full transition hover:bg-ivory";
 const NAV_LINK = "flex h-11 items-center gap-1 text-ink/85 transition-colors hover:text-ink";
@@ -151,6 +157,13 @@ export function Header({ nav, registered }: { nav: NavData; registered: boolean 
                 </Link>
               </div>
             </li>
+            {nav.skinAnalysis ? (
+              <li>
+                <Link href="/analise-de-pele" className={cn(NAV_LINK, "gap-1.5")}>
+                  Análise de pele <AiBadge />
+                </Link>
+              </li>
+            ) : null}
             <li>
               <Link href="/novidades" className={NAV_LINK}>
                 Novidades
@@ -241,6 +254,15 @@ function MobileMenu({ nav, whatsappHref, favoriteCount }: { nav: NavData; whatsa
             Todos os produtos
           </Link>
         </li>
+        {nav.skinAnalysis ? (
+          <li>
+            <Link href="/analise-de-pele" className={row}>
+              <span className="flex items-center gap-2">
+                Análise de pele com IA <AiBadge />
+              </span>
+            </Link>
+          </li>
+        ) : null}
         {groups.map((g) => (
           <li key={g.title}>
             <details className="group">

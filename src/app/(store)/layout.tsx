@@ -4,25 +4,36 @@ import { CartProvider } from "@/components/store/cart-context";
 import { FloatingWhatsApp } from "@/components/store/floating-whatsapp";
 import { Footer } from "@/components/store/footer";
 import { Header, type NavData } from "@/components/store/header";
+import { SkinLaunchPopup } from "@/components/store/skin/skin-popup";
 import { StoreConfigProvider } from "@/components/store/store-config";
 import { TopBar } from "@/components/store/top-bar";
 import { WelcomeIntro } from "@/components/store/welcome-intro";
-import { getBrands, getCategories, getKits, getStoreSettings } from "@/lib/catalog/queries";
+import { getBrands, getCategories, getHomeContent, getKits, getStoreSettings } from "@/lib/catalog/queries";
 import { SITE_URL } from "@/lib/env";
 import { getSocialProviders } from "@/lib/auth/providers";
 import { applePayConfig } from "@/lib/payments/apple-pay";
 import { mercadoPagoConfig } from "@/lib/payments/mercadopago";
+import { skinAiConfigured } from "@/lib/skin/ai";
 import { normalizeWhatsAppNumber } from "@/lib/whatsapp";
 
 export default async function StoreLayout({ children }: { children: React.ReactNode }) {
-  const [settings, categories, brands, kits, socialProviders] = await Promise.all([getStoreSettings(), getCategories(), getBrands(), getKits(), getSocialProviders()]);
+  const [settings, categories, brands, kits, socialProviders, content] = await Promise.all([
+    getStoreSettings(),
+    getCategories(),
+    getBrands(),
+    getKits(),
+    getSocialProviders(),
+    getHomeContent(),
+  ]);
   const onlinePayment = settings.online_payment_enabled && mercadoPagoConfig().ready;
+  const skinAnalysis = settings.skin_analysis_enabled && skinAiConfigured();
 
   const nav: NavData = {
     productTypes: categories.filter((c) => c.kind === "product_type" && !c.parent_id && c.productCount > 0).map(({ slug, name }) => ({ slug, name })),
     concerns: categories.filter((c) => c.kind === "concern" && c.productCount > 0).map(({ slug, name }) => ({ slug, name })),
     brands: brands.filter((b) => b.productCount > 0).map(({ slug, name }) => ({ slug, name })),
     hasKits: kits.length > 0,
+    skinAnalysis,
   };
 
   return (
@@ -64,6 +75,11 @@ export default async function StoreLayout({ children }: { children: React.ReactN
         <Footer settings={settings} nav={nav} />
         <CartDrawer />
         <WelcomeIntro />
+        {skinAnalysis && content.skinPopup ? (
+          <Suspense fallback={null}>
+            <SkinLaunchPopup banner={content.skinPopup} intervalDays={settings.skin_popup_interval_days} />
+          </Suspense>
+        ) : null}
         <Suspense fallback={null}>
           <FloatingWhatsApp />
         </Suspense>

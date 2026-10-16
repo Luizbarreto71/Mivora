@@ -16,6 +16,7 @@
     "test:e2e:fresh": "bash scripts/local-stack/e2e-fresh.sh"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0",
     "@hookform/resolvers": "^5.9.1",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.117.3",

@@ -1,5 +1,6 @@
 import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
 import path from "node:path";
+import sharp from "sharp";
 import { RETURNING_VISITOR } from "../../playwright.config";
 
 /**
@@ -492,7 +493,7 @@ test("Frete — admin configura origem e zona por CEP; cliente calcula no produt
 
   // Product page: São Paulo gets carrier quotes only (the local zone does not cover it)
   await page.goto("/produtos/skin1004-madagascar-centella-ampoule");
-  const cep = page.getByLabel("Calcular frete e prazo");
+  const cep = page.getByLabel("Calcular frete e prazo").filter({ visible: true });
   await cep.fill("01001-000");
   await expect(page.getByText("Sé · São Paulo/SP · CEP 01001-000")).toBeVisible();
   await expect(page.getByText("Correios PAC")).toBeVisible();
@@ -773,7 +774,7 @@ test("Pagamento online — Pix com QR Code aprovado pelo webhook, clique duplo s
   // Product page → "Comprar agora" → checkout
   await page.goto("/produtos/skin1004-madagascar-centella-ampoule");
   await expect(page.getByText(/Pague pelo site com Pix, cartão ou boleto/).filter({ visible: true }).first()).toBeVisible();
-  await page.getByLabel("Calcular frete e prazo").fill("01001-000");
+  await page.getByLabel("Calcular frete e prazo").filter({ visible: true }).fill("01001-000");
   await expect(page.getByText("Correios SEDEX")).toBeVisible();
   await page.getByRole("button", { name: "Comprar agora" }).click();
   await expect(page).toHaveURL(/\/finalizar$/);
@@ -999,7 +1000,7 @@ test("Apple Pay — painel, arquivo da Apple, CPF, recusa sem pedido duplicado, 
   const plain = await browser.newContext({ storageState: RETURNING_VISITOR });
   const visitor = await plain.newPage();
   await visitor.goto("/produtos/skin1004-madagascar-centella-ampoule");
-  await visitor.getByLabel("Calcular frete e prazo").fill("01001-000");
+  await visitor.getByLabel("Calcular frete e prazo").filter({ visible: true }).fill("01001-000");
   await expect(visitor.getByText("Correios SEDEX")).toBeVisible();
   await visitor.getByRole("button", { name: "Comprar agora" }).click();
   await fillIdentity(visitor, "Davi Sem Apple");
@@ -1014,7 +1015,7 @@ test("Apple Pay — painel, arquivo da Apple, CPF, recusa sem pedido duplicado, 
   await ctx.addInitScript(fakeApplePay);
   const page = await ctx.newPage();
   await page.goto("/produtos/skin1004-madagascar-centella-ampoule");
-  await page.getByLabel("Calcular frete e prazo").fill("01001-000");
+  await page.getByLabel("Calcular frete e prazo").filter({ visible: true }).fill("01001-000");
   await expect(page.getByText("Correios SEDEX")).toBeVisible();
   await page.getByRole("button", { name: "Comprar agora" }).click();
   // the CPF Mercado Pago needs for Apple Pay is asked with the buyer's data
@@ -1316,4 +1317,366 @@ test("Checkout no celular (390 px) — resumo recolhível e nenhuma etapa com ro
   expect(await overflow(), "pedido com Pix").toBeLessThanOrEqual(0);
   await ctx.close();
   await setOnlinePayment(false);
+});
+
+// ---------------------------------------------------------------------------
+// Análise de Pele com IA (simulador local da Anthropic — a IA real nunca é chamada nos testes)
+// ---------------------------------------------------------------------------
+/** A solid-colour JPEG: the local AI double answers by colour (beige → dryness, reddish → redness, grey → no face, black → overloaded). */
+const photo = async (r: number, g: number, b: number, name = "rosto.jpg") => ({
+  name,
+  mimeType: "image/jpeg",
+  buffer: await sharp({ create: { width: 720, height: 960, channels: 3, background: { r, g, b } } }).jpeg().toBuffer(),
+});
+const FIRST_VISIT_DONE = (memory?: object) => ({
+  cookies: [],
+  origins: [
+    {
+      origin: process.env.E2E_BASE_URL ?? "http://localhost:3000",
+      localStorage: [{ name: "mivora.welcome.v1", value: "1" }, ...(memory ? [{ name: "mivora.skinPopup.v1", value: JSON.stringify(memory) }] : [])],
+    },
+  ],
+});
+const DAY = 86_400_000;
+
+test("Análise de pele — pop-up de lançamento: X, Esc, clique fora, frequência, CTA e seção permanente na home", async ({ browser }) => {
+  // eligible visit: the pop-up opens, the X closes it, and it does not come back on the next visit
+  const ctx = await browser.newContext({ storageState: FIRST_VISIT_DONE() });
+  const page = await ctx.newPage();
+  await page.goto("/");
+  const popup = page.getByRole("dialog", { name: "Sua pele fala. A gente te ouve." });
+  await expect(popup).toBeVisible();
+  await expect(popup).toContainText("Novidade MIVORA");
+  await expect(popup).toContainText("Envie uma foto do seu rosto e receba uma análise visual personalizada");
+  for (const h of ["Análise visual personalizada.", "Recomendações de produtos da MIVORA.", "Sua rotina de skincare em poucos passos."]) await expect(popup).toContainText(h);
+  await expect(popup.getByRole("link", { name: "Analisar minha pele" })).toHaveAttribute("href", "/analise-de-pele");
+  await expect(popup.getByRole("link", { name: "Conhecer a novidade" })).toHaveAttribute("href", "/#analise-de-pele");
+  await expect(popup.getByRole("button", { name: "Fechar" })).toBeFocused();
+  await popup.getByRole("button", { name: "Fechar" }).click();
+  await expect(popup).toBeHidden();
+  await page.reload();
+  await page.waitForTimeout(1500);
+  await expect(page.getByRole("dialog", { name: "Sua pele fala. A gente te ouve." })).toHaveCount(0);
+  // closing it never hides the feature: the home section and the menu stay
+  const section = page.getByRole("region", { name: "Sua pele é única. Sua rotina também deveria ser." });
+  await expect(section).toBeVisible();
+  await expect(section).toContainText("Exclusivo MIVORA");
+  await expect(section).toContainText("Rápido, personalizado e pensado para ajudar você a escolher seus produtos.");
+  await expect(page.getByRole("navigation", { name: "Principal" }).getByRole("link", { name: /Análise de pele/ })).toHaveAttribute("href", "/analise-de-pele");
+  await section.getByRole("link", { name: "Fazer minha análise" }).click();
+  await expect(page).toHaveURL(/\/analise-de-pele$/);
+  await expect(page.getByRole("heading", { level: 1, name: "Vamos conhecer melhor a sua pele?" })).toBeVisible();
+  await ctx.close();
+
+  // Escape closes it; a click outside also closes it
+  for (const how of ["escape", "outside"] as const) {
+    const c = await browser.newContext({ storageState: FIRST_VISIT_DONE() });
+    const p = await c.newPage();
+    await p.goto("/produtos");
+    const d = p.getByRole("dialog", { name: "Sua pele fala. A gente te ouve." });
+    await expect(d).toBeVisible();
+    if (how === "escape") await p.keyboard.press("Escape");
+    else await p.mouse.click(8, 8);
+    await expect(d).toBeHidden();
+    await c.close();
+  }
+
+  // the interval set in the admin: 6 days after closing it stays away, after 8 days it returns
+  for (const [days, shown] of [
+    [6, false],
+    [8, true],
+  ] as const) {
+    const c = await browser.newContext({ storageState: FIRST_VISIT_DONE({ dismissedAt: Date.now() - days * DAY }) });
+    const p = await c.newPage();
+    await p.goto("/");
+    if (shown) await expect(p.getByRole("dialog", { name: "Sua pele fala. A gente te ouve." })).toBeVisible();
+    else {
+      await p.waitForTimeout(1500);
+      await expect(p.getByRole("dialog", { name: "Sua pele fala. A gente te ouve." })).toHaveCount(0);
+    }
+    await c.close();
+  }
+
+  // the main button opens the analysis and the pop-up does not return while the customer goes on
+  const go = await browser.newContext({ storageState: FIRST_VISIT_DONE() });
+  const visitor = await go.newPage();
+  await visitor.goto("/");
+  await visitor.getByRole("dialog", { name: "Sua pele fala. A gente te ouve." }).getByRole("link", { name: "Analisar minha pele" }).click();
+  await expect(visitor).toHaveURL(/\/analise-de-pele$/);
+  await visitor.goto("/produtos");
+  await visitor.waitForTimeout(1500);
+  await expect(visitor.getByRole("dialog", { name: "Sua pele fala. A gente te ouve." })).toHaveCount(0);
+  await go.close();
+
+  // a first visit shows the welcome intro, never both campaigns in the same session; checkout pages stay quiet
+  const first = await browser.newContext({ storageState: { cookies: [], origins: [] } });
+  const fresh = await first.newPage();
+  await fresh.goto("/");
+  const intro = fresh.getByRole("dialog", { name: "Bem-vinda à MIVORA" });
+  await expect(intro).toBeVisible();
+  await intro.getByRole("button", { name: "Quero meu desconto" }).click();
+  await fresh.goto("/produtos");
+  await fresh.waitForTimeout(1500);
+  await expect(fresh.getByRole("dialog", { name: "Sua pele fala. A gente te ouve." })).toHaveCount(0);
+  await first.close();
+  const quiet = await browser.newContext({ storageState: FIRST_VISIT_DONE() });
+  const cart = await quiet.newPage();
+  await cart.goto("/carrinho");
+  await cart.waitForTimeout(1500);
+  await expect(cart.getByRole("dialog", { name: "Sua pele fala. A gente te ouve." })).toHaveCount(0);
+  await quiet.close();
+});
+
+test("Análise de pele — consentimento obrigatório, foto inadequada, falha do serviço, resultado conforme a foto, produtos reais e carrinho", async ({ browser, request }) => {
+  const ctx = await browser.newContext({ storageState: RETURNING_VISITOR });
+  const page = await ctx.newPage();
+  await page.goto("/analise-de-pele");
+  const steps = page.getByRole("navigation", { name: "Etapas da análise" });
+  await expect(steps.locator('[aria-current="step"]')).toContainText("Início");
+  await expect(page.getByText("A análise é cosmética e informativa. Ela não é um diagnóstico médico")).toBeVisible();
+  await page.getByRole("button", { name: "Começar análise" }).click();
+
+  // consent: explained, not pre-selected, required to continue
+  await expect(page.getByRole("heading", { name: "Antes de começar" })).toBeVisible();
+  await expect(page.getByText("A imagem não é usada para treinar modelos de inteligência artificial nem para publicidade.")).toBeVisible();
+  const consent = page.getByRole("checkbox", { name: /Concordo com o uso da minha foto/ });
+  await expect(consent).not.toBeChecked();
+  await expect(page.getByRole("button", { name: "Continuar" })).toBeDisabled();
+  await consent.check();
+  await page.getByRole("button", { name: "Continuar" }).click();
+
+  // the server refuses a photo without consent, whatever the page does
+  const noConsent = await request.post("/api/analise-de-pele", { multipart: { photo: await photo(230, 200, 180) } });
+  expect(noConsent.status()).toBe(400);
+  expect(await noConsent.json()).toMatchObject({ ok: false, error: "consent_required" });
+  expect(noConsent.headers()["cache-control"]).toContain("no-store");
+
+  // photo step: preview first, nothing is sent until "Analisar minha foto"
+  await expect(page.getByRole("heading", { name: "Sua foto" })).toBeVisible();
+  await expect(page.getByLabel("Tirar foto com a câmera")).toHaveAttribute("capture", "user");
+  await page.getByLabel("Escolher foto da galeria").setInputFiles(await photo(128, 128, 128, "parede.jpg"));
+  await expect(page.getByRole("img", { name: "Pré-visualização da sua foto" })).toBeVisible();
+  await page.getByRole("button", { name: "Analisar minha foto" }).click();
+  // a photo without a face is explained and another one is asked
+  await expect(page.getByText("Não encontramos um rosto na foto. Envie uma foto do seu rosto, de frente.")).toBeVisible();
+  await page.getByRole("button", { name: "Enviar outra foto" }).click();
+
+  // the AI service fails: an honest message, no result, and a retry
+  await page.getByLabel("Escolher foto da galeria").setInputFiles(await photo(4, 4, 4, "escura.jpg"));
+  await page.getByRole("button", { name: "Analisar minha foto" }).click();
+  await expect(page.getByText("O serviço de análise está ocupado agora. Tente de novo em instantes.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Tentar de novo" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sua análise está pronta" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Voltar para a foto" }).click();
+
+  // a real analysis: the result follows the photo
+  await page.getByLabel("Trocar foto").setInputFiles(await photo(230, 200, 180));
+  await page.getByRole("button", { name: "Analisar minha foto" }).click();
+  await expect(page.getByRole("heading", { name: "Sua análise está pronta" })).toBeVisible({ timeout: 20_000 });
+  const traits = page.getByRole("region", { name: "Características observadas" });
+  await expect(traits).toContainText("Hidratação");
+  await expect(traits).toContainText("Merece atenção");
+  await expect(traits).toContainText("A pele aparenta ressecamento nas maçãs do rosto.");
+  await expect(page.getByText("Com esta foto não foi possível avaliar: poros.")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Necessidades que podem ser consideradas" })).toContainText("Hidratação — A aparência de ressecamento");
+  await expect(page.getByText(/não um diagnóstico médico, e não substitui a avaliação de um dermatologista/)).toBeVisible();
+
+  // products: only real, available catalogue products, with their current price and links
+  await page.getByRole("button", { name: "Ver produtos recomendados" }).click();
+  const cards = page.locator("main article");
+  await expect(cards.first()).toBeVisible();
+  const names = await cards.locator("h3").allTextContents();
+  expect(names.length).toBeGreaterThan(0);
+  for (let i = 0; i < names.length; i += 1) {
+    const card = cards.nth(i);
+    const href = (await card.getByRole("link", { name: "Ver produto" }).getAttribute("href"))!;
+    const slug = href.replace("/produtos/", "");
+    // each card is a real catalogue product: published, available, with the price stored in the database
+    const [row] = await serviceGet(request, `products?slug=eq.${slug}&select=name,status,availability,is_available,price_cents`);
+    expect(row, slug).toMatchObject({ name: names[i], status: "published", availability: "in_stock", is_available: true });
+    expect(row.price_cents).toBeGreaterThan(0);
+    await expect(card).toContainText(brl(row.price_cents));
+    await expect(card).toContainText("Disponível");
+  }
+  // the product link works and the result is still there after coming back
+  await cards.first().getByRole("link", { name: "Ver produto" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: names[0] })).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole("heading", { name: "Sua análise está pronta" })).toBeVisible();
+
+  // add one product with the store's cart
+  await page.getByRole("tab", { name: /Produtos/ }).click();
+  await cards.first().getByRole("button", { name: /^Adicionar .* ao carrinho$/ }).click();
+  await expect(page.getByRole("dialog", { name: /Carrinho \(1\)/ })).toBeVisible();
+  await page.getByRole("button", { name: "Fechar" }).click();
+
+  // routine: morning and night; the whole routine goes to the bag only after confirming the list and the total
+  await page.getByRole("tab", { name: "Rotina" }).click();
+  await expect(page.getByRole("region", { name: "Rotina da manhã" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Rotina da noite" })).toBeVisible();
+  await page.getByRole("button", { name: "Adicionar rotina ao carrinho" }).click();
+  const confirm = page.getByRole("group", { name: "Estes produtos serão adicionados à sua sacola:" });
+  await expect(confirm).toContainText("Total dos produtos");
+  await page.getByRole("button", { name: "Confirmar e adicionar" }).click();
+  await expect(page.getByText("Rotina adicionada à sacola.")).toBeVisible();
+  // the store's cart drawer opens with the products; it is closed to go on
+  await page.getByRole("dialog", { name: /Carrinho/ }).getByRole("button", { name: "Fechar" }).click();
+
+  // adjusting the needs recomputes from the catalogue, without a new photo
+  await page.getByRole("tab", { name: "Análise" }).click();
+  await page.getByRole("button", { name: "Conforto da pele" }).click();
+  await expect(page.getByRole("button", { name: "Conforto da pele" })).toHaveAttribute("aria-pressed", "true");
+
+  // another photo, another result (consent asked again)
+  await page.getByRole("button", { name: "Refazer análise" }).click();
+  await page.getByRole("checkbox", { name: /Concordo com o uso da minha foto/ }).check();
+  await page.getByRole("button", { name: "Continuar" }).click();
+  await page.getByLabel("Escolher foto da galeria").setInputFiles(await photo(225, 110, 110));
+  await page.getByRole("button", { name: "Analisar minha foto" }).click();
+  await expect(page.getByRole("heading", { name: "Sua análise está pronta" })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("region", { name: "Características observadas" })).toContainText("Vermelhidão");
+  await expect(page.getByRole("region", { name: "Necessidades que podem ser consideradas" })).toContainText("Conforto da pele");
+  await ctx.close();
+});
+
+test("Análise de pele — relatório salvo na conta (consentimento à parte), painel: textos, intervalo, classificação e desligar", async ({ browser }) => {
+  // signed in with Google (local OAuth simulator), the report can be kept — text only
+  const email = `relatorio${Date.now()}@exemplo.com.br`;
+  const ctx = await browser.newContext({ storageState: RETURNING_VISITOR });
+  const page = await ctx.newPage();
+  await page.goto("/minha-conta");
+  await page.getByRole("button", { name: "Continuar com Google" }).click();
+  await page.getByLabel("E-mail").fill(email);
+  await page.getByLabel("Nome").fill("Rita Relatório");
+  await page.getByRole("button", { name: "Autorizar" }).click();
+  await expect(page.getByRole("region", { name: "Sua conta" })).toContainText("Nenhum relatório salvo.");
+  await page.goto("/analise-de-pele");
+  await page.getByRole("button", { name: "Começar análise" }).click();
+  await page.getByRole("checkbox", { name: /Concordo com o uso da minha foto/ }).check();
+  await page.getByRole("button", { name: "Continuar" }).click();
+  await page.getByLabel("Escolher foto da galeria").setInputFiles(await photo(230, 200, 180));
+  await page.getByRole("button", { name: "Analisar minha foto" }).click();
+  await expect(page.getByRole("heading", { name: "Sua análise está pronta" })).toBeVisible({ timeout: 20_000 });
+  const save = page.getByRole("button", { name: "Salvar relatório" });
+  await expect(save).toBeDisabled();
+  await page.getByRole("checkbox", { name: /salvar o texto deste relatório/ }).check();
+  await save.click();
+  await expect(page.getByText("Relatório salvo em Minha conta.")).toBeVisible();
+  await page.goto("/minha-conta");
+  const account = page.getByRole("region", { name: "Sua conta" });
+  await expect(account).toContainText("Relatórios da análise de pele");
+  await expect(account).toContainText("Hidratação");
+  await account.getByRole("button", { name: /Excluir o relatório de/ }).click();
+  await expect(account).toContainText("Nenhum relatório salvo.");
+  await ctx.close();
+
+  // Admin: status, interval and daily limit
+  await admin.goto("/admin/configuracoes");
+  await expect(admin.getByText(/No ar: pop-up de lançamento, seção da home, menu e página \/analise-de-pele/)).toBeVisible();
+  await expect(admin.getByText(/Hoje: \d+ análises?\./)).toBeVisible();
+  await admin.getByLabel("Intervalo do pop-up (dias)").fill("0");
+  await admin.getByRole("button", { name: "Salvar configurações" }).click();
+  await expect(admin.getByText("O intervalo do pop-up da análise de pele deve ficar entre 1 e 90 dias.")).toBeVisible();
+  await admin.getByLabel("Intervalo do pop-up (dias)").fill("3");
+  await admin.getByRole("button", { name: "Salvar configurações" }).click();
+  await expect(admin.getByText("Configurações salvas.")).toBeVisible();
+
+  // Admin: the pop-up copy is edited in Conteúdo and shows in the store
+  await admin.goto("/admin/conteudo#analise-de-pele");
+  const popupForm = admin.locator("section#analise-de-pele form").first();
+  await popupForm.getByLabel("Título", { exact: true }).fill("Sua pele fala. A MIVORA te ouve.");
+  await popupForm.getByLabel("Destaques").fill("Análise visual personalizada.\nProdutos do nosso catálogo.");
+  await popupForm.getByRole("button", { name: "Salvar banner" }).click();
+  await expect(admin.getByText("Banner salvo.").first()).toBeVisible();
+  const visitor = await browser.newContext({ storageState: FIRST_VISIT_DONE({ dismissedAt: Date.now() - 4 * DAY }) });
+  const v = await visitor.newPage();
+  await v.goto("/");
+  const edited = v.getByRole("dialog", { name: "Sua pele fala. A MIVORA te ouve." });
+  await expect(edited).toBeVisible(); // 4 days later with a 3-day interval
+  await expect(edited).toContainText("Produtos do nosso catálogo.");
+  await edited.getByRole("button", { name: "Fechar" }).click();
+
+  // Admin: a product left out of the recommendations is never suggested
+  await editProductBySlug(admin, "dr-althea-345-relief-cream");
+  await expect(admin.getByRole("heading", { name: "Análise de pele" })).toBeVisible();
+  await expect(admin.getByText(/Etapa automática \(pelo tipo\):/)).toBeVisible();
+  await admin.getByLabel("Pode aparecer nas recomendações da análise de pele").uncheck();
+  await admin.getByRole("button", { name: "Salvar análise de pele" }).click();
+  await expect(admin.getByText("Análise de pele salva.")).toBeVisible();
+  await v.goto("/analise-de-pele");
+  await v.getByRole("button", { name: "Começar análise" }).click();
+  await v.getByRole("checkbox", { name: /Concordo com o uso da minha foto/ }).check();
+  await v.getByRole("button", { name: "Continuar" }).click();
+  await v.getByLabel("Escolher foto da galeria").setInputFiles(await photo(230, 200, 180));
+  await v.getByRole("button", { name: "Analisar minha foto" }).click();
+  await expect(v.getByRole("heading", { name: "Sua análise está pronta" })).toBeVisible({ timeout: 20_000 });
+  await v.getByRole("button", { name: "Ver produtos recomendados" }).click();
+  await expect(v.locator('main article a[href="/produtos/dr-althea-345-relief-cream"]')).toHaveCount(0);
+  await admin.getByLabel("Pode aparecer nas recomendações da análise de pele").check();
+  await admin.getByRole("button", { name: "Salvar análise de pele" }).click();
+  await expect(admin.getByText("Análise de pele salva.")).toBeVisible();
+
+  // Admin: switched off → no section, no menu link, no pop-up; the page says it is unavailable
+  await admin.goto("/admin/configuracoes");
+  await admin.getByLabel("Mostrar a Análise de Pele com IA na loja").uncheck();
+  await admin.getByRole("button", { name: "Salvar configurações" }).click();
+  await expect(admin.getByText("Configurações salvas.")).toBeVisible();
+  // cached pages are regenerated on the next visits (stale-while-revalidate): reload until the change shows
+  const reloadUntil = (url: string, check: () => Promise<void>) =>
+    expect(async () => {
+      await v.goto(url);
+      await check();
+    }).toPass({ timeout: 45_000, intervals: [1_000, 2_000, 3_000] });
+  await reloadUntil("/", async () => {
+    await expect(v.getByRole("region", { name: "Sua pele é única. Sua rotina também deveria ser." })).toHaveCount(0, { timeout: 1_000 });
+    await expect(v.getByRole("navigation", { name: "Principal" }).getByRole("link", { name: /Análise de pele/ })).toHaveCount(0, { timeout: 1_000 });
+  });
+  await reloadUntil("/analise-de-pele", () => expect(v.getByText("A análise de pele está temporariamente indisponível. Tente de novo mais tarde.")).toBeVisible({ timeout: 1_000 }));
+  await admin.goto("/admin/configuracoes");
+  await admin.getByLabel("Mostrar a Análise de Pele com IA na loja").check();
+  await admin.getByLabel("Intervalo do pop-up (dias)").fill("7");
+  await admin.getByRole("button", { name: "Salvar configurações" }).click();
+  await expect(admin.getByText("Configurações salvas.")).toBeVisible();
+  await reloadUntil("/", () => expect(v.getByRole("region", { name: "Sua pele é única. Sua rotina também deveria ser." })).toBeVisible({ timeout: 1_000 }));
+  await reloadUntil("/analise-de-pele", () => expect(v.getByRole("button", { name: "Começar análise" })).toBeVisible({ timeout: 1_000 }));
+  await visitor.close();
+});
+
+test("Análise de pele no celular (390 px) — pop-up proporcional, seção da home e etapas sem rolagem horizontal", async ({ browser }) => {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, storageState: FIRST_VISIT_DONE() });
+  const page = await ctx.newPage();
+  const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  await page.goto("/");
+  const popup = page.getByRole("dialog", { name: /Sua pele fala/ });
+  await expect(popup).toBeVisible();
+  const box = (await popup.boundingBox())!;
+  expect(box.width).toBeLessThanOrEqual(390 - 16);
+  expect(box.height).toBeLessThan(844);
+  await expect(popup.getByRole("link", { name: "Analisar minha pele" })).toBeInViewport();
+  await popup.getByRole("button", { name: "Fechar" }).tap();
+  await expect(popup).toBeHidden();
+  const section = page.getByRole("region", { name: "Sua pele é única. Sua rotina também deveria ser." });
+  await section.scrollIntoViewIfNeeded();
+  await expect(section.getByRole("link", { name: "Fazer minha análise" })).toBeVisible();
+  expect(await overflow(), "home").toBeLessThanOrEqual(0);
+  await page.getByRole("button", { name: "Abrir menu" }).tap();
+  await expect(page.getByRole("dialog", { name: "Menu" }).getByRole("link", { name: /Análise de pele com IA/ })).toBeVisible();
+  await page.goto("/analise-de-pele");
+  expect(await overflow(), "início").toBeLessThanOrEqual(0);
+  await page.getByRole("button", { name: "Começar análise" }).tap();
+  await page.getByRole("checkbox", { name: /Concordo com o uso da minha foto/ }).check();
+  expect(await overflow(), "consentimento").toBeLessThanOrEqual(0);
+  await page.getByRole("button", { name: "Continuar" }).tap();
+  await page.getByLabel("Escolher foto da galeria").setInputFiles(await photo(230, 200, 180));
+  await expect(page.getByRole("img", { name: "Pré-visualização da sua foto" })).toBeVisible();
+  expect(await overflow(), "foto").toBeLessThanOrEqual(0);
+  await page.getByRole("button", { name: "Analisar minha foto" }).tap();
+  await expect(page.getByRole("heading", { name: "Sua análise está pronta" })).toBeVisible({ timeout: 20_000 });
+  expect(await overflow(), "resultado").toBeLessThanOrEqual(0);
+  await page.getByRole("tab", { name: /Produtos/ }).tap();
+  await expect(page.locator("main article").first()).toBeVisible();
+  expect(await overflow(), "produtos").toBeLessThanOrEqual(0);
+  await page.getByRole("tab", { name: "Rotina" }).tap();
+  expect(await overflow(), "rotina").toBeLessThanOrEqual(0);
+  await ctx.close();
 });

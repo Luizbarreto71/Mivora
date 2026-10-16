@@ -75,6 +75,9 @@ export const DEFAULT_SETTINGS: StoreSettings = {
   apple_pay_product_id: null,
   mercadopago_public_key: null,
   apple_pay_domain_association: null,
+  skin_analysis_enabled: true,
+  skin_popup_interval_days: 7,
+  skin_analysis_daily_limit: 200,
   about_headline: null,
   about_text: null,
   whatsapp_section_title: null,
@@ -118,6 +121,8 @@ type HomeContent = {
   editorial: Banner[];
   routines: Banner | null;
   comingSoon: Banner | null;
+  skinPopup: Banner | null;
+  skinHome: Banner | null;
   ritual: RitualStep[];
   faqs: Faq[];
 };
@@ -127,7 +132,7 @@ export async function getHomeContent(): Promise<HomeContent> {
   cacheLife("hours");
   cacheTag(TAGS.content);
   const sb = getPublicSupabase();
-  if (!sb) return { hero: [], editorial: [], routines: null, comingSoon: null, ritual: [], faqs: [] };
+  if (!sb) return { hero: [], editorial: [], routines: null, comingSoon: null, skinPopup: null, skinHome: null, ritual: [], faqs: [] };
   const [banners, ritual, faqs] = await Promise.all([
     // RLS hides inactive banners, campaigns outside their period and unpublished products
     sb.from("banners").select("*, product:products(slug, name, images:product_images(url, alt, is_primary, sort_order))").order("sort_order"),
@@ -149,6 +154,8 @@ export async function getHomeContent(): Promise<HomeContent> {
     editorial: all.filter((b) => b.placement === "editorial"),
     routines: all.find((b) => b.placement === "routines") ?? null,
     comingSoon: all.find((b) => b.placement === "coming_soon") ?? null,
+    skinPopup: all.find((b) => b.placement === "skin_popup") ?? null,
+    skinHome: all.find((b) => b.placement === "skin_home") ?? null,
     ritual: (ritual.data ?? []) as unknown as RitualStep[],
     faqs: (faqs.data ?? []) as Faq[],
   };

@@ -5,9 +5,15 @@
 -- ---------------------------------------------------------------------------
 -- Banners: new home sections, background colour and a featured product
 -- ---------------------------------------------------------------------------
-alter table public.banners drop constraint if exists banners_placement_check;
-alter table public.banners add constraint banners_placement_check
-  check (placement in ('hero', 'editorial', 'routines', 'coming_soon'));
+-- (re-runnable: never narrows a list that a later migration already widened)
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'banners_placement_check' and pg_get_constraintdef(oid) like '%coming_soon%') then
+    alter table public.banners drop constraint if exists banners_placement_check;
+    alter table public.banners add constraint banners_placement_check
+      check (placement in ('hero', 'editorial', 'routines', 'coming_soon'));
+  end if;
+end $$;
 alter table public.banners
   add column if not exists background_color text check (background_color is null or background_color ~ '^#[0-9A-Fa-f]{6}$'),
   add column if not exists product_id uuid references public.products (id) on delete set null;

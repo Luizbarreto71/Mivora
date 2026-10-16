@@ -142,6 +142,9 @@ export type StoreSettings = {
   apple_pay_product_id: string | null;
   mercadopago_public_key: string | null;
   apple_pay_domain_association: string | null;
+  skin_analysis_enabled: boolean;
+  skin_popup_interval_days: number;
+  skin_analysis_daily_limit: number;
   about_headline: string | null;
   about_text: string | null;
   whatsapp_section_title: string | null;
@@ -165,7 +168,7 @@ export type DeliveryZone = {
   cities: string[];
 };
 
-export type BannerPlacement = "hero" | "editorial" | "routines" | "coming_soon";
+export type BannerPlacement = "hero" | "editorial" | "routines" | "coming_soon" | "skin_popup" | "skin_home";
 
 export type Banner = {
   id: string;
@@ -186,6 +189,10 @@ export type Banner = {
   image_desktop_url: string | null;
   image_mobile_url: string | null;
   image_alt: string | null;
+  /** Short bullet points (skin analysis pop-up) */
+  highlights?: string[];
+  /** Small text under the button (skin analysis home section) */
+  footnote?: string | null;
 };
 
 export type RitualStep = {

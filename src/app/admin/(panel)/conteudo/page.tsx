@@ -23,6 +23,8 @@ type BannerRow = {
   image_desktop_url: string | null;
   image_mobile_url: string | null;
   image_alt: string | null;
+  highlights: string[] | null;
+  footnote: string | null;
   background_color: string | null;
   layout: string;
   product_id: string | null;
@@ -51,6 +53,19 @@ const PLACEMENTS = [
     color: "#F7E1E1",
   },
   { value: "editorial", label: "Vitrine editorial (opcional)", description: "Faixas extras no fim da home, no mesmo estilo.", color: "#F3ECE4" },
+  {
+    value: "skin_popup",
+    label: "Análise de pele — pop-up de lançamento",
+    description:
+      "Pop-up que anuncia a Análise de Pele com IA quando a cliente entra no site (a frequência fica em Configurações). Os “Destaques” aparecem com ✓. O botão principal deve levar a /analise-de-pele e o secundário à seção da home (/#analise-de-pele). Sem foto, aparece a foto do produto em destaque. Desmarque “Ativo” para não mostrar o pop-up.",
+    color: "#F6E4E1",
+  },
+  {
+    value: "skin_home",
+    label: "Análise de pele — seção da home",
+    description: "Faixa fixa logo abaixo do banner principal, com o botão para a análise (/analise-de-pele). O texto auxiliar aparece abaixo do botão. Sem foto, aparece a foto do produto em destaque.",
+    color: "#F7E8E5",
+  },
 ] as const;
 
 /** timestamptz → value for <input type="datetime-local"> in Brasília time */
@@ -90,6 +105,16 @@ function BannerForm({ banner, placement, products }: { banner?: BannerRow; place
       <Field label="Subtítulo" htmlFor={`subtitle-${id}`} className="sm:col-span-2">
         <Textarea id={`subtitle-${id}`} name="subtitle" rows={2} defaultValue={banner?.subtitle ?? ""} />
       </Field>
+      {placement.value === "skin_popup" ? (
+        <Field label="Destaques" htmlFor={`highlights-${id}`} hint="Um por linha, até 5 (até 90 caracteres cada)" className="sm:col-span-2">
+          <Textarea id={`highlights-${id}`} name="highlights" rows={3} defaultValue={(banner?.highlights ?? []).join("\n")} />
+        </Field>
+      ) : null}
+      {placement.value === "skin_home" ? (
+        <Field label="Texto auxiliar (abaixo do botão)" htmlFor={`footnote-${id}`} className="sm:col-span-2">
+          <Input id={`footnote-${id}`} name="footnote" defaultValue={banner?.footnote ?? ""} />
+        </Field>
+      ) : null}
       <Field label="Botão principal — texto" htmlFor={`cta-${id}`}>
         <Input id={`cta-${id}`} name="cta_label" defaultValue={banner?.cta_label ?? ""} />
       </Field>
@@ -107,7 +132,11 @@ function BannerForm({ banner, placement, products }: { banner?: BannerRow; place
         label="Imagem (desktop)"
         defaultValue={banner?.image_desktop_url ?? null}
         folder="banners"
-        hint="Foto vertical ou quadrada, com o produto ou a modelo no centro. Ela se dissolve na cor de fundo pelo lado esquerdo."
+        hint={
+          placement.value === "skin_popup" || placement.value === "skin_home"
+            ? "Foto editorial de skincare (com pessoa somente com autorização de uso), com o rosto no centro e no alto: no celular a parte de cima é preservada."
+            : "Foto vertical ou quadrada, com o produto ou a modelo no centro. Ela se dissolve na cor de fundo pelo lado esquerdo."
+        }
       />
       <MediaField name="image_mobile_url" label="Imagem (celular, opcional)" defaultValue={banner?.image_mobile_url ?? null} folder="banners" />
       <Field label="Layout" htmlFor={`layout-${id}`} hint="Arte completa: a imagem já tem logo/textos e aparece inteira, sem texto por cima (proporção 16:9)">
@@ -166,7 +195,7 @@ export default async function ContentPage() {
         {PLACEMENTS.map((placement) => {
           const list = rows.filter((b) => b.placement === placement.value);
           return (
-            <section key={placement.value} className="space-y-4">
+            <section key={placement.value} id={placement.value === "skin_popup" ? "analise-de-pele" : undefined} className="scroll-mt-24 space-y-4">
               <div>
                 <h2 className="text-base font-semibold">{placement.label}</h2>
                 <p className="mt-1 max-w-3xl text-sm text-muted">{placement.description}</p>

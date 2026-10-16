@@ -16,6 +16,7 @@ import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, createReadStream, unlinkSync } from "node:fs";
 import http from "node:http";
 import path from "node:path";
+import sharp from "sharp";
 
 const root = process.cwd();
 const stateDir = path.join(root, ".local-stack");
@@ -252,6 +253,82 @@ async function notify(topic, id) {
 }
 const notifyPayment = (id) => notify("payment", id);
 
+// Anthropic (Claude) test double for the skin analysis — Messages API shape. Nothing here talks to Anthropic.
+// The answer depends on the photo's colours, so tests can check that results follow the image:
+// warm beige → dryness; reddish → visible redness; grey (no colour) → no face; almost black → service overloaded.
+const TEST_ANTHROPIC_KEY = "test-local-anthropic";
+const anthropicError = (res, status, type, message) => json(res, status, { type: "error", error: { type, message } });
+const skinObservation = (characteristic, status, finding, explanation) => ({ characteristic, status, finding, explanation });
+async function anthropicDouble(req, res) {
+  if (req.headers["x-api-key"] !== TEST_ANTHROPIC_KEY) return anthropicError(res, 401, "authentication_error", "invalid x-api-key");
+  const betas = String(req.headers["anthropic-beta"] ?? "");
+  const body = JSON.parse((await readBody(req)).toString() || "{}");
+  const image = (body.messages?.[0]?.content ?? []).find((b) => b.type === "image");
+  // the request the store must send: current model, server-side fallback, structured output, one JPEG photo
+  if (
+    body.model !== "claude-opus-5-5" ||
+    body.fallbacks !== "default" ||
+    !betas.includes("server-side-fallback-2026-07-01") ||
+    body.output_config?.format?.type !== "json_schema" ||
+    image?.source?.type !== "base64" ||
+    image.source.media_type !== "image/jpeg"
+  ) {
+    return anthropicError(res, 400, "invalid_request_error", "unexpected request shape");
+  }
+  const { channels } = await sharp(Buffer.from(image.source.data, "base64")).stats();
+  const [r, g, b] = channels.map((c) => c.mean);
+  await new Promise((done) => setTimeout(done, 400));
+  if ((r + g + b) / 3 < 25) return anthropicError(res, 529, "overloaded_error", "Overloaded");
+  let output;
+  if (Math.max(r, g, b) - Math.min(r, g, b) < 12) {
+    output = { image_ok: false, image_problem: "sem_rosto", summary: "Não encontramos um rosto nesta foto.", observations: [], needs: [], limitations: [] };
+  } else if (r - g > 60) {
+    output = {
+      image_ok: true,
+      image_problem: null,
+      summary: "Sua pele mostra áreas com vermelhidão visível nas bochechas e pequenas diferenças de tonalidade.",
+      observations: [
+        skinObservation("vermelhidao", "evidente", "Há áreas avermelhadas visíveis nas bochechas.", "Cuidados calmantes podem trazer mais conforto."),
+        skinObservation("uniformidade", "leve", "Pequenas diferenças de tom entre a testa e as bochechas.", "Produtos de uniformidade ajudam no viço."),
+        skinObservation("hidratacao", "nao_observado", "A pele não aparenta ressecamento.", "A hidratação diária mantém esse equilíbrio."),
+        skinObservation("olhos", "sem_evidencia", "A região dos olhos está pouco visível.", "Uma foto mais próxima permitiria observar."),
+      ],
+      needs: [
+        { need: "conforto", priority: "alta", reason: "A vermelhidão visível sugere priorizar o conforto da pele." },
+        { need: "uniformidade_manchas", priority: "media", reason: "Há pequenas diferenças de tonalidade." },
+      ],
+      limitations: ["A luz quente pode ter acentuado os tons avermelhados."],
+    };
+  } else {
+    output = {
+      image_ok: true,
+      image_problem: null,
+      summary: "Sua pele aparenta pouca hidratação, com textura levemente irregular na testa.",
+      observations: [
+        skinObservation("hidratacao", "evidente", "A pele aparenta ressecamento nas maçãs do rosto.", "Hidratantes ajudam a manter a pele confortável."),
+        skinObservation("textura", "leve", "Textura levemente irregular na testa.", "Uma rotina constante ajuda na aparência da textura."),
+        skinObservation("oleosidade", "nao_observado", "Não há brilho aparente.", "A pele não aparenta excesso de oleosidade."),
+        skinObservation("poros", "sem_evidencia", "A resolução não permite observar os poros.", "Uma foto mais nítida permitiria avaliar."),
+      ],
+      needs: [
+        { need: "hidratacao", priority: "alta", reason: "A aparência de ressecamento foi a característica mais visível." },
+        { need: "luminosidade", priority: "media", reason: "A pele pode ganhar viço com hidratação e cuidados de luminosidade." },
+      ],
+      limitations: ["A foto foi tirada com luz artificial."],
+    };
+  }
+  return json(res, 200, {
+    id: `msg_local_${randomUUID().slice(0, 8)}`,
+    type: "message",
+    role: "assistant",
+    model: body.model,
+    content: [{ type: "text", text: JSON.stringify(output) }],
+    stop_reason: "end_turn",
+    stop_sequence: null,
+    usage: { input_tokens: 1800, output_tokens: 420 },
+  });
+}
+
 const MP_SDK_STUB = `(function () {
   class MercadoPago {
     constructor(publicKey) { this.publicKey = publicKey; window.__mpPublicKey = publicKey; }
@@ -390,6 +467,7 @@ const server = http.createServer(async (req, res) => {
       if (!/@/.test(req.headers["user-agent"] ?? "")) return json(res, 400, { message: "User-Agent must contain a contact e-mail." });
       return json(res, 200, testCarrierQuote(JSON.parse((await readBody(req)).toString() || "{}")));
     }
+    if (url.pathname === "/anthropic/v1/messages" && req.method === "POST") return anthropicDouble(req, res);
     // Mercado Pago test doubles
     if (url.pathname.startsWith("/mercadopago/")) {
       const mpPath = url.pathname.slice("/mercadopago".length);
@@ -659,7 +737,9 @@ writeFileSync(
     // shipping calculator against the test doubles above (never the real services)
     `export CEP_API_URL=http://localhost:${cfg.gatewayPort}/viacep\nexport MELHOR_ENVIO_BASE_URL=http://localhost:${cfg.gatewayPort}/melhor-envio\nexport MELHOR_ENVIO_TOKEN=${TEST_ME_TOKEN}\nexport MELHOR_ENVIO_EMAIL=loja@example.com\n` +
     // online payments against the Mercado Pago doubles; the service role key is the local one
-    `export MERCADOPAGO_BASE_URL=http://localhost:${cfg.gatewayPort}/mercadopago\nexport NEXT_PUBLIC_MERCADOPAGO_SDK_URL=http://localhost:${cfg.gatewayPort}/mercadopago/js/v2\nexport MERCADOPAGO_ACCESS_TOKEN=${TEST_MP_TOKEN}\nexport MERCADOPAGO_WEBHOOK_SECRET=${TEST_MP_WEBHOOK_SECRET}\nexport SUPABASE_SERVICE_ROLE_KEY=${serviceKey}\n`,
+    `export MERCADOPAGO_BASE_URL=http://localhost:${cfg.gatewayPort}/mercadopago\nexport NEXT_PUBLIC_MERCADOPAGO_SDK_URL=http://localhost:${cfg.gatewayPort}/mercadopago/js/v2\nexport MERCADOPAGO_ACCESS_TOKEN=${TEST_MP_TOKEN}\nexport MERCADOPAGO_WEBHOOK_SECRET=${TEST_MP_WEBHOOK_SECRET}\nexport SUPABASE_SERVICE_ROLE_KEY=${serviceKey}\n` +
+    // skin analysis against the Anthropic double (never the real API)
+    `export ANTHROPIC_API_KEY=${TEST_ANTHROPIC_KEY}\nexport ANTHROPIC_BASE_URL=http://localhost:${cfg.gatewayPort}/anthropic\n`,
 );
 
 // .env.local for the Next.js app

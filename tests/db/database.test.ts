@@ -1125,3 +1125,84 @@ describe("checkout accounts, saved addresses and checkout attempts", () => {
     await db.query(`update store_settings set online_payment_enabled = false where id = 1`);
   });
 });
+
+describe("skin analysis: campaign, recommendation profiles, daily quota and saved reports", () => {
+  let user: string;
+  let other: string;
+  let product: string;
+  let draft: string;
+  const report = { summary: "Pele com aparência ressecada.", observations: [], needs: [], limitations: [], products: [], analyzedAt: "2026-10-16T12:00:00.000Z" };
+
+  beforeAll(async () => {
+    const make = async (email: string) => (await one<{ id: string }>(`insert into auth.users (email, email_confirmed_at) values ($1, now()) returning id`, [email])).id;
+    user = await make("pele@conta.com");
+    other = await make("outra@conta.com");
+    product = await productId("skin1004-madagascar-centella-ampoule");
+    draft = (await one<{ id: string }>(`select id from products where status = 'draft' limit 1`)).id;
+  });
+
+  it("seeds the launch pop-up and the home section as editable banners, and the settings with safe defaults", async () => {
+    const banners = await asRole(db, "anon", null, () =>
+      db.query<{ placement: string; title: string; highlights: string[]; footnote: string | null; cta_href: string; cta2_href: string | null }>(
+        `select placement, title, highlights, footnote, cta_href, cta2_href from banners where placement in ('skin_popup', 'skin_home') order by placement`,
+      ),
+    );
+    expect(banners.rows).toEqual([
+      expect.objectContaining({ placement: "skin_home", title: "Sua pele é única. Sua rotina também deveria ser.", cta_href: "/analise-de-pele", footnote: expect.stringContaining("Rápido, personalizado") }),
+      expect.objectContaining({ placement: "skin_popup", title: "Sua pele fala. A gente te ouve.", cta_href: "/analise-de-pele", cta2_href: "/#analise-de-pele", highlights: expect.arrayContaining(["Análise visual personalizada."]) }),
+    ]);
+    await expect(db.query(`update banners set highlights = array['1','2','3','4','5','6'] where placement = 'skin_popup'`)).rejects.toThrow(/banners_highlights_check/);
+    expect(await one(`select skin_analysis_enabled, skin_popup_interval_days, skin_analysis_daily_limit from store_settings where id = 1`)).toEqual({
+      skin_analysis_enabled: true,
+      skin_popup_interval_days: 7,
+      skin_analysis_daily_limit: 200,
+    });
+    await expect(db.query(`update store_settings set skin_popup_interval_days = 0 where id = 1`)).rejects.toThrow(/skin_popup_interval/);
+  });
+
+  it("recommendation profiles: public for published products, written only by admins", async () => {
+    await db.query(`insert into product_skin_profiles (product_id, routine_step, precautions) values ($1, 'tratamento', 'Evite a área dos olhos.'), ($2, 'hidratante', null)`, [product, draft]);
+    const visible = await asRole(db, "anon", null, () => db.query<{ product_id: string }>(`select product_id from product_skin_profiles`));
+    expect(visible.rows.map((r) => r.product_id)).toEqual([product]);
+    await expect(asRole(db, "authenticated", user, () => db.query(`update product_skin_profiles set recommendable = false where product_id = $1`, [product]))).resolves.toMatchObject({ affectedRows: 0 });
+    await expect(asRole(db, "anon", null, () => db.query(`insert into product_skin_profiles (product_id) values ($1)`, [draft]))).rejects.toThrow(/permission denied|row-level security/);
+    await expect(db.query(`insert into product_skin_profiles (product_id, alternative_product_id) values ($1, $1)`, [await productId("dr-althea-345-relief-cream")])).rejects.toThrow(/check/);
+  });
+
+  it("the daily quota is taken only by the server and follows the limit set in the admin", async () => {
+    await expect(asRole(db, "anon", null, () => db.query(`select take_skin_analysis_slot()`))).rejects.toThrow(/permission denied/);
+    await expect(asRole(db, "authenticated", user, () => db.query(`select take_skin_analysis_slot()`))).rejects.toThrow(/permission denied/);
+    await db.query(`update store_settings set skin_analysis_daily_limit = 2 where id = 1`);
+    const take = () => asRole(db, "service_role", null, async () => (await one<{ ok: boolean }>(`select take_skin_analysis_slot() as ok`)).ok);
+    expect([await take(), await take(), await take()]).toEqual([true, true, false]);
+    expect(await one(`select analyses from skin_analysis_usage`)).toEqual({ analyses: 2 });
+    await expect(asRole(db, "anon", null, () => db.query(`select * from skin_analysis_usage`))).rejects.toThrow(/permission denied/);
+    await db.query(`update store_settings set skin_analysis_daily_limit = 200 where id = 1`);
+  });
+
+  it("saved reports: text only, visible to their owner, at most 20 per account, older than 12 months removed", async () => {
+    const save = (uid: string) => asRole(db, "authenticated", uid, () => db.query(`insert into skin_reports (result) values ($1::jsonb)`, [JSON.stringify(report)]));
+    await save(user);
+    await expect(asRole(db, "anon", null, () => db.query(`insert into skin_reports (result) values ('{}'::jsonb)`))).rejects.toThrow(/permission denied|row-level security|not-null/);
+    expect((await asRole(db, "authenticated", other, () => db.query(`select id from skin_reports`))).rows).toEqual([]);
+    expect((await asRole(db, "authenticated", user, () => db.query(`select id from skin_reports`))).rows).toHaveLength(1);
+    // someone else's report cannot be deleted
+    await asRole(db, "authenticated", other, () => db.query(`delete from skin_reports`));
+    expect(await one(`select count(*)::int as n from skin_reports where user_id = $1`, [user])).toEqual({ n: 1 });
+    // a report older than 12 months disappears with the next save
+    await db.query(`insert into skin_reports (user_id, result, created_at) values ($1, $2::jsonb, now() - interval '13 months')`, [user, JSON.stringify(report)]);
+    await save(user);
+    expect(await one(`select count(*)::int as n from skin_reports where user_id = $1`, [user])).toEqual({ n: 2 });
+    for (let i = 0; i < 18; i += 1) await save(user);
+    await expect(save(user)).rejects.toThrow(/too_many_reports/);
+    await db.query(`delete from skin_reports`);
+  });
+
+  it("the privacy policy explains the analysis, the provider and that the photo is not stored", async () => {
+    const privacy = await one<{ body: string }>(`select body from pages where slug = 'politica-de-privacidade'`);
+    expect(privacy.body).toContain("## Análise de pele com IA");
+    expect(privacy.body).toMatch(/não é diagnóstico médico/);
+    expect(privacy.body).toMatch(/Anthropic/);
+    expect(privacy.body).toMatch(/não fica armazenada na MIVORA/);
+  });
+});

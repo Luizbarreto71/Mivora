@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { ActionButton } from "@/components/admin/action-button";
 import { ActionForm, SubmitButton } from "@/components/admin/form-kit";
 import { AdminPage, Card } from "@/components/admin/ui";
@@ -11,6 +12,8 @@ import { centsToInput } from "@/lib/money";
 import { applePayConfig } from "@/lib/payments/apple-pay";
 import { checkMercadoPago, mercadoPagoConfig } from "@/lib/payments/mercadopago";
 import { formatCep } from "@/lib/shipping/cep";
+import { skinAiConfigured } from "@/lib/skin/ai";
+import { isServiceRoleConfigured } from "@/lib/supabase/service";
 import { checkMelhorEnvio, melhorEnvioConfig } from "@/lib/shipping/quote";
 import { formatCepRange } from "@/lib/shipping/zones";
 import { DELIVERY_METHOD_LABEL, type DeliveryMethod } from "@/lib/types";
@@ -74,11 +77,22 @@ function ZoneForm({ zone }: { zone?: Zone }) {
 
 export default async function SettingsPage() {
   const { supabase } = await requireAdmin();
-  const [{ data: s }, { data: zones }] = await Promise.all([
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(new Date());
+  const [{ data: s }, { data: zones }, { data: skinUsage }] = await Promise.all([
     supabase.from("store_settings").select("*").eq("id", 1).single(),
     supabase.from("delivery_zones").select("*").order("sort_order"),
+    supabase.from("skin_analysis_usage").select("analyses").eq("day", today).maybeSingle(),
   ]);
   const v = s ?? {};
+  const skinAi = skinAiConfigured();
+  const skinStatus = !skinAi
+    ? {
+        tone: "text-warning",
+        text: "Falta a chave da IA: crie uma chave em console.anthropic.com (API Keys) e cadastre-a na variável ANTHROPIC_API_KEY do servidor (Vercel e Hostinger); depois faça um novo deploy. Por segurança, a chave nunca é salva no banco nem aparece no site. Sem ela, o pop-up, a seção da home e o menu ficam ocultos e a página da análise mostra que o recurso está indisponível.",
+      }
+    : v.skin_analysis_enabled === false
+      ? { tone: "text-muted", text: "IA conectada (Claude, da Anthropic). Marque a opção acima para mostrar a análise na loja." }
+      : { tone: "text-success", text: "No ar: pop-up de lançamento, seção da home, menu e página /analise-de-pele, com a análise feita pelo Claude (Anthropic) a partir do servidor." };
   const me = melhorEnvioConfig({ contact_email: v.contact_email ?? null });
   // live test quote, so an expired or revoked token shows up here
   const check = me.ready && v.shipping_origin_cep ? await checkMelhorEnvio({ ...DEFAULT_SETTINGS, ...v }) : null;
@@ -350,6 +364,35 @@ export default async function SettingsPage() {
             >
               <Textarea id="apple_pay_domain_association" name="apple_pay_domain_association" rows={3} className="font-mono text-xs" defaultValue={v.apple_pay_domain_association ?? ""} />
             </Field>
+          </div>
+        </Card>
+
+        <Card
+          title="Análise de Pele com IA"
+          description="A cliente envia uma foto do rosto, recebe uma análise visual cosmética e sugestões de produtos do catálogo. A foto é analisada em memória e descartada; nada é salvo sem um consentimento à parte."
+        >
+          <div className="grid gap-5 sm:grid-cols-2">
+            <div className="space-y-2 sm:col-span-2">
+              <Checkbox name="skin_analysis_enabled" label="Mostrar a Análise de Pele com IA na loja" defaultChecked={v.skin_analysis_enabled ?? true} />
+              <p className={cn("text-xs leading-relaxed", skinStatus.tone)}>{skinStatus.text}</p>
+            </div>
+            <Field label="Intervalo do pop-up (dias)" htmlFor="skin_popup_interval_days" hint="Depois de fechado (ou de iniciada a análise), o pop-up só volta a aparecer nesse navegador após este prazo. De 1 a 90.">
+              <Input id="skin_popup_interval_days" name="skin_popup_interval_days" inputMode="numeric" defaultValue={v.skin_popup_interval_days ?? 7} />
+            </Field>
+            <Field
+              label="Limite de análises por dia"
+              htmlFor="skin_analysis_daily_limit"
+              hint={`Controla o custo da IA (cada análise é cobrada pela Anthropic). Hoje: ${skinUsage?.analyses ?? 0} ${(skinUsage?.analyses ?? 0) === 1 ? "análise" : "análises"}.${isServiceRoleConfigured() ? "" : " Atenção: sem SUPABASE_SERVICE_ROLE_KEY o limite não é aplicado."}`}
+            >
+              <Input id="skin_analysis_daily_limit" name="skin_analysis_daily_limit" inputMode="numeric" defaultValue={v.skin_analysis_daily_limit ?? 200} />
+            </Field>
+            <p className="text-xs leading-relaxed text-muted sm:col-span-2">
+              Textos, botões, links e imagens do pop-up e da seção da home ficam em{" "}
+              <Link href="/admin/conteudo#analise-de-pele" className="underline underline-offset-2">
+                Conteúdo → Análise de pele
+              </Link>
+              . Os produtos sugeridos vêm das categorias de necessidade e de tipo de cada produto e do quadro “Análise de pele” na página do produto.
+            </p>
           </div>
         </Card>
 

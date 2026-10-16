@@ -10,6 +10,7 @@ import { deleteMyAddress, getMyAccount, getMyOrders, signOutAccount, type Accoun
 import { formatBrPhone } from "@/lib/store/customer";
 import { ORDER_STATUS_LABEL, type OrderStatus } from "@/lib/types";
 import { SocialSignIn } from "./auth/social-sign-in";
+import { SavedSkinReports } from "./skin/saved-skin-reports";
 import { useStoreConfig } from "./store-config";
 import { maskedCpf } from "./checkout/identity-section";
 
@@ -124,6 +125,8 @@ export function AccountSession() {
             </ul>
           )}
         </div>
+
+        <SavedSkinReports />
 
         <div>
           <p className="mb-2 flex items-center gap-2 font-semibold">

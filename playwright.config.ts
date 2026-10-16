@@ -9,10 +9,18 @@ import { defineConfig, devices } from "@playwright/test";
  */
 const baseURL = process.env.E2E_BASE_URL ?? "http://localhost:3000";
 
-/** Most tests run as returning visitors: the welcome intro has already been seen. */
+/** Most tests run as returning visitors: the welcome intro and the skin-analysis launch pop-up have already been seen. */
 export const RETURNING_VISITOR = {
   cookies: [],
-  origins: [{ origin: baseURL, localStorage: [{ name: "mivora.welcome.v1", value: "1" }] }],
+  origins: [
+    {
+      origin: baseURL,
+      localStorage: [
+        { name: "mivora.welcome.v1", value: "1" },
+        { name: "mivora.skinPopup.v1", value: JSON.stringify({ dismissedAt: Date.now() }) },
+      ],
+    },
+  ],
 };
 
 export default defineConfig({
