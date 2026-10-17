@@ -161,6 +161,7 @@ async function ProductContent({ params }: { params: PageProps<"/produtos/[slug]"
       </div>
 
       <div className="container-page mt-16 sm:mt-20">
+        <h2 className="sr-only">Detalhes do produto</h2>
         <ProductTabs
           tabs={[
             ...(product.description || skinTypes.length > 0 || concerns.length > 0

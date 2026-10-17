@@ -9,7 +9,7 @@ export function Testimonials({ items }: { items: Testimonial[] }) {
         <li key={t.id} className="w-[78%] shrink-0 snap-start sm:w-[46%] md:w-auto">
           <figure className="flex h-full flex-col rounded-card bg-ivory p-6">
             {t.rating ? (
-              <p className="flex gap-0.5" aria-label={`Avaliação: ${t.rating} de 5`}>
+              <p className="flex gap-0.5" role="img" aria-label={`Avaliação: ${t.rating} de 5`}>
                 {Array.from({ length: 5 }, (_, i) => (
                   <Star key={i} className={i < t.rating! ? "h-3.5 w-3.5 fill-ink text-ink" : "h-3.5 w-3.5 text-ink/25"} strokeWidth={1.5} aria-hidden="true" />
                 ))}
