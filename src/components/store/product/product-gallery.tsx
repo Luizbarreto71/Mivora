@@ -9,6 +9,9 @@ import { ProductImagePlaceholder } from "../placeholder";
 
 type Media = { kind: "image"; image: ImageRef } | { kind: "video"; url: string };
 
+// packshots keep a margin and blend into the stage; ambience / texture photos fill the frame
+const photoClass = (image: ImageRef, pad: string) => (image.fit === "cover" ? "object-cover" : cn("product-photo object-contain", pad));
+
 function videoEmbed(url: string) {
   const yt = url.match(/(?:youtube\.com\/(?:watch\?v=|shorts\/|embed\/)|youtu\.be\/)([\w-]{6,})/);
   if (yt) return { type: "iframe" as const, src: `https://www.youtube-nocookie.com/embed/${yt[1]}?rel=0` };
@@ -73,10 +76,10 @@ export function ProductGallery({ images, videoUrl, name, brand }: { images: Imag
               aria-selected={i === index}
               aria-label={m.kind === "video" ? "Vídeo do produto" : `Imagem ${i + 1}`}
               onClick={() => setIndex(i)}
-              className={cn("relative aspect-square w-full bg-ivory outline-offset-2 transition", i === index ? "ring-1 ring-ink" : "opacity-70 hover:opacity-100")}
+              className={cn("relative aspect-square w-full overflow-hidden rounded-control bg-card outline-offset-2 transition", i === index ? "ring-1 ring-ink" : "opacity-70 hover:opacity-100")}
             >
               {m.kind === "image" ? (
-                <Image src={m.image.url} alt="" fill sizes="72px" className="product-photo object-contain p-1.5" />
+                <Image src={m.image.url} alt="" fill sizes="72px" className={photoClass(m.image, "p-1.5")} />
               ) : (
                 <span className="absolute inset-0 flex items-center justify-center">
                   <Play className="h-5 w-5" strokeWidth={1.5} />
@@ -88,7 +91,7 @@ export function ProductGallery({ images, videoUrl, name, brand }: { images: Imag
       ) : null}
 
       {/* main stage (desktop) */}
-      <div className="relative hidden aspect-square overflow-hidden bg-ivory lg:block">
+      <div className="relative hidden aspect-square overflow-hidden rounded-card bg-card lg:block">
         {current.kind === "image" ? (
           <button
             type="button"
@@ -107,7 +110,7 @@ export function ProductGallery({ images, videoUrl, name, brand }: { images: Imag
               fill
               preload={index === 0}
               sizes="(min-width: 1280px) 46vw, 50vw"
-              className="product-photo object-contain p-[8%] transition-transform duration-200 ease-out"
+              className={cn(photoClass(current.image, "p-[8%]"), "transition-transform duration-200 ease-out")}
               style={zoom ? { transform: "scale(1.9)", transformOrigin: `${zoom.x}% ${zoom.y}%` } : undefined}
             />
             <span className="absolute bottom-4 right-4 flex h-9 w-9 items-center justify-center rounded-full bg-paper/80">
@@ -131,10 +134,10 @@ export function ProductGallery({ images, videoUrl, name, brand }: { images: Imag
           }}
         >
           {media.map((m, i) => (
-            <div key={i} className="relative aspect-square w-full shrink-0 snap-center bg-ivory">
+            <div key={i} className="relative aspect-square w-full shrink-0 snap-center overflow-hidden bg-card sm:rounded-card">
               {m.kind === "image" ? (
                 <button type="button" className="absolute inset-0" onClick={() => setLightbox(true)} aria-label="Ampliar imagem">
-                  <Image src={m.image.url} alt={m.image.alt ?? name} fill preload={i === 0} sizes="100vw" className="product-photo object-contain p-[8%]" />
+                  <Image src={m.image.url} alt={m.image.alt ?? name} fill preload={i === 0} sizes="100vw" className={photoClass(m.image, "p-[8%]")} />
                 </button>
               ) : (
                 <VideoPlayer url={m.url} title={name} />

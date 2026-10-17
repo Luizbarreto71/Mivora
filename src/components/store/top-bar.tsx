@@ -4,8 +4,8 @@ import Link from "next/link";
 import { Fragment, useEffect, useState } from "react";
 
 /**
- * Thin black bar above the header. Desktop: every message in one line, separated by dots.
- * Mobile: one message at a time, rotating every few seconds (paused for reduced motion).
+ * Thin black bar above the header. Large screens: every message in one line, separated by dots.
+ * Phones and tablets: one message at a time, rotating every few seconds (paused for reduced motion).
  */
 export function TopBar({ messages, href }: { messages: string[]; href?: string | null }) {
   const [index, setIndex] = useState(0);
@@ -20,7 +20,7 @@ export function TopBar({ messages, href }: { messages: string[]; href?: string |
   if (count === 0) return null;
   const content = (
     <>
-      <p className="hidden items-center justify-center gap-x-3 sm:flex">
+      <p className="hidden items-center justify-center gap-x-3 lg:flex">
         {messages.map((m, i) => (
           <Fragment key={m}>
             {i > 0 ? <span aria-hidden="true" className="text-paper/40">•</span> : null}
@@ -28,7 +28,7 @@ export function TopBar({ messages, href }: { messages: string[]; href?: string |
           </Fragment>
         ))}
       </p>
-      <p className="relative h-4 sm:hidden" aria-live="off">
+      <p className="relative h-4 lg:hidden" aria-live="off">
         {messages.map((m, i) => (
           <span
             key={m}

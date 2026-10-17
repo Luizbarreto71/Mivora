@@ -42,7 +42,7 @@ export type QuoteResult = { ok: true; quote: ShippingQuote } | { ok: false; erro
 
 export async function quoteShipping(input: unknown): Promise<QuoteResult> {
   const parsed = schema.safeParse(input);
-  if (!parsed.success) return { ok: false, error: "Não foi possível calcular o frete para este carrinho." };
+  if (!parsed.success) return { ok: false, error: "Não foi possível calcular o frete para esta sacola." };
   const cep = normalizeCep(parsed.data.cep);
   if (!cep) return { ok: false, error: "Digite um CEP válido, com 8 números." };
   const settings = await getStoreSettings();

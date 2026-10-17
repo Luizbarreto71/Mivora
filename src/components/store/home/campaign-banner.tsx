@@ -26,12 +26,12 @@ export function CampaignBanner({
   const link = href ?? banner.cta_href;
   const external = link?.startsWith("http");
   return (
-    <section aria-labelledby={labelledBy} className="mt-16 sm:mt-20">
-      <div className="relative overflow-hidden" style={{ backgroundColor: banner.background_color ?? "#F3ECE4" }}>
-        <div className="container-page relative z-10 flex min-h-[15rem] items-center py-10 sm:min-h-[17rem] lg:min-h-[18.5rem]">
+    <section aria-labelledby={labelledBy} className="container-page mt-16 sm:mt-24">
+      <div className="relative overflow-hidden rounded-panel" style={{ backgroundColor: banner.background_color ?? "#F3ECE4" }}>
+        <div className="relative z-10 flex min-h-[15rem] items-center px-6 py-10 sm:min-h-[17rem] sm:px-10 lg:min-h-[20rem] lg:px-14">
           <div className="max-w-[24rem] lg:max-w-[28rem]">
             {banner.eyebrow ? <p className="mb-3 text-[0.6875rem] font-medium uppercase tracking-[0.22em] text-ink/70">{banner.eyebrow}</p> : null}
-            <h2 id={labelledBy} className="heading-display text-[1.75rem] sm:text-[2rem]">
+            <h2 id={labelledBy} className="t-h2">
               {banner.title}
             </h2>
             {banner.subtitle ? <p className="mt-3 text-[0.9375rem] leading-relaxed text-ink/75">{banner.subtitle}</p> : null}

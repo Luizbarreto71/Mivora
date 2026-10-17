@@ -87,7 +87,7 @@ export function BuyBox({ product }: { product: ProductDetail }) {
       </div>
       {priceCents == null && !comingSoon ? <p className="mt-2 text-sm text-muted">Fale com a gente pelo WhatsApp para saber o valor atual.</p> : null}
       {comingSoon ? (
-        <div className="mt-5 border border-line bg-ivory p-4 text-sm leading-relaxed text-ink-soft" role="note">
+        <div className="mt-5 rounded-card bg-ivory p-4 text-sm leading-relaxed text-ink-soft" role="note">
           <p className="font-semibold text-ink">Este produto ainda não está disponível.</p>
           <p className="mt-1">Ele faz parte dos próximos lançamentos da MIVORA e não pode ser comprado nem entregue no momento.{product.comingSoonNote ? ` ${product.comingSoonNote}` : ""}</p>
         </div>
@@ -112,7 +112,7 @@ export function BuyBox({ product }: { product: ProductDetail }) {
                 }}
                 aria-pressed={v.id === variantId}
                 className={cn(
-                  "min-h-11 border px-4 text-sm transition",
+                  "min-h-11 rounded-control border px-4 text-sm transition",
                   v.id === variantId ? "border-ink bg-ink text-paper" : "border-line hover:border-ink",
                   !v.isAvailable && "text-muted line-through",
                 )}
@@ -128,8 +128,8 @@ export function BuyBox({ product }: { product: ProductDetail }) {
         {isAvailable ? (
           <div className="flex gap-3">
             <QuantityStepper value={quantity} onChange={setQuantity} max={maxQuantity} />
-            <button type="button" onClick={addToCart} className={buttonClasses("primary", "lg", "min-w-0 flex-1 px-4 whitespace-normal text-center leading-tight sm:px-8")}>
-              <ShoppingBag className="h-4 w-4" strokeWidth={1.75} /> Adicionar ao carrinho
+            <button type="button" onClick={addToCart} className={buttonClasses("accent", "lg", "min-w-0 flex-1 px-4 whitespace-normal text-center leading-tight sm:px-8")}>
+              <ShoppingBag className="h-4 w-4" strokeWidth={1.75} /> Adicionar à sacola
             </button>
           </div>
         ) : null}
@@ -159,7 +159,7 @@ export function BuyBox({ product }: { product: ProductDetail }) {
       </div>
 
       {shippingCalculator && isAvailable && !comingSoon ? (
-        <ShippingCalculator className="mt-6 border border-line p-4 sm:p-5" items={[{ productId: product.id, variantId, kitId: null, quantity }]} />
+        <ShippingCalculator className="mt-6 rounded-card border border-line p-4 sm:p-5" items={[{ productId: product.id, variantId, kitId: null, quantity }]} />
       ) : null}
 
       <ul className={cn("mt-8 space-y-3 border-t border-line pt-6 text-sm text-ink-soft", comingSoon && "hidden")}>
@@ -207,8 +207,8 @@ export function BuyBox({ product }: { product: ProductDetail }) {
             <Price priceCents={priceCents} compareAtCents={compareAtCents} className="text-sm" />
           </div>
           {isAvailable ? (
-            <button type="button" onClick={addToCart} tabIndex={showSticky ? 0 : -1} className={buttonClasses("primary", "md", "shrink-0")}>
-              Adicionar
+            <button type="button" onClick={addToCart} tabIndex={showSticky ? 0 : -1} className={buttonClasses("accent", "md", "shrink-0")} aria-label={`Adicionar ${product.name} à sacola`}>
+              <ShoppingBag className="h-4 w-4" strokeWidth={1.75} /> Adicionar
             </button>
           ) : whatsappHref ? (
             <a href={whatsappHref} target="_blank" rel="noopener noreferrer" tabIndex={showSticky ? 0 : -1} className={buttonClasses("primary", "md", "shrink-0")}>

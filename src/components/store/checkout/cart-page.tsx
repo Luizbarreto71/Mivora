@@ -95,7 +95,7 @@ export function CartPageContent() {
           ) : null}
           <div className="mt-7">
             {canCheckout ? (
-              <Link href="/finalizar?etapa=identificacao" className={buttonClasses("primary", "lg", "w-full whitespace-normal px-5 text-center")}>
+              <Link href="/finalizar?etapa=identificacao" className={buttonClasses("accent", "lg", "w-full whitespace-normal px-5 text-center")}>
                 Continuar para identificação
               </Link>
             ) : (

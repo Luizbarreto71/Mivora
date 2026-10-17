@@ -105,7 +105,7 @@ function Pagination({ basePath, filters, page, pageCount }: { basePath: string; 
           <Link
             href={href(p)}
             aria-current={p === page ? "page" : undefined}
-            className={p === page ? "flex h-10 min-w-10 items-center justify-center bg-ink px-3 text-sm text-paper" : "flex h-10 min-w-10 items-center justify-center px-3 text-sm hover:bg-ivory"}
+            className={p === page ? "flex h-10 min-w-10 items-center justify-center rounded-full bg-ink px-3 text-sm text-paper" : "flex h-10 min-w-10 items-center justify-center rounded-full px-3 text-sm hover:bg-ivory"}
           >
             {p}
           </Link>
@@ -133,7 +133,7 @@ export function CatalogSkeleton() {
         <div className="grid grid-cols-2 gap-x-3 gap-y-10 pt-8 sm:gap-x-5 md:grid-cols-3 xl:grid-cols-4">
           {Array.from({ length: 8 }).map((_, i) => (
             <div key={i}>
-              <div className="aspect-[4/5] animate-pulse bg-ivory" />
+              <div className="aspect-square animate-pulse rounded-card bg-ivory" />
               <div className="mt-4 h-3 w-1/3 animate-pulse bg-ivory" />
               <div className="mt-2 h-4 w-4/5 animate-pulse bg-ivory" />
             </div>

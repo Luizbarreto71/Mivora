@@ -56,8 +56,8 @@ const STEP_BUTTON = "w-full whitespace-normal px-5 text-center sm:w-auto sm:px-8
 type LastOrder = { code: string; url: string; summarized: boolean; at: number };
 
 const LOGIN_NOTICE: Record<string, { tone: "info" | "error"; text: string }> = {
-  ok: { tone: "info", text: "Pronto, você entrou na sua conta. Seu carrinho foi mantido." },
-  confirmado: { tone: "info", text: "E-mail confirmado! Sua conta está ativa e seu carrinho foi mantido." },
+  ok: { tone: "info", text: "Pronto, você entrou na sua conta. Sua sacola foi mantida." },
+  confirmado: { tone: "info", text: "E-mail confirmado! Sua conta está ativa e sua sacola foi mantida." },
   cancelado: { tone: "info", text: "O login foi cancelado. Você pode tentar de novo ou entrar com seu e-mail." },
   erro: { tone: "error", text: "Não foi possível entrar agora. Tente de novo." },
 };
@@ -281,7 +281,7 @@ export function CheckoutFlow({
   const onlineBlocker = !onlinePayment
     ? null
     : totals.hasUnpricedItems
-      ? "Há itens com preço sob consulta no carrinho: para eles, o pagamento é combinado pelo WhatsApp."
+      ? "Há itens com preço sob consulta na sacola: para eles, o pagamento é combinado pelo WhatsApp."
       : deliveryFeeCents == null
         ? "Para pagar pelo site, escolha uma entrega com valor definido."
         : null;
@@ -703,7 +703,7 @@ export function CheckoutFlow({
                 <Link href="/carrinho" className="inline-flex items-center justify-center gap-2 text-sm text-muted underline-offset-4 hover:text-ink hover:underline">
                   <ArrowLeft className="h-4 w-4" /> Voltar para a sacola
                 </Link>
-                <Button size="lg" className={STEP_BUTTON} onClick={toPayment} disabled={saving || blockedByCart || account === undefined}>
+                <Button variant="accent" size="lg" className={STEP_BUTTON} onClick={toPayment} disabled={saving || blockedByCart || account === undefined}>
                   {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                   Continuar para o pagamento
                 </Button>
@@ -729,7 +729,7 @@ export function CheckoutFlow({
                 <button type="button" onClick={() => goTo("identificacao")} className="inline-flex items-center justify-center gap-2 text-sm text-muted underline-offset-4 hover:text-ink hover:underline">
                   <ArrowLeft className="h-4 w-4" /> Voltar para identificação e entrega
                 </button>
-                <Button size="lg" className={STEP_BUTTON} onClick={toReview} disabled={!payMethod || blockedByCart}>
+                <Button variant="accent" size="lg" className={STEP_BUTTON} onClick={toReview} disabled={!payMethod || blockedByCart}>
                   Continuar para a revisão
                 </Button>
               </div>
@@ -766,7 +766,7 @@ export function CheckoutFlow({
                 {payMethod === "applepay" ? (
                   <ApplePayButton onClick={payWithApplePay} disabled={applePayBusy || blockedByCart || totalCents == null} />
                 ) : (
-                  <Button size="lg" className="w-full whitespace-normal px-5 text-center sm:px-8" onClick={confirm} disabled={placing || blockedByCart || (payMethod === "card" && !card)}>
+                  <Button variant="accent" size="lg" className="w-full whitespace-normal px-5 text-center sm:px-8" onClick={confirm} disabled={placing || blockedByCart || (payMethod === "card" && !card)}>
                     {placing ? <Loader2 className="h-4 w-4 animate-spin" /> : payMethod === "whatsapp" ? <WhatsAppIcon className="h-4 w-4" /> : <Lock className="h-4 w-4" strokeWidth={1.75} />}
                     {placing
                       ? "Confirmando o pedido…"
@@ -803,7 +803,7 @@ function CheckoutLoginGate({ notice }: { notice: { tone: "info" | "error"; text:
         Entre para finalizar sua compra
       </h2>
       <p className="mt-2 text-sm leading-relaxed text-ink-soft">
-        Para comprar na MIVORA é preciso ter uma conta com o e-mail confirmado. Seu carrinho continua salvo e você volta para cá depois de entrar ou criar a conta.
+        Para comprar na MIVORA é preciso ter uma conta com o e-mail confirmado. Sua sacola continua salva e você volta para cá depois de entrar ou criar a conta.
       </p>
       {notice ? (
         <p className={notice.tone === "error" ? "mt-4 border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger" : "mt-4 border border-rose-ink/20 bg-rose-soft px-4 py-3 text-sm"} role="status">

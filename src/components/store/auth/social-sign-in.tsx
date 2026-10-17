@@ -67,7 +67,7 @@ export function SocialSignIn({ providers, next, beforeRedirect, className }: { p
           type="button"
           onClick={() => start("google")}
           disabled={busy !== null}
-          className="flex h-12 w-full items-center justify-center gap-3 rounded-[4px] border border-[#747775] bg-white px-4 text-[0.9375rem] font-medium text-[#1f1f1f] transition-colors hover:bg-[#f7f7f7] disabled:opacity-60"
+          className="flex h-12 w-full items-center justify-center gap-3 rounded-control border border-[#747775] bg-white px-4 text-[0.9375rem] font-medium text-[#1f1f1f] transition-colors hover:bg-[#f7f7f7] disabled:opacity-60"
         >
           {busy === "google" ? <Loader2 className="h-5 w-5 animate-spin" /> : <GoogleMark className="h-5 w-5" />}
           Continuar com Google
@@ -78,7 +78,7 @@ export function SocialSignIn({ providers, next, beforeRedirect, className }: { p
           type="button"
           onClick={() => start("apple")}
           disabled={busy !== null}
-          className="flex h-12 w-full items-center justify-center gap-3 rounded-[4px] bg-black px-4 text-[0.9375rem] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+          className="flex h-12 w-full items-center justify-center gap-3 rounded-control bg-black px-4 text-[0.9375rem] font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
         >
           {busy === "apple" ? <Loader2 className="h-5 w-5 animate-spin" /> : <AppleMark className="h-5 w-5" />}
           Continuar com Apple

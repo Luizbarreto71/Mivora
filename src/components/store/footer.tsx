@@ -55,38 +55,49 @@ export function Footer({ settings, nav }: { settings: StoreSettings; nav: NavDat
     },
   ];
 
+  // only what the store accepts today (Configurações): online payment by Mercado Pago, Apple Pay, or the team
+  const payments = settings.online_payment_enabled
+    ? ["Pix", "Cartão de crédito", "Boleto", ...(settings.apple_pay_enabled ? ["Apple Pay"] : [])]
+    : [];
+
   return (
-    <footer className="mt-20 sm:mt-24">
+    <footer className="mt-24 sm:mt-28">
       <div className="bg-ink text-paper">
-        <div className="container-page grid gap-10 py-12 lg:grid-cols-[1fr_1.1fr_1fr] lg:items-start lg:gap-12">
+        <div className="container-page grid gap-12 py-14 lg:grid-cols-[1.1fr_1fr] lg:items-center lg:gap-16 lg:py-16">
           <div>
-            <Link href="/" aria-label="MIVORA — página inicial" className="inline-flex h-6">
+            <Link href="/" aria-label="MIVORA — página inicial" className="inline-flex h-7">
               <Logo registered={settings.show_registered_mark} className="h-full text-paper" />
             </Link>
+            <p className="mt-6 max-w-md text-[1.0625rem] leading-relaxed text-paper/80">
+              {settings.tagline ?? "Skincare coreano e beleza internacional, com curadoria e atendimento personalizado."}
+            </p>
+            <div className="mt-6 space-y-1 text-[0.8125rem] text-paper/60">
+              {settings.contact_email ? (
+                <a href={`mailto:${settings.contact_email}`} className="block hover:text-paper">
+                  {settings.contact_email}
+                </a>
+              ) : null}
+              {settings.business_hours ? <p>{settings.business_hours}</p> : null}
+            </div>
             {socials.length > 0 ? (
-              <div className="mt-7">
-                <p className="text-[0.8125rem] font-medium">Siga a gente</p>
-                <div className="mt-3 flex gap-2">
-                  {socials.map(({ href, label, Icon }) => (
-                    <a key={label} href={href} target="_blank" rel="noopener noreferrer" aria-label={label} className="flex h-9 w-9 items-center justify-center rounded-full border border-paper/25 transition hover:border-paper">
-                      <Icon className="h-4 w-4" />
-                    </a>
-                  ))}
-                </div>
+              <div className="mt-7 flex gap-2" aria-label="Redes sociais">
+                {socials.map(({ href, label, Icon }) => (
+                  <a key={label} href={href} target="_blank" rel="noopener noreferrer" aria-label={label} className="flex h-10 w-10 items-center justify-center rounded-full border border-paper/25 transition hover:border-paper hover:bg-paper hover:text-ink">
+                    <Icon className="h-4 w-4" />
+                  </a>
+                ))}
               </div>
             ) : null}
           </div>
-          {settings.newsletter_enabled ? <NewsletterForm /> : <div className="hidden lg:block" />}
-          <div className="text-[0.8125rem] leading-relaxed text-paper/65 lg:text-right">
-            <p className="font-medium text-paper">{settings.store_name}</p>
-            <p className="mt-2 lg:ml-auto lg:max-w-xs">{settings.tagline ?? "Skincare coreano e beleza internacional, com curadoria e atendimento personalizado."}</p>
-            {settings.contact_email ? (
-              <a href={`mailto:${settings.contact_email}`} className="mt-2 inline-block hover:text-paper">
-                {settings.contact_email}
-              </a>
-            ) : null}
-            {settings.business_hours ? <p className="mt-1">{settings.business_hours}</p> : null}
-          </div>
+          {settings.newsletter_enabled ? (
+            <div className="rounded-panel bg-paper/[0.06] p-6 sm:p-8">
+              <p className="t-label text-paper/60">Newsletter</p>
+              <p className="mt-2 text-[1.25rem] font-semibold tracking-[-0.01em]">Lançamentos e novidades primeiro</p>
+              <div className="mt-5">
+                <NewsletterForm />
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -114,6 +125,22 @@ export function Footer({ settings, nav }: { settings: StoreSettings; nav: NavDat
           ))}
         </div>
       </div>
+
+      {payments.length > 0 ? (
+        <div className="border-b border-line bg-paper">
+          <div className="container-page flex flex-col gap-3 py-6 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-[0.8125rem] font-semibold">Formas de pagamento</p>
+            <ul className="flex flex-wrap gap-2" aria-label="Formas de pagamento">
+              {payments.map((p) => (
+                <li key={p} className="rounded-full border border-line px-3 py-1.5 text-xs text-ink-soft">
+                  {p}
+                </li>
+              ))}
+              <li className="px-1 py-1.5 text-xs text-muted">pelo Mercado Pago</li>
+            </ul>
+          </div>
+        </div>
+      ) : null}
 
       <div className="bg-paper">
         <div className="container-page flex flex-col gap-2 py-6 text-xs text-muted sm:flex-row sm:items-center sm:justify-between">

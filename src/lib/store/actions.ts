@@ -111,7 +111,7 @@ const lineWithQuantity = lineRef.extend({ quantity: z.number().int().min(1).max(
 const checkoutSchema = z.object({
   /** One id per checkout attempt: repeated clicks reuse the same order */
   requestId: z.uuid().optional(),
-  items: z.array(lineWithQuantity).min(1, "Seu carrinho está vazio.").max(60, "Carrinho muito grande. Fale com a gente pelo WhatsApp."),
+  items: z.array(lineWithQuantity).min(1, "Sua sacola está vazia.").max(60, "Sacola muito grande. Fale com a gente pelo WhatsApp."),
   // validated again by the database (CPF digits, phone, e-mail)
   customer: z.object(
     {
@@ -157,9 +157,9 @@ const checkoutSchema = z.object({
 type CheckoutInput = z.infer<typeof checkoutSchema>;
 
 const ERROR_MESSAGES: Record<string, string> = {
-  empty_cart: "Seu carrinho está vazio",
-  too_many_items: "Carrinho muito grande. Fale com a gente pelo WhatsApp",
-  invalid_quantity: "Revise as quantidades do carrinho",
+  empty_cart: "Sua sacola está vazia",
+  too_many_items: "Sacola muito grande. Fale com a gente pelo WhatsApp",
+  invalid_quantity: "Revise as quantidades da sacola",
   item_unavailable: "Um dos produtos não está mais disponível",
   insufficient_stock: "Não há estoque suficiente para",
   below_minimum_order: "O pedido não atinge o valor mínimo para a entrega escolhida",
@@ -178,14 +178,14 @@ const ERROR_MESSAGES: Record<string, string> = {
   address_required: "Informe o endereço completo de entrega (rua, número, bairro e destinatário)",
   invalid_payment_method: "Forma de pagamento inválida",
   online_payment_disabled: "O pagamento pelo site não está disponível no momento",
-  online_payment_unavailable: "Há itens com preço sob consulta no carrinho. Para eles, combine o pagamento pelo WhatsApp",
+  online_payment_unavailable: "Há itens com preço sob consulta na sacola. Para eles, combine o pagamento pelo WhatsApp",
   delivery_required: "Para pagar pelo site, escolha uma entrega com valor definido",
   login_required: "Entre na sua conta para finalizar a compra",
   email_not_confirmed: "Confirme seu e-mail para finalizar a compra",
   invalid_request: "Não foi possível registrar este pedido. Recarregue a página e tente de novo",
 };
 
-const LOGIN_REQUIRED = "Entre na sua conta para finalizar a compra. Seu carrinho continua salvo.";
+const LOGIN_REQUIRED = "Entre na sua conta para finalizar a compra. Sua sacola continua salva.";
 const CONFIRM_REQUIRED = "Confirme seu e-mail para finalizar a compra. Enviamos o link para a sua caixa de entrada.";
 
 /** Purchases need a signed-in account with a confirmed e-mail (also enforced by the database). */

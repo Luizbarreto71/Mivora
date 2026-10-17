@@ -113,7 +113,7 @@ export function ReviewSection(p: Props) {
           maxLength={1000}
           rows={3}
           placeholder="Ex.: melhor horário para entrega"
-          className="w-full rounded-[2px] border border-line bg-paper px-3.5 py-3 text-[0.9375rem] focus:border-ink focus:outline-none"
+          className="w-full rounded-control border border-line bg-paper px-3.5 py-3 text-[0.9375rem] focus:border-ink focus:outline-none"
         />
       </div>
       <dl className="space-y-1.5 border-t border-line pt-4 text-sm">

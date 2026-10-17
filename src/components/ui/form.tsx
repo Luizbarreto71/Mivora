@@ -3,7 +3,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 const field =
-  "w-full rounded-[2px] border border-line bg-paper px-3.5 text-[0.9375rem] text-ink placeholder:text-muted/70 transition-colors focus:border-ink focus:outline-none disabled:bg-ivory disabled:text-muted aria-[invalid=true]:border-danger";
+  "w-full rounded-control border border-line bg-paper px-3.5 text-[0.9375rem] text-ink placeholder:text-muted/70 transition-[border-color,box-shadow] focus:border-ink focus:shadow-[0_0_0_3px_rgba(23,20,20,0.06)] focus:outline-none disabled:bg-ivory disabled:text-muted aria-[invalid=true]:border-danger";
 
 export function Input({ className, ...props }: ComponentProps<"input">) {
   return <input className={cn(field, "h-11", className)} {...props} />;

@@ -123,6 +123,13 @@ Reprodução do mockup enviado pela dona da loja, sem trocar a stack nem apagar 
 - **Sessão:** cookies do Supabase Auth, renovados pelo `proxy.ts` e conferidos no servidor a cada ação; nada no `localStorage` vale como prova de login. “Sair” encerra a sessão no Supabase.
 - **Cadastro repetido antes da confirmação:** o Supabase guarda a senha do primeiro cadastro de um e-mail ainda não confirmado. Para que quem digitou o e-mail de outra pessoa não fique com a senha dessa conta, o servidor faz o cadastro mais recente definir a senha e os dados (chave de serviço + função `pending_email_signup`). Google ou Apple com o e-mail de um cadastro não confirmado seguem só com o provedor: o Supabase descarta a senha e os dados digitados nesse cadastro.
 
+### Nova direção visual (17/10/2026)
+- **Design system** (`src/app/globals.css`): branco de base, off-white e bege para profundidade, grafite nos textos e na navegação, rosé de apoio e uma cor da marca, **rosewood `#7A2F45`** (texto branco com contraste 9:1), só para as ações que levam à compra: adicionar à sacola, finalizar e avançar nas etapas. Cantos suaves (controle 6 px, card 12 px, painel 20 px), sombras só na interação, escala tipográfica única (`t-display`, `t-h1`, `t-h2`, `t-h3`, `t-lead`, `t-label`) em Inter, e animações curtas que respeitam “reduzir movimento”.
+- **Componentes padronizados:** botões (`accent`, `primary`, `outline`…), etiquetas, campos, card de produto (foto maior, etiquetas só quando verdadeiras, “Adicionar à sacola” no hover e botão compacto sobre a foto no celular), títulos de seção, estado vazio, paginação e filtros. A loja passou a dizer “sacola” em todos os lugares (os endereços `/carrinho` continuam).
+- **Home:** banner com foto em moldura e texto em HTML; “Compre por categoria” com fotos editoriais e a quantidade real de produtos; “Destaques da curadoria” (o que dá para comprar na hora vem primeiro); análise de pele; novidades; marcas; rotinas; necessidades; “Aprenda com a MIVORA” (só leva a páginas que existem); depoimentos reais. O catálogo também lista primeiro o que está disponível.
+- **Imagens:** fotos oficiais das marcas (versão exata conferida), em alta resolução, com galerias de ambiente e textura nos produtos à venda; fotos editoriais do Unsplash (licença de uso comercial) no banner, nas categorias e nos guias. Origem de cada arquivo em `assets/IMAGENS.md`. O campo `product_images.fit` diz se a foto preenche o quadro (ambiente) ou mantém margem (embalagem).
+- **Banner:** as quatro artes de 837 px (com logotipo dentro da imagem, desfocadas em telas grandes) foram **desligadas, não apagadas**: dá para religar em Conteúdo. As imagens das categorias podem ser trocadas em Categorias.
+
 ## 2. Estrutura
 
 ```

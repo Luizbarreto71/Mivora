@@ -77,7 +77,7 @@ export function PixPayment({ qrCode, qrBase64, ticketUrl, expiresAt }: { qrCode:
       <label htmlFor="pix-code" className="mt-5 block text-[0.8125rem] font-semibold">
         Pix copia e cola
       </label>
-      <textarea id="pix-code" readOnly value={qrCode} rows={3} className="mt-1.5 w-full resize-none break-all rounded-[2px] border border-line bg-ivory px-3 py-2 font-mono text-xs" onFocus={(e) => e.currentTarget.select()} />
+      <textarea id="pix-code" readOnly value={qrCode} rows={3} className="mt-1.5 w-full resize-none break-all rounded-control border border-line bg-ivory px-3 py-2 font-mono text-xs" onFocus={(e) => e.currentTarget.select()} />
       <Button size="lg" className="mt-3 w-full" onClick={copy}>
         {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" strokeWidth={1.75} />}
         {copied ? "Código copiado" : "Copiar código Pix"}

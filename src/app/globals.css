@@ -1,31 +1,49 @@
 @import "tailwindcss";
 
-/* MIVORA design tokens — white & black identity, nude as a quiet accent */
+/*
+ * MIVORA design system
+ * Colour: white base, warm off-white and beige for depth, graphite for text and navigation, delicate rosé as
+ * support, and one signature colour (rosewood) for the actions that move a purchase forward.
+ * Shape: soft corners (control 6 px, card 12 px, panel 20 px). Elevation only on interaction.
+ */
 @theme {
   --color-paper: #ffffff;
-  --color-ink: #121212;
-  --color-ink-soft: #2b2b2b;
-  --color-ivory: #f8f7f4;
-  --color-sand: #f1efea;
-  --color-line: #eaeaea;
-  --color-muted: #737373;
-  --color-blush: #eadddd;
+  --color-ink: #171414;
+  --color-ink-soft: #2e2928;
+  --color-ivory: #f8f6f3;
+  --color-sand: #f1ece6;
+  --color-line: #e8e3de;
+  --color-muted: #6e6866;
+  --color-blush: #ecdcda;
   /* rosé and beige of the campaign bands; card is the light stage behind product photos */
-  --color-rose: #f6e4e1;
+  --color-rose: #f5e3e0;
   --color-rose-soft: #fbf3f1;
   --color-rose-ink: #8a4b51;
-  --color-beige: #f3ece4;
-  --color-card: #faf8f6;
+  --color-beige: #f1e9df;
+  --color-card: #f8f5f2;
+  /* signature colour: buttons that add to the bag and finish a purchase (white text 9:1) */
+  --color-accent: #7a2f45;
+  --color-accent-hover: #632437;
+  --color-accent-soft: #f6e8ec;
   --color-success: #2f6b4f;
   --color-danger: #a33a3a;
   --color-warning: #8a6a1f;
 
-  /* Inter everywhere: body 400, highlights 500/600, titles 600/700 */
+  /* Inter everywhere: body 400, highlights 500/600, titles 600 */
   --font-sans: var(--font-inter), Inter, sans-serif;
   --font-display: var(--font-inter), Inter, sans-serif;
 
+  --radius-control: 6px;
+  --radius-card: 12px;
+  --radius-panel: 20px;
+
+  --shadow-soft: 0 1px 2px rgba(23, 20, 20, 0.05), 0 8px 24px -16px rgba(23, 20, 20, 0.18);
+  --shadow-lift: 0 2px 6px rgba(23, 20, 20, 0.04), 0 22px 48px -26px rgba(23, 20, 20, 0.32);
+  --shadow-overlay: 0 30px 80px -30px rgba(23, 20, 20, 0.45);
+
   --tracking-brand: 0.28em;
   --ease-soft: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out-quick: cubic-bezier(0.2, 0.8, 0.2, 1);
 
   --animate-fade-up: fade-up 0.7s var(--ease-soft) both;
   --animate-fade-in: fade-in 0.4s ease-out both;
@@ -143,6 +161,60 @@ body {
     font-weight: 600;
     letter-spacing: -0.02em;
     line-height: 1.1;
+  }
+
+  /* Type scale — one size per role, fluid between phone and desktop */
+  .t-display {
+    font-weight: 600;
+    font-size: clamp(2rem, 1.4rem + 2.9vw, 4.25rem);
+    line-height: 1.02;
+    letter-spacing: -0.035em;
+    text-wrap: balance;
+  }
+  .t-h1 {
+    font-weight: 600;
+    font-size: clamp(1.875rem, 1.5rem + 1.5vw, 2.875rem);
+    line-height: 1.08;
+    letter-spacing: -0.03em;
+    text-wrap: balance;
+  }
+  .t-h2 {
+    font-weight: 600;
+    font-size: clamp(1.5rem, 1.3rem + 0.85vw, 2.125rem);
+    line-height: 1.12;
+    letter-spacing: -0.025em;
+    text-wrap: balance;
+  }
+  .t-h3 {
+    font-weight: 600;
+    font-size: 1.0625rem;
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+  }
+  .t-lead {
+    font-size: clamp(0.9375rem, 0.9rem + 0.25vw, 1.0625rem);
+    line-height: 1.65;
+    color: var(--color-ink-soft);
+  }
+  .t-label {
+    font-size: 0.6875rem;
+    line-height: 1rem;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+  }
+
+  /* Image that grows slightly on hover of its card (never under reduced motion) */
+  .zoom-on-hover {
+    transition: transform 0.7s var(--ease-soft);
+  }
+  .group:hover .zoom-on-hover {
+    transform: scale(1.04);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .group:hover .zoom-on-hover {
+      transform: none;
+    }
   }
 
   /* Product photos are shot on white: multiply blends them into ivory cards */

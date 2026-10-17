@@ -4,7 +4,8 @@ export type CategoryKind = "product_type" | "concern";
 export type OrderStatus = "started" | "awaiting_contact" | "negotiating" | "confirmed" | "completed" | "cancelled";
 export type DeliveryMethod = "pickup" | "local_delivery" | "shipping" | "to_arrange";
 
-export type ImageRef = { url: string; alt: string | null; width?: number | null; height?: number | null };
+/** fit: "contain" for packshots on white (keep margins), "cover" for ambience / texture photos */
+export type ImageRef = { url: string; alt: string | null; width?: number | null; height?: number | null; fit?: "contain" | "cover" };
 
 export type BrandRef = { id: string; slug: string; name: string };
 

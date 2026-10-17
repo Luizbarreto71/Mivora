@@ -51,7 +51,7 @@ export default async function CategoryEditPage({ params }: PageProps<"/admin/cat
             <Textarea id="description" name="description" defaultValue={c?.description ?? ""} rows={3} />
           </Field>
           <div className="sm:col-span-2">
-            <MediaField name="image_url" label="Imagem (opcional)" defaultValue={c?.image_url ?? null} folder="categories" hint="Usada no quadro da home. Sem imagem, aparece a foto de um produto desta categoria." />
+            <MediaField name="image_url" label="Imagem (opcional)" defaultValue={c?.image_url ?? null} folder="categories" hint="Usada em “Compre por categoria” (home, tipos de produto principais) e no topo da página da categoria. Nas necessidades, sem imagem aparece a foto de um produto." />
           </div>
           <div className="flex flex-wrap gap-6 sm:col-span-2">
             <Checkbox name="is_published" label="Publicada" defaultChecked={c?.is_published ?? true} />

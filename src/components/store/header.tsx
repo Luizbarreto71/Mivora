@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronDown, Heart, Menu, Search, ShoppingBag, User } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
@@ -86,7 +87,7 @@ export function Header({ nav, registered }: { nav: NavData; registered: boolean 
               <Heart className="h-5 w-5" strokeWidth={1.5} />
               {favoriteCount > 0 ? <span className="absolute right-2.5 top-2.5 h-1.5 w-1.5 rounded-full bg-ink" /> : null}
             </Link>
-            <button type="button" onClick={openCart} className={ICON_BUTTON} aria-label={`Abrir carrinho, ${count} ${count === 1 ? "item" : "itens"}`}>
+            <button type="button" onClick={openCart} className={ICON_BUTTON} aria-label={`Abrir sacola, ${count} ${count === 1 ? "item" : "itens"}`}>
               <ShoppingBag className="h-5 w-5" strokeWidth={1.5} />
               {count > 0 ? (
                 <span className="absolute right-1 top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-ink px-1 text-[0.625rem] font-semibold text-paper">
@@ -113,15 +114,13 @@ export function Header({ nav, registered }: { nav: NavData; registered: boolean 
                   <MenuColumn title="Tipo de produto" items={nav.productTypes.map((t) => ({ href: `/categorias/${t.slug}`, label: t.name }))} more={{ href: "/produtos", label: "Ver todos os produtos" }} />
                   <MenuColumn title="Coleções" items={collections(nav.hasKits)} />
                   <MenuColumn title="Marcas" items={nav.brands.slice(0, 10).map((b) => ({ href: `/marcas/${b.slug}`, label: b.name }))} more={{ href: "/marcas", label: "Todas as marcas" }} />
-                  <div className="flex flex-col justify-between bg-[var(--color-rose-soft)] p-7">
-                    <div>
-                      <p className="eyebrow">Ritual MIVORA</p>
-                      <p className="heading-display mt-3 text-[1.25rem]">Descubra a rotina ideal para o seu objetivo.</p>
-                    </div>
-                    <Link href="/ritual" className="mt-6 text-xs font-semibold underline underline-offset-4">
-                      Monte seu ritual
-                    </Link>
-                  </div>
+                  <Link href="/ritual" className="group/promo relative flex min-h-56 flex-col justify-end overflow-hidden rounded-card p-6 text-paper">
+                    <Image src="/editorial/editorial-rotina.webp" alt="" fill sizes="22rem" className="object-cover transition-transform duration-700 group-hover/promo:scale-105" />
+                    <span aria-hidden="true" className="absolute inset-0 bg-gradient-to-t from-ink/70 via-ink/20 to-transparent" />
+                    <span className="relative t-label text-paper/80">Ritual MIVORA</span>
+                    <span className="relative mt-2 text-[1.125rem] font-semibold leading-snug">Descubra a rotina ideal para o seu objetivo.</span>
+                    <span className="relative mt-3 text-xs font-semibold underline underline-offset-4">Monte seu ritual</span>
+                  </Link>
                 </div>
               </div>
             </li>

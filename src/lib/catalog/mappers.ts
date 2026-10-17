@@ -7,7 +7,7 @@ import type { Availability, ImageRef, ProductSummary, ProductVariant } from "@/l
 export type Row = Record<string, any>;
 
 export const PRODUCT_SUMMARY_SELECT =
-  "id, slug, code, name, volume, short_description, price_cents, compare_at_price_cents, availability, track_inventory, stock_quantity, reserved_quantity, is_available, is_new, is_featured, featured_order, sort_order, published_at, brand:brands!inner(id, slug, name), images:product_images(url, alt, width, height, sort_order, is_primary), variants:product_variants(id)";
+  "id, slug, code, name, volume, short_description, price_cents, compare_at_price_cents, availability, track_inventory, stock_quantity, reserved_quantity, is_available, is_new, is_featured, featured_order, sort_order, published_at, brand:brands!inner(id, slug, name), images:product_images(url, alt, width, height, sort_order, is_primary, fit), variants:product_variants(id)";
 
 export function availableQuantity(row: { track_inventory: boolean; stock_quantity: number | null; reserved_quantity: number }) {
   if (!row.track_inventory) return null;
@@ -17,7 +17,7 @@ export function availableQuantity(row: { track_inventory: boolean; stock_quantit
 export function sortImages(images: Row[] | null | undefined): ImageRef[] {
   return [...(images ?? [])]
     .sort((a, b) => Number(b.is_primary) - Number(a.is_primary) || a.sort_order - b.sort_order)
-    .map((i) => ({ url: i.url, alt: i.alt, width: i.width, height: i.height }));
+    .map((i) => ({ url: i.url, alt: i.alt, width: i.width, height: i.height, fit: i.fit === "cover" ? ("cover" as const) : ("contain" as const) }));
 }
 
 export function toProductSummary(row: Row): ProductSummary {

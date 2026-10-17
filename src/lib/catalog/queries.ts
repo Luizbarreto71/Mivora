@@ -362,7 +362,9 @@ export async function listProducts(filters: CatalogFilters, pageSize = PAGE_SIZE
       query = query.order("name");
       break;
     default:
+      // products that can be bought right away come first, then the curated order
       query = query
+        .order("is_available", { ascending: false })
         .order("is_featured", { ascending: false })
         .order("featured_order")
         .order("sort_order")
@@ -414,7 +416,7 @@ const PRODUCT_DETAIL_SELECT = `
   stock_quantity, reserved_quantity, is_available, is_new, is_featured, video_url, seo_title, seo_description,
   published_at, updated_at,
   brand:brands!inner(id, slug, name),
-  images:product_images(url, alt, width, height, sort_order, is_primary),
+  images:product_images(url, alt, width, height, sort_order, is_primary, fit),
   variants:product_variants(id, name, price_cents, compare_at_price_cents, track_inventory, stock_quantity, reserved_quantity, is_active, sort_order),
   links:product_categories(category:categories(id, parent_id, slug, name, kind, is_published)),
   faqs(id, question, answer, sort_order, is_published)

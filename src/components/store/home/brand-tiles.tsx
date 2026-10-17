@@ -14,7 +14,7 @@ export function BrandTiles({ brands }: { brands: BrandWithCount[] }) {
         const editorial = Boolean(b.image_url);
         return (
           <li key={b.id} className="w-[44%] shrink-0 snap-start sm:w-[30%] md:w-auto">
-            <Link href={`/marcas/${b.slug}`} className="group relative block aspect-[4/3] overflow-hidden border border-line bg-gradient-to-br from-[#faf8f6] via-[#f4efeb] to-[#ece4de]">
+            <Link href={`/marcas/${b.slug}`} className="group relative block aspect-[4/3] overflow-hidden rounded-card bg-gradient-to-br from-[#faf8f6] via-[#f4efeb] to-[#ece4de] transition-shadow duration-300 hover:shadow-lift">
               {b.coverImage ? (
                 <Image
                   src={b.coverImage}

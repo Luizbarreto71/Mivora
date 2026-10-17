@@ -26,8 +26,8 @@ export function NeedTiles({ needs: raw }: { needs: HomeNeed[] }) {
     <ul className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 [scrollbar-width:none] sm:-mx-6 sm:px-6 md:mx-0 md:grid md:grid-cols-5 md:gap-4 md:overflow-visible md:px-0 md:pb-0 [&::-webkit-scrollbar]:hidden">
       {needs.map((n, i) => (
         <li key={n.slug} className="w-[46%] shrink-0 snap-start sm:w-[30%] md:w-auto">
-          <Link href={`/categorias/${n.slug}`} className="group flex h-full flex-col border border-line bg-paper transition-colors hover:border-ink/25">
-            <span className="relative block aspect-[4/3] overflow-hidden" style={{ backgroundColor: TINTS[i % TINTS.length] }}>
+          <Link href={`/categorias/${n.slug}`} className="group flex h-full flex-col">
+            <span className="relative block aspect-[4/3] overflow-hidden rounded-card" style={{ backgroundColor: TINTS[i % TINTS.length] }}>
               {n.image ? (
                 <Image
                   src={n.image.url}
@@ -42,7 +42,7 @@ export function NeedTiles({ needs: raw }: { needs: HomeNeed[] }) {
                 />
               ) : null}
             </span>
-            <span className="flex items-center justify-between gap-2 px-3.5 py-3 text-[0.8125rem] font-medium">
+            <span className="flex items-center justify-between gap-2 px-0.5 pt-3 text-[0.9375rem] font-medium">
               {n.name}
               <ArrowRight className="h-3.5 w-3.5 shrink-0 text-ink/60 transition-transform group-hover:translate-x-0.5 group-hover:text-ink" strokeWidth={1.75} />
             </span>

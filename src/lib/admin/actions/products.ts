@@ -229,7 +229,7 @@ export async function duplicateProduct(id: string) {
   if (insertError) return fail(dbErrorMessage(insertError));
   const [cats, imgs, priv] = await Promise.all([
     supabase.from("product_categories").select("category_id").eq("product_id", id),
-    supabase.from("product_images").select("url, storage_path, alt, width, height, sort_order, is_primary").eq("product_id", id),
+    supabase.from("product_images").select("url, storage_path, alt, width, height, sort_order, is_primary, fit").eq("product_id", id),
     supabase.from("product_private").select("supplier, internal_notes").eq("product_id", id).maybeSingle(),
   ]);
   if (cats.data?.length) await supabase.from("product_categories").insert(cats.data.map((c) => ({ product_id: copy.id, category_id: c.category_id })));

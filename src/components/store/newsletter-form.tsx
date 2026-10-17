@@ -27,9 +27,9 @@ export function NewsletterForm() {
         e.preventDefault();
         submit();
       }}
-      className="w-full max-w-sm"
+      className="w-full max-w-md"
     >
-      <label htmlFor={inputId} className="text-[0.8125rem] font-medium text-paper">
+      <label htmlFor={inputId} className="sr-only">
         Receba novidades e lançamentos
       </label>
       <div className="mt-3 flex border-b border-paper/30 focus-within:border-paper">

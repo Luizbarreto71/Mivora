@@ -98,8 +98,6 @@ export function HeroCarousel({ slides }: { slides: Banner[] }) {
           const reveal = cn("transition duration-700 ease-out motion-reduce:transition-none", active ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0");
           const delay = (step: number) => ({ transitionDelay: active ? `${120 + step * 90}ms` : "0ms" });
           const full = s.layout === "full" && Boolean(s.image_desktop_url);
-          // on phones the image comes first; on desktop full art hides the copy (it is in the image)
-          const desktopHidden = full ? "lg:hidden" : "";
           return (
             <div
               key={s.id}
@@ -108,48 +106,48 @@ export function HeroCarousel({ slides }: { slides: Banner[] }) {
               aria-label={multiple ? `${i + 1} de ${count}` : undefined}
               aria-hidden={active ? undefined : true}
               inert={!active}
-              className={cn(
-                "relative col-start-1 row-start-1 flex flex-col transition-opacity duration-700 ease-out motion-reduce:transition-none lg:block lg:h-[var(--hero-h)]",
-                active ? "z-10 opacity-100" : "pointer-events-none opacity-0",
-              )}
+              className={cn("relative col-start-1 row-start-1 transition-opacity duration-700 ease-out motion-reduce:transition-none", active ? "z-10 opacity-100" : "pointer-events-none opacity-0")}
               style={{ backgroundColor: s.background_color ?? DEFAULT_BG }}
             >
-              {full ? <FullArt slide={s} active={active} preload={i === 0} /> : null}
-              <div className={cn("container-page relative z-10 order-2 flex items-center pb-8 pt-7 sm:pt-10 lg:order-none", full ? "lg:absolute lg:p-0" : "lg:h-full lg:py-0")}>
-                <div className="max-w-[36rem] lg:pb-12">
-                  {s.eyebrow ? (
-                    <p className={cn("mb-4 text-[0.6875rem] font-medium uppercase tracking-[0.22em] text-ink/70", reveal, desktopHidden)} style={delay(0)}>
-                      {s.eyebrow}
-                    </p>
-                  ) : null}
-                  <Heading
-                    className={cn("heading-display text-balance text-[2.25rem] leading-[1.06] sm:text-[2.75rem] lg:text-[3.25rem] xl:text-[3.5rem]", reveal, full && "lg:sr-only")}
-                    style={delay(1)}
-                  >
-                    {s.title}
-                  </Heading>
-                  {s.subtitle ? (
-                    <p className={cn("mt-4 max-w-[27rem] text-[0.9375rem] leading-relaxed text-ink/75 sm:text-base", reveal, desktopHidden)} style={delay(2)}>
-                      {s.subtitle}
-                    </p>
-                  ) : null}
-                  {(s.cta_label && s.cta_href) || (s.cta2_label && s.cta2_href) ? (
-                    <div className={cn("mt-7 flex flex-col gap-3 sm:flex-row", reveal, desktopHidden)} style={delay(3)}>
-                      {s.cta_label && s.cta_href ? (
-                        <Link href={s.cta_href} className={buttonClasses("primary", "md", "group/cta h-12 gap-3 px-7")}>
-                          {s.cta_label} <ArrowRight className="h-4 w-4 transition-transform group-hover/cta:translate-x-0.5" strokeWidth={1.75} />
-                        </Link>
-                      ) : null}
-                      {s.cta2_label && s.cta2_href ? (
-                        <Link href={s.cta2_href} className={buttonClasses("outline", "md", "h-12 px-7")}>
-                          {s.cta2_label}
-                        </Link>
-                      ) : null}
-                    </div>
-                  ) : null}
+              <div
+                className={cn(
+                  "container-page grid gap-6 pb-8 pt-4 sm:pt-6 lg:h-[var(--hero-h)] lg:items-center lg:gap-12 lg:py-10",
+                  full ? "lg:grid-cols-1" : "lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]",
+                )}
+              >
+                <div className={cn("order-2 lg:order-1 lg:pb-14", full && "lg:sr-only")}>
+                  <div className="max-w-[34rem]">
+                    {s.eyebrow ? (
+                      <p className={cn("t-label mb-4 text-ink/65", reveal)} style={delay(0)}>
+                        {s.eyebrow}
+                      </p>
+                    ) : null}
+                    <Heading className={cn("t-display text-ink", reveal)} style={delay(1)}>
+                      {s.title}
+                    </Heading>
+                    {s.subtitle ? (
+                      <p className={cn("t-lead mt-4 line-clamp-3 max-w-[28rem] text-ink/75 sm:mt-5 sm:line-clamp-none", reveal)} style={delay(2)}>
+                        {s.subtitle}
+                      </p>
+                    ) : null}
+                    {(s.cta_label && s.cta_href) || (s.cta2_label && s.cta2_href) ? (
+                      <div className={cn("mt-7 flex flex-wrap gap-3 sm:mt-8", reveal)} style={delay(3)}>
+                        {s.cta_label && s.cta_href ? (
+                          <Link href={s.cta_href} className={buttonClasses("primary", "md", "group/cta h-11 gap-3 px-6 sm:h-12 sm:px-7")}>
+                            {s.cta_label} <ArrowRight className="h-4 w-4 transition-transform group-hover/cta:translate-x-0.5" strokeWidth={1.75} />
+                          </Link>
+                        ) : null}
+                        {s.cta2_label && s.cta2_href ? (
+                          <Link href={s.cta2_href} className={buttonClasses("outline", "md", "h-11 bg-paper/40 px-6 backdrop-blur-sm sm:h-12 sm:px-7")}>
+                            {s.cta2_label}
+                          </Link>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
+                <SlideVisual slide={s} active={active} preload={i === 0} full={full} />
               </div>
-              {full ? null : <SlideVisual slide={s} active={active} preload={i === 0} />}
             </div>
           );
         })}
@@ -182,62 +180,57 @@ export function HeroCarousel({ slides }: { slides: Banner[] }) {
   );
 }
 
-/** Finished banner art (16:9): shown whole, centred, edges dissolving into the slide colour. */
-function FullArt({ slide: s, active, preload }: { slide: Banner; active: boolean; preload: boolean }) {
-  return (
-    <Link
-      href={s.cta_href ?? "/produtos"}
-      aria-label={s.cta_label ? `${s.cta_label}: ${s.title}` : s.title}
-      className="relative order-1 block aspect-video w-full overflow-hidden lg:absolute lg:inset-0 lg:flex lg:aspect-auto lg:items-center lg:justify-center"
-    >
-      <span className="relative block h-full w-full lg:aspect-video lg:w-auto lg:[mask-image:linear-gradient(to_right,transparent,#000_7%,#000_93%,transparent)]">
-        <span className={cn("absolute inset-0 transition-transform duration-[7000ms] ease-out motion-reduce:transition-none", active ? "scale-100" : "scale-[1.02]")}>
-          <Image src={s.image_desktop_url!} alt={s.image_alt ?? s.title} fill preload={preload} sizes="(min-width: 1024px) 75vw, 100vw" className="object-cover" />
-        </span>
-      </span>
-    </Link>
-  );
-}
+/**
+ * The slide's picture in a soft-cornered frame: campaign photo (separate crop for phones), finished art shown
+ * whole (and clickable), or — without a photo — the chosen product under a soft studio light.
+ */
+function SlideVisual({ slide: s, active, preload, full }: { slide: Banner; active: boolean; preload: boolean; full: boolean }) {
+  const motion = cn("absolute inset-0 transition-transform duration-[7000ms] ease-out motion-reduce:transition-none", active ? "scale-100" : "scale-[1.04]");
+  const frame = "relative order-1 overflow-hidden rounded-panel lg:order-2";
 
-function SlideVisual({ slide: s, active, preload }: { slide: Banner; active: boolean; preload: boolean }) {
-  const motion = cn("transition-transform duration-[7000ms] ease-out motion-reduce:transition-none", active ? "scale-100" : "scale-[1.04]");
+  if (full) {
+    return (
+      <Link
+        href={s.cta_href ?? "/produtos"}
+        aria-label={s.cta_label ? `${s.cta_label}: ${s.title}` : s.title}
+        className={cn(frame, "mx-auto block aspect-video w-full lg:h-full lg:w-auto lg:max-w-full")}
+      >
+        <Image src={s.image_desktop_url!} alt={s.image_alt ?? s.title} fill preload={preload} sizes="(min-width: 1024px) 70vw, 100vw" className="object-contain" />
+      </Link>
+    );
+  }
+
   if (s.image_desktop_url) {
     return (
-      <div className="relative order-1 aspect-square w-full overflow-hidden sm:aspect-[16/11] lg:absolute lg:inset-y-0 lg:right-0 lg:aspect-auto lg:w-[min(56%,calc(var(--hero-h)*1.18))] lg:[mask-image:linear-gradient(to_right,transparent,#000_34%)]">
-        <div className={cn("absolute inset-0", motion)}>
+      <div className={cn(frame, "aspect-[5/4] sm:aspect-[16/10] lg:aspect-auto lg:h-full")}>
+        <div className={motion}>
           {s.image_mobile_url ? (
             <>
-              <Image src={s.image_mobile_url} alt={s.image_alt ?? ""} fill preload={preload} sizes="100vw" className="object-cover lg:hidden" />
-              <Image src={s.image_desktop_url} alt={s.image_alt ?? ""} fill preload={preload} sizes="40vw" className="hidden object-cover lg:block" />
+              <Image src={s.image_mobile_url} alt={s.image_alt ?? ""} fill preload={preload} sizes="100vw" className="object-cover sm:hidden" />
+              <Image src={s.image_desktop_url} alt={s.image_alt ?? ""} fill preload={preload} sizes="(min-width: 1024px) 58vw, 100vw" className="hidden object-cover sm:block" />
             </>
           ) : (
-            <Image src={s.image_desktop_url} alt={s.image_alt ?? ""} fill preload={preload} sizes="(min-width: 1024px) 40vw, 100vw" className="object-cover" />
+            <Image src={s.image_desktop_url} alt={s.image_alt ?? ""} fill preload={preload} sizes="(min-width: 1024px) 58vw, 100vw" className="object-cover" />
           )}
         </div>
       </div>
     );
   }
+
   const image = s.product?.image;
   if (!image) return null;
   return (
-    <div className="relative order-1 aspect-video w-full overflow-hidden lg:absolute lg:inset-y-0 lg:right-0 lg:aspect-auto lg:w-[52%]">
+    <div className={cn(frame, "aspect-[5/4] bg-paper/35 sm:aspect-[16/10] lg:aspect-auto lg:h-full")}>
       {/* studio light: the product photo (white background) blends into it */}
       <div
         aria-hidden="true"
         className="absolute left-1/2 top-1/2 aspect-square h-[125%] -translate-x-1/2 -translate-y-1/2 rounded-full"
         style={{ background: "radial-gradient(closest-side, rgba(255,255,255,0.98) 0%, rgba(255,255,255,0.88) 42%, rgba(255,255,255,0.35) 68%, rgba(255,255,255,0) 100%)" }}
       />
-      <div aria-hidden="true" className="absolute bottom-[7%] left-1/2 h-[6%] w-[34%] -translate-x-1/2 rounded-[50%] bg-ink/10 blur-xl" />
+      <div aria-hidden="true" className="absolute bottom-[8%] left-1/2 h-[6%] w-[34%] -translate-x-1/2 rounded-[50%] bg-ink/10 blur-xl" />
       {/* multiply on the animated wrapper (a transform would isolate a blend set on the image) */}
-      <div className={cn("absolute inset-0 mix-blend-multiply", motion)}>
-        <Image
-          src={image.url}
-          alt={image.alt ?? s.product?.name ?? ""}
-          fill
-          preload={preload}
-          sizes="(min-width: 1024px) 45vw, 100vw"
-          className="object-contain px-[10%] py-[5%] lg:py-[4%]"
-        />
+      <div className={cn(motion, "mix-blend-multiply")}>
+        <Image src={image.url} alt={image.alt ?? s.product?.name ?? ""} fill preload={preload} sizes="(min-width: 1024px) 50vw, 100vw" className="object-contain px-[10%] py-[6%]" />
       </div>
     </div>
   );
@@ -271,7 +264,7 @@ function Indicators({
             aria-current={active ? "true" : undefined}
             className="group flex h-8 items-center gap-3 text-[0.6875rem] font-semibold tabular-nums tracking-[0.08em]"
           >
-            <span className={cn("transition-colors", active ? "text-ink" : "text-ink/40 group-hover:text-ink/70")}>{String(i + 1).padStart(2, "0")}</span>
+            <span className={cn("transition-colors", active ? "text-ink" : "text-ink/60 group-hover:text-ink")}>{String(i + 1).padStart(2, "0")}</span>
             {active ? (
               <span className={cn("relative block h-px overflow-hidden bg-ink/15", compact ? "w-8" : "w-12")}>
                 {/* the bar's end advances to the next slide */}

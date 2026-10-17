@@ -232,7 +232,7 @@ test("Testes 3, 4, 5 e 13 — carrinho, subtotal, WhatsApp e intenção de pedid
 
   for (const p of PRICED) {
     await page.goto(`/produtos/${p.slug}`);
-    await page.getByRole("button", { name: "Adicionar ao carrinho" }).click();
+    await page.getByRole("button", { name: "Adicionar à sacola" }).click();
     await page.getByRole("button", { name: "Fechar" }).click();
   }
   await page.goto("/carrinho");
@@ -317,7 +317,7 @@ test("Teste 8 — produto com estoque numérico esgotado não pode ser comprado"
   await expect(card).toContainText("Esgotado");
   await card.getByRole("link", { name: NEW_PRODUCT }).first().click();
   await expect(page.getByText("Esgotado no momento")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Adicionar ao carrinho" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Adicionar à sacola" })).toHaveCount(0);
 });
 
 test("Teste 7 — produto despublicado sai do catálogo público", async ({ page }) => {
@@ -409,7 +409,7 @@ test("Expansão — “Em breve”: vitrine sem compra e venda bloqueada sem doc
   await page.goto("/produtos/mediheal-madecassoside-blemish-pad");
   // getByText also sees the hidden copy React may leave from streaming right after a revalidation
   await expect(page.getByText("Este produto ainda não está disponível.").filter({ visible: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Adicionar ao carrinho" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Adicionar à sacola" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: /Consultar previsão de chegada/ })).toHaveAttribute("href", /ainda%20n%C3%A3o%20est%C3%A1%20dispon%C3%ADvel/);
 
   await page.goto("/");
@@ -464,7 +464,7 @@ test("Boas-vindas — apresentação na primeira visita e cupom de 10% aplicado 
   await expect(page.getByText("10% OFF na primeira compra · cupom BEMVINDA10").first()).toBeVisible();
 
   await page.goto("/produtos/skin1004-madagascar-centella-ampoule");
-  await page.getByRole("button", { name: "Adicionar ao carrinho" }).click();
+  await page.getByRole("button", { name: "Adicionar à sacola" }).click();
   await page.goto("/finalizar");
   await expect(page.getByText("BEMVINDA10", { exact: true })).toBeVisible();
   await expect(page.getByText(/Desconto \(BEMVINDA10\)/)).toBeVisible();
@@ -489,7 +489,7 @@ test("Catálogo — produto 'Sob consulta' mostra foto e 'Consultar preço', sem
   await page.goto("/produtos/olaplex-no3-hair-perfector");
   await expect(page.getByRole("heading", { name: "Olaplex Nº 3 Hair Perfector" })).toBeVisible();
   await expect(page.getByText("Consultar preço").first()).toBeVisible();
-  await expect(page.getByRole("button", { name: "Adicionar ao carrinho" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Adicionar à sacola" })).toHaveCount(0);
   await expect(page.getByRole("link", { name: /Consultar preço pelo WhatsApp/ })).toHaveAttribute("href", /saber%20o%20pre%C3%A7o/);
   await expect(page.locator('main img[src*="olaplex-no3-hair-perfector"]').first()).toBeVisible();
 
@@ -529,8 +529,11 @@ test("Frete — admin configura origem e zona por CEP; cliente calcula no produt
     await route.fulfill({ status: 200, body: "whatsapp" });
   });
 
-  // Product page: São Paulo gets carrier quotes only (the local zone does not cover it)
+  // Product page: official gallery (packshot, ambience, texture, bottles) — then São Paulo gets carrier quotes only
   await page.goto("/produtos/skin1004-madagascar-centella-ampoule");
+  await expect(page.getByRole("tablist", { name: "Imagens do produto" }).getByRole("tab")).toHaveCount(4);
+  await page.getByRole("tab", { name: "Imagem 3" }).click();
+  await expect(page.getByRole("button", { name: "Ampliar imagem" }).filter({ visible: true }).locator("img")).toHaveAttribute("alt", /Textura líquida/);
   const cep = page.getByLabel("Calcular frete e prazo").filter({ visible: true });
   await cep.fill("01001-000");
   await expect(page.getByText("Sé · São Paulo/SP · CEP 01001-000")).toBeVisible();
@@ -552,7 +555,7 @@ test("Frete — admin configura origem e zona por CEP; cliente calcula no produt
 
   await cep.fill("01001-000");
   await expect(page.getByText("Correios SEDEX")).toBeVisible();
-  await page.getByRole("button", { name: "Adicionar ao carrinho" }).click();
+  await page.getByRole("button", { name: "Adicionar à sacola" }).click();
 
   // Cart: the remembered CEP is quoted, the visitor picks SEDEX and sees it in the total
   await page.goto("/carrinho");
@@ -601,7 +604,7 @@ test("Frete — admin configura origem e zona por CEP; cliente calcula no produt
 // ---------------------------------------------------------------------------
 // Home — carrossel de fotos
 // ---------------------------------------------------------------------------
-test("Home — carrossel: banner do mockup, artes autorais da MIVORA, setas, indicadores e pausa", async ({ page }) => {
+test("Home — carrossel: banner do mockup, slides editoriais em alta resolução com texto em HTML, setas, indicadores e pausa", async ({ page }) => {
   await page.goto("/");
   const carousel = page.getByRole("region", { name: "Destaques da MIVORA" });
   await expect(carousel.getByRole("heading", { level: 1, name: "Sua pele, seu ritual." })).toBeVisible();
@@ -612,23 +615,24 @@ test("Home — carrossel: banner do mockup, artes autorais da MIVORA, setas, ind
   await carousel.getByRole("button", { name: "Pausar a troca automática" }).click();
   await expect(carousel.getByRole("button", { name: "Retomar a troca automática" })).toBeVisible();
 
-  // the owner's own art (logo inside the image) is shown whole and the banner itself is the link
+  // editorial slides: licensed photo in a frame, the copy and both buttons in HTML
   await carousel.getByRole("button", { name: "Próximo destaque" }).click();
-  await expect(carousel.getByRole("heading", { name: "Seu momento de autocuidado" })).toBeAttached();
-  await expect(carousel.getByRole("img", { name: /sérum com conta-gotas/ })).toBeVisible();
-  await expect(carousel.getByRole("link", { name: /Seu momento de autocuidado/ })).toHaveAttribute("href", "/produtos");
+  await expect(carousel.getByRole("heading", { name: "Skincare coreano escolhido para a sua rotina" })).toBeVisible();
+  await expect(carousel.getByRole("img", { name: /Texturas de séruns e cremes/ })).toBeVisible();
+  await expect(carousel.getByRole("link", { name: "Ver marcas" })).toHaveAttribute("href", "/marcas");
 
-  await carousel.getByRole("button", { name: /Ir para o destaque 5/ }).click();
-  await expect(carousel.getByRole("img", { name: /máscara transparente/ })).toBeVisible();
-  await expect(carousel.getByRole("link", { name: /Desperte seu glow com o cuidado noturno/ })).toHaveAttribute("href", "/produtos/medicube-collagen-night-wrapping-mask");
+  await carousel.getByRole("button", { name: /Ir para o destaque 4/ }).click();
+  await expect(carousel.getByRole("heading", { name: "Sua rotina em etapas, do jeito certo" })).toBeVisible();
+  await expect(carousel.getByRole("link", { name: /Monte seu ritual/ })).toHaveAttribute("href", "/ritual");
   await carousel.getByRole("button", { name: "Próximo destaque" }).click();
   await expect(carousel.getByRole("heading", { level: 1, name: "Sua pele, seu ritual." })).toBeVisible();
   await carousel.getByRole("button", { name: "Destaque anterior" }).click();
   await carousel.getByRole("button", { name: "Destaque anterior" }).click();
-  await expect(carousel.getByRole("img", { name: /textura em gel/ })).toBeVisible();
+  await expect(carousel.getByRole("img", { name: /creme branco/ })).toBeVisible();
+  // the owner's low-resolution art stays off the banner
+  await expect(page.locator('img[src*="home-mivora-"]')).toHaveCount(0);
 
-  await carousel.getByRole("button", { name: /Ir para o destaque 3/ }).click();
-  await carousel.getByRole("link", { name: /Hidratação que deixa a pele macia/ }).click();
+  await carousel.getByRole("link", { name: /Ver hidratantes/ }).click();
   await expect(page).toHaveURL(/\/categorias\/hidratantes$/);
 });
 
@@ -662,6 +666,16 @@ test("Home premium — cabeçalho, busca, seções do mockup, produto em abas, n
   expect(order.every((i) => i >= 0)).toBe(true);
   expect([...order].sort((a, b) => a - b)).toEqual(order);
   expect(await page.getByRole("list", { name: "Novidades MIVORA" }).locator("article").count()).toBe(4);
+  // categories with their own photos and real counts, the curated selection and the guides (real pages only)
+  const categories = page.getByRole("region", { name: "Compre por categoria" });
+  await expect(categories.getByRole("link", { name: /Séruns e ampolas/ })).toHaveAttribute("href", "/categorias/seruns-e-ampolas");
+  await expect(categories.getByRole("link", { name: /Séruns e ampolas/ })).toContainText(/\d+ produtos?/);
+  await expect(page.getByRole("list", { name: "Destaques da curadoria" }).locator("article").first()).toBeVisible();
+  const guides = page.getByRole("region", { name: "Escolha com segurança" });
+  await expect(guides.getByRole("link", { name: /Monte seu ritual em etapas/ })).toHaveAttribute("href", "/ritual");
+  for (const href of await guides.getByRole("link").evaluateAll((links) => links.map((l) => l.getAttribute("href")))) {
+    expect((await page.request.get(href!)).status(), href!).toBe(200);
+  }
   await expect(page.getByRole("link", { name: "Medicube", exact: true }).first()).toHaveAttribute("href", "/marcas/medicube");
   await expect(page.getByRole("link", { name: /Ver rotinas/ })).toHaveAttribute("href", "/ritual");
   await expect(page.getByRole("heading", { name: "O que nossos clientes dizem" })).toHaveCount(0);
@@ -838,7 +852,7 @@ test("Cadastro — validações, senha forte, máscaras, confirmação obrigató
   // Testes 7 e 20: the valid link activates the account and returns to the checkout, signed in, with the bag
   await page.goto(mails[1].link);
   await expect(page).toHaveURL(/\/finalizar\?etapa=identificacao/);
-  await expect(page.getByText("E-mail confirmado! Sua conta está ativa e seu carrinho foi mantido.").filter({ visible: true })).toBeVisible();
+  await expect(page.getByText("E-mail confirmado! Sua conta está ativa e sua sacola foi mantida.").filter({ visible: true })).toBeVisible();
   await expect(page.getByRole("complementary", { name: "Resumo do pedido" })).toContainText("345 Relief Cream");
   // what was typed at sign-up is already filled in; the e-mail is the account's
   await expect(page.getByText("Conectada com e-mail e senha").filter({ visible: true })).toBeVisible();
@@ -1565,7 +1579,7 @@ test("Checkout — sacola vazia, dados mantidos ao atualizar a página e ao volt
   await expect(page.getByText("Sua sacola está vazia")).toBeVisible();
 
   await page.goto("/produtos/celimax-pore-dark-spot-brightening-cream");
-  await page.getByRole("button", { name: "Adicionar ao carrinho" }).click();
+  await page.getByRole("button", { name: "Adicionar à sacola" }).click();
   await page.getByRole("button", { name: "Fechar" }).click();
   await page.goto("/finalizar?etapa=identificacao");
   const email = await fillIdentity(page, "Lia Refresh");
@@ -1614,7 +1628,7 @@ test("Login com Google — cliente nova volta à finalização com a sacola, com
   });
 
   await page.goto("/produtos/dr-althea-345-relief-cream");
-  await page.getByRole("button", { name: "Adicionar ao carrinho" }).click();
+  await page.getByRole("button", { name: "Adicionar à sacola" }).click();
   await page.getByRole("button", { name: "Fechar" }).click();
   await page.goto("/carrinho");
   await page.getByRole("link", { name: "Continuar para identificação" }).click();
@@ -1657,7 +1671,7 @@ test("Login com Google — cliente nova volta à finalização com a sacola, com
   const other = await browser.newContext({ storageState: RETURNING_VISITOR });
   const phone = await other.newPage();
   await phone.goto("/produtos/dr-althea-345-relief-cream");
-  await phone.getByRole("button", { name: "Adicionar ao carrinho" }).click();
+  await phone.getByRole("button", { name: "Adicionar à sacola" }).click();
   await phone.getByRole("button", { name: "Fechar" }).click();
   await phone.goto("/finalizar");
   await socialLogin(phone, "Google", googleEmail, "Ana Google");
@@ -1687,7 +1701,7 @@ test("Login com Apple — cancelar volta sem perder a sacola; sem nome e com e-m
   const ctx = await browser.newContext({ storageState: RETURNING_VISITOR });
   const page = await ctx.newPage();
   await page.goto("/produtos/skin1004-madagascar-centella-ampoule");
-  await page.getByRole("button", { name: "Adicionar ao carrinho" }).click();
+  await page.getByRole("button", { name: "Adicionar à sacola" }).click();
   await page.getByRole("button", { name: "Fechar" }).click();
   await page.goto("/finalizar");
 
@@ -1731,7 +1745,7 @@ test("Sessão expirada — a finalização pede para entrar de novo e mantém a 
     await route.fulfill({ status: 200, body: "whatsapp" });
   });
   await page.goto("/produtos/skin1004-madagascar-centella-ampoule");
-  await page.getByRole("button", { name: "Adicionar ao carrinho" }).click();
+  await page.getByRole("button", { name: "Adicionar à sacola" }).click();
   await page.getByRole("button", { name: "Fechar" }).click();
   await page.goto("/finalizar");
   await socialLogin(page, "Google", email, "Rita Sessão");
@@ -1756,7 +1770,7 @@ test("Sessão expirada — a finalização pede para entrar de novo e mantém a 
   // the order itself is refused by the server without a session (not only by the screen): back to the sign-in
   await ctx.clearCookies();
   await page.getByRole("button", { name: "Confirmar e enviar pelo WhatsApp" }).click();
-  await expect(page.getByText("Entre na sua conta para finalizar a compra. Seu carrinho continua salvo.")).toBeVisible();
+  await expect(page.getByText("Entre na sua conta para finalizar a compra. Sua sacola continua salva.")).toBeVisible();
   await expect(page.getByRole("heading", { name: "Entre para finalizar sua compra" })).toBeVisible();
   expect(whatsappUrl).toBe("");
   await ctx.close();
@@ -1770,7 +1784,7 @@ test("Checkout no celular (390 px) — resumo recolhível e nenhuma etapa com ro
 
   await page.goto("/produtos/skin1004-madagascar-centella-ampoule");
   await page.waitForLoadState("networkidle");
-  await page.getByRole("button", { name: "Adicionar ao carrinho" }).filter({ visible: true }).first().click();
+  await page.getByRole("button", { name: "Adicionar à sacola" }).filter({ visible: true }).first().click();
   await expect(page.getByRole("button", { name: "Fechar" })).toBeVisible();
   await page.goto("/carrinho");
   await expect(page.getByRole("heading", { level: 1 })).toHaveText("Sacola (1 item)");
@@ -2026,21 +2040,21 @@ test("Análise de pele — consentimento obrigatório, foto inadequada, falha do
 
   // add one product with the store's cart
   await page.getByRole("tab", { name: /Produtos/ }).click();
-  await cards.first().getByRole("button", { name: /^Adicionar .* ao carrinho$/ }).click();
-  await expect(page.getByRole("dialog", { name: /Carrinho \(1\)/ })).toBeVisible();
+  await cards.first().getByRole("button", { name: /^Adicionar .* à sacola$/ }).click();
+  await expect(page.getByRole("dialog", { name: /Sacola \(1\)/ })).toBeVisible();
   await page.getByRole("button", { name: "Fechar" }).click();
 
   // routine: morning and night; the whole routine goes to the bag only after confirming the list and the total
   await page.getByRole("tab", { name: "Rotina" }).click();
   await expect(page.getByRole("region", { name: "Rotina da manhã" })).toBeVisible();
   await expect(page.getByRole("region", { name: "Rotina da noite" })).toBeVisible();
-  await page.getByRole("button", { name: "Adicionar rotina ao carrinho" }).click();
+  await page.getByRole("button", { name: "Adicionar rotina à sacola" }).click();
   const confirm = page.getByRole("group", { name: "Estes produtos serão adicionados à sua sacola:" });
   await expect(confirm).toContainText("Total dos produtos");
   await page.getByRole("button", { name: "Confirmar e adicionar" }).click();
   await expect(page.getByText("Rotina adicionada à sacola.")).toBeVisible();
   // the store's cart drawer opens with the products; it is closed to go on
-  await page.getByRole("dialog", { name: /Carrinho/ }).getByRole("button", { name: "Fechar" }).click();
+  await page.getByRole("dialog", { name: /Sacola/ }).getByRole("button", { name: "Fechar" }).click();
 
   // adjusting the needs recomputes from the catalogue, without a new photo
   await page.getByRole("tab", { name: "Análise" }).click();

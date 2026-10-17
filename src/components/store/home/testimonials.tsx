@@ -7,7 +7,7 @@ export function Testimonials({ items }: { items: Testimonial[] }) {
     <ul className="-mx-4 flex snap-x snap-mandatory gap-3 overflow-x-auto px-4 pb-2 [scrollbar-width:none] sm:-mx-6 sm:px-6 md:mx-0 md:grid md:grid-cols-4 md:gap-4 md:overflow-visible md:px-0 md:pb-0 [&::-webkit-scrollbar]:hidden">
       {items.map((t) => (
         <li key={t.id} className="w-[78%] shrink-0 snap-start sm:w-[46%] md:w-auto">
-          <figure className="flex h-full flex-col border border-line bg-paper p-5">
+          <figure className="flex h-full flex-col rounded-card bg-ivory p-6">
             {t.rating ? (
               <p className="flex gap-0.5" aria-label={`Avaliação: ${t.rating} de 5`}>
                 {Array.from({ length: 5 }, (_, i) => (

@@ -154,8 +154,8 @@ function AddButton({ rec }: { rec: Recommendation }) {
     );
   }
   return (
-    <button type="button" onClick={() => add(cartLineFromProduct(rec.product), 1)} className={buttonClasses("primary", "sm", "w-full")} aria-label={`Adicionar ${rec.product.name} ao carrinho`}>
-      <ShoppingBag className="h-3.5 w-3.5" strokeWidth={1.75} /> Adicionar ao carrinho
+    <button type="button" onClick={() => add(cartLineFromProduct(rec.product), 1)} className={buttonClasses("primary", "sm", "w-full")} aria-label={`Adicionar ${rec.product.name} à sacola`}>
+      <ShoppingBag className="h-3.5 w-3.5" strokeWidth={1.75} /> Adicionar à sacola
     </button>
   );
 }
@@ -326,7 +326,7 @@ export function RoutineView({ plan }: { plan: SkinPlan }) {
                 {addable.length} {addable.length === 1 ? "produto" : "produtos"} · <span className="font-semibold tabular-nums">{formatBRL(total)}</span>
               </p>
               <button type="button" className={buttonClasses("primary", "md", "w-full sm:w-auto")} onClick={() => setConfirming(true)}>
-                <ShoppingBag className="h-4 w-4" strokeWidth={1.75} /> Adicionar rotina ao carrinho
+                <ShoppingBag className="h-4 w-4" strokeWidth={1.75} /> Adicionar rotina à sacola
               </button>
             </div>
           )}

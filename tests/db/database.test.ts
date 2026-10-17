@@ -51,6 +51,20 @@ const newCustomer = (phone?: string) => {
 
 const shopperIds = new Map<string, string>();
 /** A signed-in customer with a confirmed e-mail: every order needs one (migration 021). */
+/** Products whose primary photo migration 023 replaced with the official higher-resolution one */
+const REFRESHED_PHOTOS = new Set([
+  "skin1004-madagascar-centella-light-cleansing-oil",
+  "medicube-collagen-jelly-cream",
+  "medicube-collagen-night-wrapping-mask",
+  "medicube-pdrn-pink-collagen-capsule-cream",
+  "medicube-pdrn-pink-collagen-exosome-shot-7500",
+  "medicube-deep-vita-c-capsule-cream",
+  "beauty-of-joseon-revive-eye-serum-ginseng-retinal",
+  "numbuzin-no9-nad-bio-lifting-sil-essence",
+  "celimax-the-vita-a-retinal-shot",
+]);
+const primaryPhoto = (slug: string) => `/products/${slug}${REFRESHED_PHOTOS.has(slug) ? "-frente" : ""}.webp`;
+
 async function shopper(email: string) {
   const known = shopperIds.get(email);
   if (known) return known;
@@ -88,7 +102,7 @@ describe("initial catalogue (Teste 10 / 12)", () => {
     }
   });
 
-  it("maps each supplied photo to the right product (catalogue photos fill the gaps)", async () => {
+  it("maps each supplied photo to the right product (catalogue photos fill the gaps; migration 023 upgrades a few)", async () => {
     const rows = await all<{ slug: string; url: string | null; media_pending: boolean }>(`
       select p.slug, i.url, p.media_pending from products p
       left join product_images i on i.product_id = p.id and i.is_primary order by p.slug`);
@@ -102,7 +116,7 @@ describe("initial catalogue (Teste 10 / 12)", () => {
     expect(bySlug["medicube-deep-vita-c-pad"].url).toBe("/products/medicube-deep-vita-c-pad.webp");
     // These three had no photo; the Catálogo MIVORA 2026 provides them
     for (const slug of ["medicube-pdrn-pink-peptide-serum", "medicube-zero-pore-pad", "celimax-the-vita-a-retinal-shot"]) {
-      expect(bySlug[slug].url).toBe(`/products/${slug}.webp`);
+      expect(bySlug[slug].url).toBe(primaryPhoto(slug));
       expect(bySlug[slug].media_pending).toBe(false);
     }
   });
@@ -141,7 +155,7 @@ describe("Catálogo MIVORA 2026 (50 produtos)", () => {
         availability: "on_request",
         price_cents: null,
         track_inventory: false,
-        url: `/products/${r.slug}.webp`,
+        url: primaryPhoto(r.slug),
         sourcing_status: "planned",
         regulatory_status: "not_verified",
         content_verified: false,
@@ -168,16 +182,16 @@ describe("Catálogo MIVORA 2026 (50 produtos)", () => {
     expect(step.slug).toBe("protecao-solar");
   });
 
-  it("never replaces existing photos, prices or the owner's photos", async () => {
+  it("never replaces existing photos, prices or the owner's photos (official gallery photos only add to them)", async () => {
     const rows = await all<{ slug: string; images: number; url: string; price_cents: number | null }>(`
-      select p.slug, count(i.*)::int as images, min(i.url) as url, p.price_cents
+      select p.slug, count(i.*)::int as images, min(i.url) filter (where i.is_primary) as url, p.price_cents
         from products p join product_images i on i.product_id = p.id
        where p.slug in ('dr-althea-345-relief-cream', 'celimax-pore-dark-spot-brightening-cream', 'skin1004-madagascar-centella-ampoule')
        group by p.slug, p.price_cents order by p.slug`);
     expect(rows.map((r) => [r.slug, r.images, r.url, r.price_cents])).toEqual([
-      ["celimax-pore-dark-spot-brightening-cream", 1, "/products/celimax-pore-dark-spot-brightening-cream.webp", 12999],
+      ["celimax-pore-dark-spot-brightening-cream", 2, "/products/celimax-pore-dark-spot-brightening-cream.webp", 12999],
       ["dr-althea-345-relief-cream", 1, "/products/dr-althea-345-relief-cream.webp", 17999],
-      ["skin1004-madagascar-centella-ampoule", 1, "/products/skin1004-madagascar-centella-ampoule.webp", 17999],
+      ["skin1004-madagascar-centella-ampoule", 4, "/products/skin1004-madagascar-centella-ampoule.webp", 17999],
     ]);
     const jelly = await one<{ volume: string }>(`select volume from products where slug = 'medicube-collagen-jelly-cream'`);
     expect(jelly.volume).toBe("50 ml");
@@ -393,7 +407,7 @@ describe("catalogue expansion (29 products)", () => {
   it("keeps the 20 expansion records without invented price or stock (catalogue items visible as 'Sob consulta')", async () => {
     const rows = await all<{ slug: string; status: string; availability: string; price_cents: number | null; stock_quantity: number | null; sourcing_status: string; images: number }>(`
       select p.slug, p.status, p.availability, p.price_cents, p.stock_quantity, pp.sourcing_status,
-             (select count(*)::int from product_images i where i.product_id = p.id) as images
+             (select count(*)::int from product_images i where i.product_id = p.id and i.is_primary) as images
         from products p join product_private pp on pp.product_id = p.id
        where p.sort_order between 10 and 29 and p.slug <> 'teste-produto'`);
     expect(rows).toHaveLength(20);
@@ -600,6 +614,8 @@ describe("shipping calculator", () => {
 describe("home carousel", () => {
   // the owner's own art, in the order she sent it (migration 013)
   const ART = ["/banners/home-mivora-serum.webp", "/banners/home-mivora-creme.webp", "/banners/home-mivora-gel.webp", "/banners/home-mivora-mascara.webp"];
+  // editorial photos (Unsplash License) of migration 023
+  const EDITORIAL = ["/editorial/hero-seruns-texturas.webp", "/editorial/hero-creme-bege.webp", "/editorial/hero-gotas-rose.webp"];
   type Slide = {
     title: string;
     image_desktop_url: string | null;
@@ -620,7 +636,7 @@ describe("home carousel", () => {
       ),
     );
 
-  it("opens with the mockup slide (real serum photo on rosé), then the owner's four banners, each with copy and a link", async () => {
+  it("opens with the mockup slide (real serum photo on rosé), then the editorial slides; the owner's 837 px art is kept switched off", async () => {
     const rows = await slides();
     expect(rows[0]).toMatchObject({
       title: "Sua pele, seu ritual.",
@@ -630,10 +646,13 @@ describe("home carousel", () => {
       background_color: "#F6E4E1",
       layout: "split",
     });
-    expect(rows.slice(1).map((r) => r.image_desktop_url)).toEqual(ART);
-    expect(rows.slice(1).every((r) => r.layout === "full")).toBe(true);
-    expect(rows[1]).toMatchObject({ title: "Seu momento de autocuidado", cta2_label: null });
-    expect(rows[2]).toMatchObject({ title: "Hidratação que deixa a pele macia", cta_href: "/categorias/hidratantes" });
+    expect(rows.slice(1).map((r) => r.image_desktop_url)).toEqual(EDITORIAL);
+    expect(rows.slice(1).every((r) => r.layout === "split")).toBe(true);
+    expect(rows[1]).toMatchObject({ title: "Skincare coreano escolhido para a sua rotina", cta_href: "/produtos", cta2_label: "Ver marcas" });
+    expect(rows[2]).toMatchObject({ title: "Pele macia, confortável e com viço", cta_href: "/categorias/hidratantes" });
+    // the owner's art stays in the admin, switched off (not deleted)
+    const art = await all<{ image_desktop_url: string; is_active: boolean }>(`select image_desktop_url, is_active from banners where placement = 'hero' and layout = 'full' order by sort_order`);
+    expect(art).toEqual(ART.map((image_desktop_url) => ({ image_desktop_url, is_active: false })));
     // no campaign photo with people is left
     expect(rows.some((r) => r.image_desktop_url?.includes("medicube") || r.image_desktop_url?.includes("aparelho"))).toBe(false);
     expect(new Set(rows.map((r) => r.title)).size).toBe(rows.length);
@@ -653,13 +672,13 @@ describe("home carousel", () => {
   it("re-running the carousel, premium home and banner art migrations changes nothing (idempotent)", async () => {
     const before = await slides();
     const banners = await all(`select placement, title, sort_order from banners order by placement, sort_order`);
-    for (const name of ["home_carousel", "premium_home", "authored_banners"]) {
+    for (const name of ["home_carousel", "premium_home", "authored_banners", "visual_refresh_content"]) {
       const file = readdirSync(path.join(process.cwd(), "supabase", "migrations")).find((f) => f.includes(name))!;
       await db.exec(readFileSync(path.join(process.cwd(), "supabase", "migrations", file), "utf8"));
     }
     expect(await slides()).toEqual(before);
     expect(await all(`select placement, title, sort_order from banners order by placement, sort_order`)).toEqual(banners);
-    expect((await one<{ n: number }>(`select count(*)::int as n from banners where placement = 'hero'`)).n).toBe(5);
+    expect((await one<{ n: number }>(`select count(*)::int as n from banners where placement = 'hero'`)).n).toBe(8);
   });
 });
 

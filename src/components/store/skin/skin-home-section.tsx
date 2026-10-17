@@ -14,12 +14,12 @@ const STEPS = [
 export function SkinHomeSection({ banner }: { banner: Banner }) {
   return (
     <section id="analise-de-pele" aria-labelledby="analise-de-pele-titulo" className="container-page scroll-mt-32 pt-14 sm:pt-16">
-      <div className="grid overflow-hidden rounded-[6px] border border-line/70 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]" style={{ backgroundColor: banner.background_color ?? "#F7E8E5" }}>
+      <div className="grid overflow-hidden rounded-panel lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]" style={{ backgroundColor: banner.background_color ?? "#F7E8E5" }}>
         <div className="px-6 py-9 sm:px-10 sm:py-12 lg:px-14 lg:py-16">
           {banner.eyebrow ? (
             <p className="inline-flex rounded-full bg-paper/80 px-3 py-1 text-[0.6875rem] font-semibold uppercase tracking-[0.2em] text-rose-ink">{banner.eyebrow}</p>
           ) : null}
-          <h2 id="analise-de-pele-titulo" className="heading-display mt-4 max-w-[30rem] text-[2rem] leading-[1.08] sm:text-[2.625rem] lg:text-[3rem]">
+          <h2 id="analise-de-pele-titulo" className="t-h1 mt-4 max-w-[30rem]">
             {banner.title}
           </h2>
           {banner.subtitle ? <p className="mt-4 max-w-[30rem] text-[0.9375rem] leading-relaxed text-ink/75 sm:text-base">{banner.subtitle}</p> : null}

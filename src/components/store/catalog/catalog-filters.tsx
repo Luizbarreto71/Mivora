@@ -46,7 +46,7 @@ export function CatalogToolbar({ basePath, filters, options, locked, total }: Pr
           <button
             type="button"
             onClick={() => setOpen(true)}
-            className="flex h-10 items-center gap-2 border border-line px-4 text-[0.6875rem] font-semibold uppercase tracking-[0.16em] hover:border-ink lg:hidden"
+            className="flex h-10 items-center gap-2 rounded-full border border-line px-4 text-[0.6875rem] font-semibold uppercase tracking-[0.14em] transition-colors hover:border-ink lg:hidden"
           >
             <SlidersHorizontal className="h-3.5 w-3.5" strokeWidth={1.5} /> Filtrar
             {active ? <span className="h-1.5 w-1.5 rounded-full bg-ink" /> : null}
@@ -60,7 +60,7 @@ export function CatalogToolbar({ basePath, filters, options, locked, total }: Pr
           <select
             value={filters.ordem ?? "destaques"}
             onChange={(e) => go({ ...filters, ordem: e.target.value as SortValue })}
-            className="h-10 border border-line bg-paper px-3 text-xs font-medium focus:border-ink focus:outline-none"
+            className="h-10 rounded-full border border-line bg-paper px-4 text-xs font-medium focus:border-ink focus:outline-none"
             aria-label="Ordenar produtos"
           >
             {SORT_OPTIONS.map((o) => (
@@ -210,7 +210,7 @@ function CheckRow({ label, count, checked, onChange, depth = 0 }: { label: strin
   return (
     <label className={cn("flex min-h-9 cursor-pointer items-center justify-between gap-3 text-sm", depth > 0 ? "pl-6 text-ink-soft" : "font-medium")}>
       <span className="flex items-center gap-2.5">
-        <input type="checkbox" className="h-4 w-4 accent-ink" checked={checked} onChange={onChange} />
+        <input type="checkbox" className="h-4 w-4 accent-[var(--color-accent)]" checked={checked} onChange={onChange} />
         {label}
       </span>
       {count != null ? <span className="text-xs tabular-nums text-muted">{count}</span> : null}
@@ -232,13 +232,13 @@ function PriceRange({ filters, onApply }: { filters: CatalogFilters; onApply: (m
     >
       <label className="flex-1 text-xs text-muted">
         Mín. (R$)
-        <input inputMode="decimal" value={min} onChange={(e) => setMin(e.target.value)} className="mt-1 h-10 w-full border border-line px-2 text-sm text-ink focus:border-ink focus:outline-none" />
+        <input inputMode="decimal" value={min} onChange={(e) => setMin(e.target.value)} className="mt-1 h-10 w-full rounded-control border border-line px-2 text-sm text-ink focus:border-ink focus:outline-none" />
       </label>
       <label className="flex-1 text-xs text-muted">
         Máx. (R$)
-        <input inputMode="decimal" value={max} onChange={(e) => setMax(e.target.value)} className="mt-1 h-10 w-full border border-line px-2 text-sm text-ink focus:border-ink focus:outline-none" />
+        <input inputMode="decimal" value={max} onChange={(e) => setMax(e.target.value)} className="mt-1 h-10 w-full rounded-control border border-line px-2 text-sm text-ink focus:border-ink focus:outline-none" />
       </label>
-      <button type="submit" className="h-10 border border-ink px-3 text-[0.625rem] font-semibold uppercase tracking-[0.14em] hover:bg-ink hover:text-paper">
+      <button type="submit" className="h-10 rounded-control border border-ink px-3 text-[0.625rem] font-semibold uppercase tracking-[0.14em] hover:bg-ink hover:text-paper">
         Ok
       </button>
     </form>
