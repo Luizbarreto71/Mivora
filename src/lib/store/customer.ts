@@ -1,7 +1,5 @@
-/** Customer registration remembered on this device (the record itself lives in the database). */
-export type CustomerProfile = { name: string; email: string; phone: string; marketing: boolean; firstName?: string; lastName?: string; cpf?: string };
-
-const KEY = "mivora.customer";
+/** Registration remembered on the device before accounts were required (name, phone, CPF): only removed now. */
+const LEGACY_KEY = "mivora.customer";
 
 /** Brazilian phone with area code → 10/11 digits (drops the country code); null when invalid. */
 export function normalizeBrPhone(input: string | null | undefined) {
@@ -18,26 +16,10 @@ export function formatBrPhone(digits: string) {
   return digits;
 }
 
-export function readDeviceCustomer(): CustomerProfile | null {
-  try {
-    const c = JSON.parse(localStorage.getItem(KEY) ?? "null");
-    return c && typeof c.name === "string" && typeof c.email === "string" && typeof c.phone === "string" ? { ...c, marketing: Boolean(c.marketing) } : null;
-  } catch {
-    return null;
-  }
-}
-
-export function saveDeviceCustomer(customer: CustomerProfile) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(customer));
-  } catch {
-    /* private mode */
-  }
-}
-
+/** Buying needs an account now: a shared device must not keep someone's old registration. */
 export function forgetDeviceCustomer() {
   try {
-    localStorage.removeItem(KEY);
+    localStorage.removeItem(LEGACY_KEY);
   } catch {
     /* ignore */
   }

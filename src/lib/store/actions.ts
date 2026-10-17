@@ -8,6 +8,7 @@ import type { ApplePayLines } from "@/lib/payments/apple-pay-core";
 import { isSupabaseConfigured } from "@/lib/env";
 import { chargeCard, createPix, mercadoPagoConfig, openCheckout } from "@/lib/payments/mercadopago";
 import { getPublicSupabase } from "@/lib/supabase/public";
+import { getServiceSupabase } from "@/lib/supabase/service";
 import { createServerSupabase } from "@/lib/supabase/server";
 import { saveMyAddress } from "./account-actions";
 import { cardRejectionMessage, isValidCpf } from "./checkout-data";
@@ -179,7 +180,32 @@ const ERROR_MESSAGES: Record<string, string> = {
   online_payment_disabled: "O pagamento pelo site não está disponível no momento",
   online_payment_unavailable: "Há itens com preço sob consulta no carrinho. Para eles, combine o pagamento pelo WhatsApp",
   delivery_required: "Para pagar pelo site, escolha uma entrega com valor definido",
+  login_required: "Entre na sua conta para finalizar a compra",
+  email_not_confirmed: "Confirme seu e-mail para finalizar a compra",
+  invalid_request: "Não foi possível registrar este pedido. Recarregue a página e tente de novo",
 };
+
+const LOGIN_REQUIRED = "Entre na sua conta para finalizar a compra. Seu carrinho continua salvo.";
+const CONFIRM_REQUIRED = "Confirme seu e-mail para finalizar a compra. Enviamos o link para a sua caixa de entrada.";
+
+/** Purchases need a signed-in account with a confirmed e-mail (also enforced by the database). */
+async function buyerCheck(): Promise<{ ok: true; userId: string } | { ok: false; error: string; loginRequired?: true; confirmRequired?: true }> {
+  if (!isSupabaseConfigured) return { ok: false, error: "A loja ainda não está conectada ao banco de dados." };
+  const { data } = await (await createServerSupabase()).auth.getUser();
+  if (!data.user) return { ok: false, error: LOGIN_REQUIRED, loginRequired: true };
+  if (!data.user.email_confirmed_at) return { ok: false, error: CONFIRM_REQUIRED, confirmRequired: true };
+  return { ok: true, userId: data.user.id };
+}
+
+/** Paying an existing order: an order made with an account is paid only by that account (orders from before accounts became required keep their link). */
+async function canPayOrder(orderId: string) {
+  const service = getServiceSupabase();
+  if (!service) return true;
+  const { data } = await service.from("order_intents").select("user_id").eq("id", orderId).maybeSingle();
+  if (!data?.user_id) return true;
+  const { data: auth } = await (await createServerSupabase()).auth.getUser();
+  return auth.user?.id === data.user_id;
+}
 
 function describeRpcError(message: string) {
   const [code, detail] = message.split(":");
@@ -308,7 +334,7 @@ export type PlaceOrderResult =
   | { ok: true; kind: "order"; code: string; orderId: string; url: string }
   | { ok: true; kind: "redirect"; code: string; orderId: string; url: string; orderUrl: string }
   | { ok: true; kind: "whatsapp"; code: string; url: string; summarized: boolean }
-  | { ok: false; error: string; retryable: boolean; step?: "identificacao" | "pagamento"; orderId?: string };
+  | { ok: false; error: string; retryable: boolean; step?: "identificacao" | "pagamento"; orderId?: string; loginRequired?: true; confirmRequired?: true };
 
 type Receipt = { payment_status: string; pix: { qr_code: string } | null };
 async function readReceipt(orderId: string) {
@@ -338,6 +364,8 @@ export async function placeOrder(input: unknown): Promise<PlaceOrderResult> {
   if ((method === "pix" || method === "card") && !isValidCpf(data.customer.cpf)) return { ok: false, error: "Informe um CPF válido para pagar pelo site.", retryable: false, step: "identificacao" };
   if (method === "whatsapp" && !whatsapp) return { ok: false, error: "O WhatsApp da loja ainda não foi configurado.", retryable: false, step: "pagamento" };
 
+  const buyer = await buyerCheck();
+  if (!buyer.ok) return { ...buyer, retryable: false, step: "identificacao" };
   const registered = await registerOrder(data, online ? "mercadopago" : "whatsapp");
   if (!registered.ok) return registered;
   const r = registered.r;
@@ -432,6 +460,7 @@ export async function payOrder(orderId: unknown): Promise<{ ok: true; url: strin
   const id = z.uuid().safeParse(orderId);
   if (!id.success) return { ok: false, error: "Pedido inválido." };
   if (!allowPay(await clientIp())) return { ok: false, error: "Muitas tentativas seguidas. Aguarde um minuto e tente de novo." };
+  if (!(await canPayOrder(id.data))) return { ok: false, error: "Entre com a conta que fez este pedido para pagar." };
   const result = await openCheckout(id.data);
   return result.ok ? result : { ok: false, error: payError(result.reason) };
 }
@@ -441,6 +470,7 @@ export async function renewPix(orderId: unknown): Promise<{ ok: true } | { ok: f
   const id = z.uuid().safeParse(orderId);
   if (!id.success) return { ok: false, error: "Pedido inválido." };
   if (!allowPay(await clientIp())) return { ok: false, error: "Muitas tentativas seguidas. Aguarde um minuto e tente de novo." };
+  if (!(await canPayOrder(id.data))) return { ok: false, error: "Entre com a conta que fez este pedido para pagar." };
   const result = await createPix(id.data, `${id.data}-${Date.now()}`);
   if (result.ok) return { ok: true };
   return { ok: false, error: result.reason === "pix_unavailable" ? "O Pix não está disponível no momento." : payError(result.reason) };
@@ -475,6 +505,8 @@ export async function startApplePayOrder(input: unknown): Promise<ApplePayStart>
   const parsed = checkoutSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Dados inválidos." };
   if (!isValidCpf(parsed.data.customer.cpf)) return { ok: false, error: "Informe um CPF válido para pagar com Apple Pay." };
+  const buyer = await buyerCheck();
+  if (!buyer.ok) return { ok: false, error: buyer.error };
   const registered = await registerOrder(parsed.data, "mercadopago");
   if (!registered.ok) return { ok: false, error: registered.error };
   const r = registered.r;
@@ -521,6 +553,7 @@ export async function completeApplePay(input: unknown): Promise<ApplePayCompleti
   const parsed = applePaySchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "Não foi possível ler o pagamento do Apple Pay. Tente novamente." };
   if (!(await allowApplePay())) return { ok: false, error: "Muitas tentativas seguidas. Aguarde um minuto e tente de novo." };
+  if (!(await canPayOrder(parsed.data.orderId))) return { ok: false, error: "Entre com a conta que fez este pedido para pagar." };
   const settings = await getStoreSettings();
   const result = await chargeWithApplePay(settings, parsed.data);
   if (result.ok) return { ok: true, status: result.status, approved: result.status === "approved", orderUrl: result.orderUrl };

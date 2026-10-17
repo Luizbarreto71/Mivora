@@ -48,8 +48,10 @@ export async function quoteShipping(input: unknown): Promise<QuoteResult> {
   const settings = await getStoreSettings();
   if (!settings.shipping_calculator_enabled) return { ok: false, error: "A calculadora de frete está desativada." };
   const h = await headers();
-  const ip = h.get("x-forwarded-for")?.split(",")[0]?.trim() || h.get("x-real-ip") || "local";
-  if (!allow(ip)) return { ok: false, error: "Muitas consultas seguidas. Aguarde um minuto e tente de novo." };
+  const ip = h.get("x-forwarded-for")?.split(",")[0]?.trim() || h.get("x-real-ip") || "";
+  // loopback / private addresses (a proxy without the client's IP, local tests) are not limited here
+  const publicIp = ip && !/^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|::1$|::ffff:(127|10|192\.168)\.)/.test(ip);
+  if (publicIp && !allow(ip)) return { ok: false, error: "Muitas consultas seguidas. Aguarde um minuto e tente de novo." };
   const quote = await getShippingQuote(cep, parsed.data.items);
   if (quote.addressFound === false) return { ok: false, error: "Não encontramos este CEP. Confira os números e tente de novo." };
   return { ok: true, quote };

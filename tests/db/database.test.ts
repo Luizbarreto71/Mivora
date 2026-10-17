@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
-import { asRole, createTestDb, type TestDb } from "./harness";
+import { asRole, createTestDb, setDefaultUser, type TestDb } from "./harness";
 
 let db: TestDb;
 
@@ -49,8 +49,23 @@ const newCustomer = (phone?: string) => {
   return JSON.stringify({ name: `Cliente ${customerSeq}`, email: `cliente${customerSeq}@teste.com`, phone: phone ?? `1197777${String(customerSeq).padStart(4, "0")}` });
 };
 
+const shopperIds = new Map<string, string>();
+/** A signed-in customer with a confirmed e-mail: every order needs one (migration 021). */
+async function shopper(email: string) {
+  const known = shopperIds.get(email);
+  if (known) return known;
+  const id =
+    (await one<{ id: string }>(`select id from auth.users where email = $1`, [email]))?.id ??
+    (await one<{ id: string }>(`insert into auth.users (email, email_confirmed_at) values ($1, now()) returning id`, [email])).id;
+  shopperIds.set(email, id);
+  return id;
+}
+/** Runs `fn` as the signed-in customer whose e-mail is in this customer JSON. */
+const asBuyer = async <T>(customer: string, fn: () => Promise<T>) => asRole(db, "authenticated", await shopper(JSON.parse(customer).email), fn);
+
 beforeAll(async () => {
   db = await createTestDb();
+  await setDefaultUser(db, await shopper("cliente@teste.com"));
   adminId = (await one<{ id: string }>(`insert into auth.users (email) values ('owner@mivora.test') returning id`)).id;
   outsiderId = (await one<{ id: string }>(`insert into auth.users (email) values ('someone@mivora.test') returning id`)).id;
   await db.query(`select public.grant_admin_by_email('owner@mivora.test', 'owner')`);
@@ -172,8 +187,8 @@ describe("Catálogo MIVORA 2026 (50 produtos)", () => {
     const pid = await productId("olaplex-no3-hair-perfector");
     await asRole(db, "anon", null, async () => {
       expect(await all(`select id from products where id = $1`, [pid])).toHaveLength(1);
-      await expect(db.query(`select create_order_intent($1::jsonb, ${WITH_CUSTOMER})`, [JSON.stringify([{ product_id: pid, quantity: 1 }])])).rejects.toThrow(/item_unavailable/);
     });
+    await asBuyer(CUSTOMER, () => expect(db.query(`select create_order_intent($1::jsonb, ${WITH_CUSTOMER})`, [JSON.stringify([{ product_id: pid, quantity: 1 }])])).rejects.toThrow(/item_unavailable/));
     // and they still cannot be put on sale without the documentation check
     await asRole(db, "authenticated", adminId, async () => {
       await expect(db.query(`update products set availability = 'in_stock' where id = $1`, [pid])).rejects.toThrow(/compliance_required/);
@@ -280,7 +295,7 @@ describe("order intents (Testes 4, 5, 6, 8)", () => {
     await db.query(`update products set price_cents = 11990 where id = $1`, [centella]);
     await db.query(`update products set price_cents = 15900 where id = $1`, [cream]);
 
-    const res = await asRole(db, "anon", null, () =>
+    const res = await asBuyer(CUSTOMER, () =>
       one<{ r: { code: string; subtotal_cents: number; has_unpriced_items: boolean; items: { unit_price_cents: number | null }[] } }>(
         `select create_order_intent($1::jsonb, ${WITH_CUSTOMER}) as r`,
         [JSON.stringify([
@@ -308,13 +323,13 @@ describe("order intents (Testes 4, 5, 6, 8)", () => {
   it("rejects out-of-stock tracked products and tampered quantities", async () => {
     const pid = await productId("celimax-pore-dark-spot-brightening-cream");
     await db.query(`update products set track_inventory = true, stock_quantity = 0 where id = $1`, [pid]);
-    await asRole(db, "anon", null, async () => {
+    await asBuyer(CUSTOMER, async () => {
       await expect(db.query(`select create_order_intent($1::jsonb, ${WITH_CUSTOMER})`, [JSON.stringify([{ product_id: pid, quantity: 1 }])])).rejects.toThrow(/item_unavailable/);
       await expect(db.query(`select create_order_intent($1::jsonb, ${WITH_CUSTOMER})`, [JSON.stringify([{ product_id: pid, quantity: 500 }])])).rejects.toThrow(/invalid_quantity/);
       await expect(db.query(`select create_order_intent('[]'::jsonb)`)).rejects.toThrow(/empty_cart/);
     });
     await db.query(`update products set stock_quantity = 2 where id = $1`, [pid]);
-    await asRole(db, "anon", null, async () => {
+    await asBuyer(CUSTOMER, async () => {
       await expect(db.query(`select create_order_intent($1::jsonb, ${WITH_CUSTOMER})`, [JSON.stringify([{ product_id: pid, quantity: 3 }])])).rejects.toThrow(/insufficient_stock/);
     });
   });
@@ -322,7 +337,7 @@ describe("order intents (Testes 4, 5, 6, 8)", () => {
   it("moves stock only on manual confirmation / completion / cancellation", async () => {
     const pid = await productId("celimax-pore-dark-spot-brightening-cream");
     await db.query(`update products set track_inventory = true, stock_quantity = 5, reserved_quantity = 0, price_cents = 8990 where id = $1`, [pid]);
-    const r = await asRole(db, "anon", null, () =>
+    const r = await asBuyer(CUSTOMER, () =>
       one<{ r: { id: string } }>(`select create_order_intent($1::jsonb, ${WITH_CUSTOMER}) as r`, [JSON.stringify([{ product_id: pid, quantity: 2 }])]),
     );
     const stock = () => one<{ stock_quantity: number; reserved_quantity: number }>(`select stock_quantity, reserved_quantity from products where id = $1`, [pid]);
@@ -411,8 +426,8 @@ describe("catalogue expansion (29 products)", () => {
     await db.query(`update products set status = 'published' where id = $1`, [pid]);
     await asRole(db, "anon", null, async () => {
       expect(await all(`select id from products where id = $1`, [pid])).toHaveLength(1);
-      await expect(db.query(`select create_order_intent($1::jsonb, ${WITH_CUSTOMER})`, [JSON.stringify([{ product_id: pid, quantity: 1 }])])).rejects.toThrow(/item_unavailable/);
     });
+    await asBuyer(CUSTOMER, () => expect(db.query(`select create_order_intent($1::jsonb, ${WITH_CUSTOMER})`, [JSON.stringify([{ product_id: pid, quantity: 1 }])])).rejects.toThrow(/item_unavailable/));
     await db.query(`update products set status = 'draft' where id = $1`, [pid]);
   });
 
@@ -445,13 +460,15 @@ describe("catalogue expansion (29 products)", () => {
 });
 
 describe("welcome offer (first purchase coupon)", () => {
-  const order = (items: unknown, coupon: string | null, phone: string | null = null) =>
-    asRole(db, "anon", null, () =>
+  const order = (items: unknown, coupon: string | null, phone: string | null = null) => {
+    const customer = newCustomer(phone ?? undefined);
+    return asBuyer(customer, () =>
       one<{ r: { id: string; subtotal_cents: number; discount_cents: number; coupon_code: string | null; discount_percent: number | null } }>(
         `select create_order_intent($1::jsonb, p_coupon_code => $2, p_customer => $3::jsonb) as r`,
-        [JSON.stringify(items), coupon, newCustomer(phone ?? undefined)],
+        [JSON.stringify(items), coupon, customer],
       ),
     );
+  };
 
   it("applies the configured percentage on priced items only, computed on the server", async () => {
     const ampoule = await productId("skin1004-madagascar-centella-ampoule");
@@ -488,7 +505,7 @@ describe("shipping calculator", () => {
     destination: { cep: string; city: string | null; uf: string | null } | null;
   };
   const order = (items: unknown, zoneId: string | null, shipping: unknown) =>
-    asRole(db, "anon", null, () =>
+    asBuyer(CUSTOMER, () =>
       one<{ r: OrderResult }>(`select create_order_intent($1::jsonb, null, null, null, $2::uuid, null, $3::jsonb, $4::jsonb) as r`, [
         JSON.stringify(items),
         zoneId,
@@ -718,7 +735,7 @@ describe("customer registration (lead capture)", () => {
     asRole(db, "anon", null, () => one<{ r: string }>(`select register_customer($1, $2, $3, $4, 'teste') as r`, [name, email, phone, marketing]));
 
   it("never registers an order without a customer", async () => {
-    await expect(asRole(db, "anon", null, async () => db.query(`select create_order_intent($1::jsonb)`, [await items()]))).rejects.toThrow(/customer_required/);
+    await expect(asBuyer(CUSTOMER, async () => db.query(`select create_order_intent($1::jsonb)`, [await items()]))).rejects.toThrow(/customer_required/);
   });
 
   it("validates the registration, keeps customers private and the internal function closed", async () => {
@@ -746,21 +763,24 @@ describe("customer registration (lead capture)", () => {
     expect(await one(`select source from newsletter_subscribers where email = 'bia@teste.com'`)).toEqual({ source: "cadastro" });
 
     // an order without the "marketing" key keeps the previous choice
-    await asRole(db, "anon", null, async () =>
-      db.query(`select create_order_intent($1::jsonb, p_customer => $2::jsonb)`, [await items(), JSON.stringify({ name: "Beatriz Souza", email: "bia@teste.com", phone: "21988886666" })]),
-    );
+    const bia = JSON.stringify({ name: "Beatriz Souza", email: "bia@teste.com", phone: "21988886666" });
+    await asBuyer(bia, async () => db.query(`select create_order_intent($1::jsonb, p_customer => $2::jsonb)`, [await items(), bia]));
     expect(await one(`select marketing_consent from customers where email = 'bia@teste.com'`)).toEqual({ marketing_consent: true });
-    // explicit opt-out clears the consent date
+    // the order linked the record to Bia's account: an anonymous form can no longer change it…
     await register("Beatriz Souza", "bia@teste.com", "21988886666", false);
+    expect(await one(`select marketing_consent from customers where email = 'bia@teste.com'`)).toEqual({ marketing_consent: true });
+    // …her account can: an explicit opt-out clears the consent date
+    await asBuyer(bia, () => db.query(`select save_my_account('Beatriz', 'Souza', '21988886666', null, false)`));
     expect(await one(`select marketing_consent, marketing_consent_at from customers where email = 'bia@teste.com'`)).toEqual({ marketing_consent: false, marketing_consent_at: null });
   });
 
   it("links the order to the customer, snapshots name and WhatsApp, counts orders and keeps the delivery city", async () => {
-    const r = await asRole(db, "anon", null, async () =>
+    const carla = JSON.stringify({ name: "Carla Dias", email: "carla@teste.com", phone: "(27) 99876-5432", marketing: false });
+    const r = await asBuyer(carla, async () =>
       one<{ r: { id: string } }>(`select create_order_intent($1::jsonb, null, null, 'Entregar à tarde', null, null, $2::jsonb, $3::jsonb) as r`, [
         await items(),
         JSON.stringify({ cep: "29055100", city: "Vitória", uf: "ES" }),
-        JSON.stringify({ name: "Carla Dias", email: "carla@teste.com", phone: "(27) 99876-5432", marketing: false }),
+        carla,
       ]),
     );
     const order = await one<{ customer_name: string; customer_phone: string; customer_notes: string; email: string }>(
@@ -774,12 +794,12 @@ describe("customer registration (lead capture)", () => {
   it("refuses the welcome coupon to a customer who already bought, even with another phone", async () => {
     const ampoule = await productId("skin1004-madagascar-centella-ampoule");
     const dani = (phone: string) => JSON.stringify({ name: "Dani Rocha", email: "dani@teste.com", phone });
-    const first = await asRole(db, "anon", null, () =>
+    const first = await asBuyer(dani("31911112222"), () =>
       one<{ r: { id: string } }>(`select create_order_intent($1::jsonb, p_customer => $2::jsonb) as r`, [JSON.stringify([{ product_id: ampoule, quantity: 1 }]), dani("31911112222")]),
     );
     await asRole(db, "authenticated", adminId, () => db.query(`select admin_set_order_status($1, 'confirmed')`, [first.r.id]));
     await expect(
-      asRole(db, "anon", null, () =>
+      asBuyer(dani("31933334444"), () =>
         db.query(`select create_order_intent($1::jsonb, p_coupon_code => 'BEMVINDA10', p_customer => $2::jsonb)`, [JSON.stringify([{ product_id: ampoule, quantity: 1 }]), dani("31933334444")]),
       ),
     ).rejects.toThrow(/coupon_not_first_purchase/);
@@ -790,16 +810,18 @@ describe("customer registration (lead capture)", () => {
 describe("online payments (Mercado Pago)", () => {
   type Online = { id: string; code: string; payment_method: string; amount_due_cents: number; subtotal_cents: number; discount_cents: number; items: { ref: string }[] };
   const SEDEX = { cep: "01001000", city: "São Paulo", uf: "SP", service: "Correios SEDEX", fee_cents: 4100, estimate: "3 dias úteis", recipient: "Cliente Teste", street: "Praça da Sé", number: "100", district: "Sé" };
-  const online = (items: unknown, shipping: unknown, coupon: string | null = null, method = "mercadopago") =>
-    asRole(db, "anon", null, () =>
+  const online = (items: unknown, shipping: unknown, coupon: string | null = null, method = "mercadopago") => {
+    const customer = newCustomer();
+    return asBuyer(customer, () =>
       one<{ r: Online }>(`select create_order_intent($1::jsonb, null, null, null, null, $2, $3::jsonb, $4::jsonb, $5) as r`, [
         JSON.stringify(items),
         coupon,
         shipping == null ? null : JSON.stringify(shipping),
-        newCustomer(),
+        customer,
         method,
       ]),
     );
+  };
   type Applied = { changed: boolean; status: string; payment_status: string };
   const pay = (id: string, paymentId: string, status: string, amount: number | null, type = "pix") =>
     asRole(db, "service_role", null, () =>
@@ -967,11 +989,12 @@ describe("Apple Pay (Mercado Pago Orders API)", () => {
     await db.query(`update store_settings set online_payment_enabled = true where id = 1`);
     const pid = await productId("medicube-pdrn-pink-peptide-serum");
     await db.query(`update products set price_cents = 15999, track_inventory = false, availability = 'in_stock' where id = $1`, [pid]);
-    const r = await asRole(db, "anon", null, () =>
+    const buyer = newCustomer();
+    const r = await asBuyer(buyer, () =>
       one<{ r: { id: string; amount_due_cents: number } }>(`select create_order_intent($1::jsonb, null, null, null, null, null, $2::jsonb, $3::jsonb, 'mercadopago') as r`, [
         JSON.stringify([{ product_id: pid, quantity: 1 }]),
         JSON.stringify({ cep: "01001000", city: "São Paulo", uf: "SP", service: "Correios SEDEX", fee_cents: 4100, estimate: "3 dias úteis", recipient: "Cliente Teste", street: "Praça da Sé", number: "100", district: "Sé" }),
-        newCustomer(),
+        buyer,
       ]),
     );
     const pay = (id: string, status: string, amount: number | null) =>
@@ -1000,8 +1023,8 @@ describe("checkout accounts, saved addresses and checkout attempts", () => {
   let unverified: string;
   let product: string;
   const account = (uid: string) => asRole(db, "authenticated", uid, async () => (await one<{ a: Account }>(`select get_my_account() as a`)).a);
-  const order = (uid: string | null, customer: Record<string, unknown>, opts: { shipping?: unknown; requestId?: string | null; method?: string } = {}) =>
-    asRole(db, uid ? "authenticated" : "anon", uid, () =>
+  const order = async (uid: string | null, customer: Record<string, unknown>, opts: { shipping?: unknown; requestId?: string | null; method?: string } = {}) =>
+    asRole(db, "authenticated", uid ?? (await shopper(String(customer.email))), () =>
       one<{ r: { id: string; code: string; duplicate?: boolean; amount_due_cents: number } }>(
         `select create_order_intent($1::jsonb, null, null, null, null, null, $2::jsonb, $3::jsonb, $4, $5::uuid) as r`,
         [JSON.stringify([{ product_id: product, quantity: 1 }]), JSON.stringify(opts.shipping === undefined ? SEDEX : opts.shipping), JSON.stringify(customer), opts.method ?? "mercadopago", opts.requestId ?? null],
@@ -1022,13 +1045,64 @@ describe("checkout accounts, saved addresses and checkout attempts", () => {
     await db.query(`update store_settings set online_payment_enabled = true where id = 1`);
   });
 
+  it("orders need a signed-in account with a confirmed e-mail, checked in the database", async () => {
+    const items = JSON.stringify([{ product_id: product, quantity: 1 }]);
+    const buyer = JSON.stringify({ name: "Sem Conta", email: "sem-conta@teste.com", phone: "11911110000" });
+    await expect(asRole(db, "anon", null, () => db.query(`select create_order_intent($1::jsonb, p_customer => $2::jsonb)`, [items, buyer]))).rejects.toThrow(/permission denied/);
+    // no session at all (a direct call without a user)
+    await db.query(`select set_config('request.jwt.claim.sub', '', false)`);
+    await expect(db.query(`select create_order_intent($1::jsonb, p_customer => $2::jsonb)`, [items, buyer])).rejects.toThrow(/login_required/);
+    await setDefaultUser(db, await shopper("cliente@teste.com"));
+    // an e-mail account that did not confirm the address yet
+    await expect(asRole(db, "authenticated", unverified, () => db.query(`select create_order_intent($1::jsonb, p_customer => $2::jsonb)`, [items, buyer]))).rejects.toThrow(/email_not_confirmed/);
+    // a checkout attempt id belongs to the account that created it
+    const attempt = "7d3c1f0e-2222-4c4c-9a9a-000000000002";
+    await order(await shopper("tentativa@conta.com"), { first_name: "Tina", last_name: "Souza", email: "tentativa@conta.com", phone: "11988887770" }, { requestId: attempt, method: "whatsapp", shipping: { cep: "01001000" } });
+    await expect(order(bia, { first_name: "Bia", last_name: "Lima", email: "bia@x.com", phone: "11911112222" }, { requestId: attempt, method: "whatsapp", shipping: { cep: "01001000" } })).rejects.toThrow(/invalid_request/);
+  });
+
+  it("sign-up data pre-fills the account until it saves; birth date and gender are optional and changed only by the account page", async () => {
+    type Profile = Account & { birth_date: string | null; gender: string | null };
+    const meta = { first_name: "Nina", last_name: "Rosa", phone: "(11) 97777-0000", cpf: "529.982.247-25", birth_date: "1990-05-20", gender: "feminino" };
+    const nina = (await one<{ id: string }>(`insert into auth.users (email, email_confirmed_at, raw_user_meta_data) values ('nina@conta.com', now(), $1::jsonb) returning id`, [JSON.stringify(meta)])).id;
+    const profile = () => asRole(db, "authenticated", nina, async () => (await one<{ a: Profile }>(`select get_my_account() as a`)).a);
+    expect(await profile()).toMatchObject({ saved: false, first_name: "Nina", last_name: "Rosa", phone: "11977770000", cpf: "52998224725", birth_date: "1990-05-20", gender: "feminino" });
+    // invalid values typed at sign-up are ignored
+    const odd = (await one<{ id: string }>(`insert into auth.users (email, email_confirmed_at, raw_user_meta_data) values ('odd@conta.com', now(), $1::jsonb) returning id`, [JSON.stringify({ cpf: "111.111.111-11", birth_date: "ontem", gender: "x" })])).id;
+    expect(await asRole(db, "authenticated", odd, async () => (await one<{ a: Profile }>(`select get_my_account() as a`)).a)).toMatchObject({ cpf: null, birth_date: null, gender: null });
+    // the checkout saves without birth date / gender: they stay empty until the account page sets them
+    await asRole(db, "authenticated", nina, () => db.query(`select save_my_account('Nina', 'Rosa', '11977770000', '52998224725')`));
+    expect(await profile()).toMatchObject({ saved: true, birth_date: null, gender: null });
+    await asRole(db, "authenticated", nina, () => db.query(`select save_my_account('Nina', 'Rosa', '11977770000', '52998224725', null, '1990-05-20', 'feminino', true)`));
+    expect(await profile()).toMatchObject({ birth_date: "1990-05-20", gender: "feminino" });
+    await asRole(db, "authenticated", nina, () => db.query(`select save_my_account('Nina', 'Rosa', '11977770000', '52998224725', null, null, null, true)`));
+    expect(await profile()).toMatchObject({ birth_date: null, gender: null });
+    await expect(asRole(db, "authenticated", nina, () => db.query(`select save_my_account('Nina', 'Rosa', '11977770000', null, null, '2999-01-01', null, true)`))).rejects.toThrow(/invalid_birth_date/);
+    await expect(asRole(db, "authenticated", nina, () => db.query(`select save_my_account('Nina', 'Rosa', '11977770000', null, null, null, 'robo', true)`))).rejects.toThrow(/invalid_gender/);
+  });
+
+  it("the server finds a sign-up whose e-mail was never confirmed (service role only), never a confirmed or Google account", async () => {
+    const google = (await one<{ id: string }>(`insert into auth.users (email, raw_app_meta_data) values ('google-pendente@conta.com', '{"provider":"google"}') returning id`)).id;
+    const lookup = (email: string) => asRole(db, "service_role", null, async () => (await one<{ id: string | null }>(`select pending_email_signup($1) as id`, [email])).id);
+    expect(await lookup(" SEM-CONFIRMACAO@conta.com ")).toBe(unverified);
+    expect(await lookup("ana@conta.com")).toBeNull();
+    expect(await lookup("google-pendente@conta.com")).toBeNull();
+    expect(google).toBeTruthy();
+    expect(await lookup("ninguem@conta.com")).toBeNull();
+    await expect(asRole(db, "anon", null, () => db.query(`select pending_email_signup('sem-confirmacao@conta.com')`))).rejects.toThrow(/permission denied/);
+    await expect(asRole(db, "authenticated", bia, () => db.query(`select pending_email_signup('sem-confirmacao@conta.com')`))).rejects.toThrow(/permission denied/);
+  });
+
   it("validates CPF check digits in the database", async () => {
     expect(await one(`select is_valid_cpf('529.982.247-25') as a, is_valid_cpf('12345678900') as b, is_valid_cpf('11111111111') as c, is_valid_cpf('5299822472') as d`)).toEqual({ a: true, b: false, c: false, d: false });
   });
 
-  it("an account sees only what it saved itself; a visitor's record with the same e-mail is never shown or overwritten", async () => {
-    // a visitor buys with Ana's e-mail before she has an account
-    await order(null, { name: "Outra Pessoa", email: "ana@conta.com", phone: "11911112222", cpf: "529.982.247-25" });
+  it("an account sees only what it saved itself; another account typing the same e-mail never touches it", async () => {
+    // someone else, signed in, types Ana's e-mail: the order is recorded with their own account e-mail
+    const intruder = await shopper("outra@conta.com");
+    const typed = await order(intruder, { name: "Outra Pessoa", email: "ana@conta.com", phone: "11911112222", cpf: "529.982.247-25" });
+    expect(await one(`select count(*)::int as n from customers where email = 'ana@conta.com'`)).toEqual({ n: 0 });
+    expect(await one(`select c.email from order_intents o join customers c on c.id = o.customer_id where o.id = $1`, [typed.r.id])).toEqual({ email: "outra@conta.com" });
     await expect(asRole(db, "anon", null, () => db.query(`select get_my_account()`))).rejects.toThrow(/permission denied/);
     expect(await account(ana)).toMatchObject({ email: "ana@conta.com", email_verified: true, provider: "google", provider_name: "Ana Google", saved: false, phone: null, cpf: null });
     expect(await account(bia)).toMatchObject({ email: "bia@privaterelay.appleid.com", provider: "apple", provider_name: null, saved: false });
@@ -1040,10 +1114,14 @@ describe("checkout accounts, saved addresses and checkout attempts", () => {
     expect(saved).toMatchObject({ saved: true, first_name: "Ana", last_name: "Souza", phone: "11988887777", cpf: "52998224725", marketing: true });
     expect(await one(`select name, user_id = $1 as linked from customers where email = 'ana@conta.com'`, [ana])).toEqual({ name: "Ana Souza", linked: true });
 
-    // later visitors using that e-mail do not change the account holder's data; their order keeps what they typed
-    const visitor = await order(null, { first_name: "Outra", last_name: "Pessoa", email: "ana@conta.com", phone: "(21) 95555-4444", cpf: "529.982.247-25" });
+    // the other account typing Ana's e-mail again changes nothing of hers; the order keeps what was typed and is theirs
+    const again = await order(intruder, { first_name: "Outra", last_name: "Pessoa", email: "ana@conta.com", phone: "(21) 95555-4444", cpf: "529.982.247-25" });
     expect(await one(`select name, phone from customers where email = 'ana@conta.com'`)).toEqual({ name: "Ana Souza", phone: "11988887777" });
-    expect(await one(`select customer_name, customer_phone, user_id from order_intents where id = $1`, [visitor.r.id])).toEqual({ customer_name: "Outra Pessoa", customer_phone: "21955554444", user_id: null });
+    expect(await one(`select customer_name, customer_phone, user_id = $2 as theirs from order_intents where id = $1`, [again.r.id, intruder])).toEqual({
+      customer_name: "Outra Pessoa",
+      customer_phone: "21955554444",
+      theirs: true,
+    });
 
     // unverified e-mails cannot claim a record; invalid data is refused
     await expect(asRole(db, "authenticated", unverified, () => db.query(`select save_my_account('Sem', 'Confirmacao', '11911112222', null)`))).rejects.toThrow(/email_not_verified/);
@@ -1136,7 +1214,7 @@ describe("skin analysis: campaign, recommendation profiles, daily quota and save
   beforeAll(async () => {
     const make = async (email: string) => (await one<{ id: string }>(`insert into auth.users (email, email_confirmed_at) values ($1, now()) returning id`, [email])).id;
     user = await make("pele@conta.com");
-    other = await make("outra@conta.com");
+    other = await make("outra-pele@conta.com");
     product = await productId("skin1004-madagascar-centella-ampoule");
     draft = (await one<{ id: string }>(`select id from products where status = 'draft' limit 1`)).id;
   });

@@ -56,7 +56,7 @@ export function SocialSignIn({ providers, next, beforeRedirect, className }: { p
     });
     if (oauthError) {
       setBusy(null);
-      setError("Não foi possível iniciar o login agora. Tente novamente ou continue com seus dados.");
+      setError("Não foi possível iniciar o login agora. Tente novamente ou entre com seu e-mail e senha.");
     }
   };
 

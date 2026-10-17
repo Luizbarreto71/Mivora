@@ -177,7 +177,7 @@ export function BuyBox({ product }: { product: ProductDetail }) {
         </li>
         <li className="flex gap-3">
           <Check className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.5} />
-          <span>{onlinePayment ? "Cadastro rápido, sem senha. Se preferir, finalize com atendimento humano pelo WhatsApp." : "Cadastro rápido, sem senha, e finalização com atendimento humano pelo WhatsApp."}</span>
+          <span>{onlinePayment ? "Compra com a sua conta MIVORA (e-mail e senha, Google ou Apple). Se preferir, finalize com atendimento humano pelo WhatsApp." : "Compra com a sua conta MIVORA e finalização com atendimento humano pelo WhatsApp."}</span>
         </li>
         <li className="flex gap-3">
           <CreditCard className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.5} />

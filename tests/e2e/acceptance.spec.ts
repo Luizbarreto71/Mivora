@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext, type Page } from "@playwright/test";
+import { expect, test, type APIRequestContext, type Locator, type Page } from "@playwright/test";
 import path from "node:path";
 import sharp from "sharp";
 import { RETURNING_VISITOR } from "../../playwright.config";
@@ -31,15 +31,42 @@ let customerSeq = 0;
 const CPF = "52998224725";
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "http://localhost:54321";
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+const AUTH = `${SUPABASE_URL}/auth/v1`;
+const PASSWORD = "Rosa#Teste9";
 
-/** Checkout step 2: the buyer's data, as a new customer. */
+const newEmail = (prefix = "cliente") => `${prefix}${Date.now()}${++customerSeq}@exemplo.com.br`;
+
+/** A confirmed e-mail account created straight in the local Supabase Auth stand-in (test-only helper, never part of Supabase). */
+async function createAccount(request: APIRequestContext, data: Record<string, string> = {}, opts: { email?: string; confirmed?: boolean } = {}) {
+  const email = opts.email ?? newEmail("conta");
+  const r = await request.post(`${AUTH}/test/users`, { data: { email, password: PASSWORD, confirmed: opts.confirmed ?? true, data } });
+  expect(r.ok()).toBe(true);
+  return email;
+}
+
+/** "JÁ TEM UMA CONTA?" — the e-mail and password form inside `scope` (a page, the header pop-over or the checkout). */
+async function signIn(scope: Page | Locator, email: string, password = PASSWORD) {
+  const form = scope.getByRole("form", { name: "Entrar na sua conta" });
+  await form.getByLabel("E-mail", { exact: true }).fill(email);
+  await form.getByLabel("Senha", { exact: true }).fill(password);
+  await form.getByRole("button", { name: "Entrar", exact: true }).click();
+}
+
+/** E-mails the local Supabase Auth stand-in would have sent to `email` (confirmation, recovery). */
+async function mailbox(request: APIRequestContext, email: string) {
+  const r = await request.get(`${AUTH}/test/mailbox?email=${encodeURIComponent(email)}`);
+  expect(r.ok()).toBe(true);
+  return (await r.json()) as { type: string; link: string; at: number }[];
+}
+
+/** Checkout step 2: buying needs an account — a new one signs in on the checkout, then gives CPF and phone. */
 async function fillIdentity(page: Page, name = "Cliente Teste", cpf = CPF) {
-  customerSeq += 1;
-  const email = `cliente${Date.now()}${customerSeq}@exemplo.com.br`;
   const [first, ...last] = name.split(" ");
-  await page.getByLabel("E-mail", { exact: true }).fill(email);
-  await page.getByLabel("Primeiro nome").fill(first);
-  await page.getByLabel("Sobrenome").fill(last.join(" ") || "Teste");
+  const email = await createAccount(page.request, { first_name: first, last_name: last.join(" ") || "Teste" });
+  await expect(page.getByRole("heading", { name: "Entre para finalizar sua compra" })).toBeVisible();
+  await signIn(page, email);
+  await expect(page.getByText("Conectada com e-mail e senha").filter({ visible: true })).toBeVisible();
+  await expect(page.getByLabel("Primeiro nome")).toHaveValue(first);
   await page.getByLabel("CPF", { exact: true }).fill(cpf);
   await page.getByLabel("Telefone com DDD").fill(`(11) 9${String(Date.now()).slice(-4)}-${String(1000 + customerSeq).slice(-4)}`);
   return email;
@@ -221,14 +248,21 @@ test("Testes 3, 4, 5 e 13 — carrinho, subtotal, WhatsApp e intenção de pedid
   await page.reload();
   await expect(page.getByText(brl(expected)).first()).toBeVisible();
 
-  // Step 1 → 2 (identification and delivery): nothing moves on without the buyer's data
+  // Step 1 → 2 (identification and delivery): buying needs an account, and nothing moves on without the buyer's data
   await page.getByRole("link", { name: "Continuar para identificação" }).click();
   await expect(page).toHaveURL(/\/finalizar\?etapa=identificacao$/);
   await expect(page.getByRole("navigation", { name: "Etapas da compra" }).locator('[aria-current="step"]')).toContainText("Identificação e entrega");
+  await expect(page.getByRole("heading", { name: "Entre para finalizar sua compra" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Continuar para o pagamento" })).toHaveCount(0);
+  await signIn(page, await createAccount(page.request, { first_name: "Cliente", last_name: "Teste" }));
+  await expect(page).toHaveURL(/\/finalizar\?etapa=identificacao$/);
+  await expect(page.getByRole("complementary", { name: "Resumo do pedido" }).getByText(brl(expected)).filter({ visible: true }).first()).toBeVisible();
   await page.getByRole("button", { name: "Continuar para o pagamento" }).click();
-  await expect(page.getByText("Digite um e-mail válido, ex.: nome@exemplo.com.br.")).toBeVisible();
-  await expect(page.getByLabel("E-mail", { exact: true })).toHaveAttribute("aria-invalid", "true");
-  await fillIdentity(page);
+  await expect(page.getByText("Informe seu CPF com 11 números.")).toBeVisible();
+  await expect(page.getByText("Digite um telefone com DDD, ex.: (11) 91234-5678.")).toBeVisible();
+  await expect(page.getByLabel("CPF", { exact: true })).toHaveAttribute("aria-invalid", "true");
+  await page.getByLabel("CPF", { exact: true }).fill(CPF);
+  await page.getByLabel("Telefone com DDD").fill("(11) 98888-1234");
   // without carriers (Melhor Envio is set up later) the only option for the CEP, "Entrega a combinar", comes selected and needs no address
   await page.getByLabel("CEP", { exact: true }).fill("01001-000");
   await expect(page.getByRole("radio", { name: /Entrega a combinar/ })).toBeChecked();
@@ -253,10 +287,11 @@ test("Testes 3, 4, 5 e 13 — carrinho, subtotal, WhatsApp e intenção de pedid
   const code = message.match(/MIV-\d{6}/)?.[0];
   expect(code).toBeTruthy();
 
-  // "Minha conta" lists the order sent from this device
+  // "Minha conta" lists the account's order, with its page
   await page.goto("/minha-conta");
-  await expect(page.getByText(code!)).toBeVisible();
-  await expect(page.getByRole("link", { name: /Abrir conversa do pedido/ })).toHaveAttribute("href", /wa\.me/);
+  const orders = page.getByRole("region", { name: "Meus pedidos" });
+  await expect(orders.getByRole("link", { name: code!, exact: true })).toHaveAttribute("href", /^\/pedido\/[0-9a-f-]{36}$/);
+  await expect(orders).toContainText("combinado pelo WhatsApp");
 
   // Teste 5: registered as an intent, never as a completed sale
   await admin.goto(`/admin/pedidos?q=${code}`);
@@ -607,7 +642,15 @@ test("Home premium — cabeçalho, busca, seções do mockup, produto em abas, n
   await expect(page.getByRole("link", { name: /Madagascar Centella Ampoule/ }).first()).toBeVisible();
   await page.getByRole("combobox", { name: "Buscar produtos" }).press("Enter");
   await expect(page).toHaveURL(/\/produtos\?q=centella/);
-  await page.getByRole("link", { name: "Minha conta" }).first().click();
+  // the account button opens "JÁ TEM UMA CONTA?" right in the header
+  await page.getByRole("button", { name: "Minha conta", exact: true }).click();
+  const menu = page.getByRole("dialog", { name: "Entrar na sua conta" });
+  await expect(menu.getByText("Já tem uma conta?")).toBeVisible();
+  await expect(menu.getByRole("link", { name: "Esqueceu sua senha?" })).toHaveAttribute("href", "/esqueci-senha");
+  await expect(menu.getByRole("link", { name: "Criar conta" })).toHaveAttribute("href", /^\/criar-conta\?next=/);
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
+  await page.goto("/minha-conta");
   await expect(page.getByRole("heading", { level: 1, name: "Minha conta" })).toBeVisible();
 
   // home sections in the order of the mockup, with real data
@@ -668,9 +711,23 @@ test("Home premium — cabeçalho, busca, seções do mockup, produto em abas, n
 });
 
 // ---------------------------------------------------------------------------
-// Cadastro obrigatório (captação de leads)
+// Contas — cadastro com e-mail e senha, confirmação obrigatória, login, sessão e recuperação de senha
+// (Supabase Auth: dublê local com caixa de e-mails de teste; o Supabase real nunca é chamado nos testes)
 // ---------------------------------------------------------------------------
-test("Cadastro — obrigatório para comprar, lembrado no aparelho, visível em Clientes no painel", async ({ browser }) => {
+/** "CRIE SUA CONTA MIVORA" with the required fields (and the CPF, when given). */
+async function signUp(page: Page, v: { first: string; last?: string; email: string; password?: string; cpf?: string }) {
+  const form = page.getByRole("form", { name: "Criar conta" });
+  await form.getByLabel("Nome", { exact: true }).fill(v.first);
+  await form.getByLabel("Sobrenome").fill(v.last ?? "Teste");
+  await form.getByLabel("E-mail", { exact: true }).fill(v.email);
+  await form.getByLabel("Senha", { exact: true }).fill(v.password ?? PASSWORD);
+  await form.getByLabel("Confirmar senha").fill(v.password ?? PASSWORD);
+  if (v.cpf) await form.getByLabel("CPF (opcional)").fill(v.cpf);
+  await form.getByRole("button", { name: "Criar minha conta" }).click();
+  await expect(page.getByRole("heading", { name: "Confirme seu e-mail" })).toBeVisible();
+}
+
+test("Cadastro — validações, senha forte, máscaras, confirmação obrigatória, link expirado, reenvio, volta à compra com a sacola e e-mail repetido sem revelar nada", async ({ browser, request }) => {
   const ctx = await browser.newContext({ storageState: RETURNING_VISITOR });
   const page = await ctx.newPage();
   let whatsappUrl = "";
@@ -678,32 +735,118 @@ test("Cadastro — obrigatório para comprar, lembrado no aparelho, visível em 
     whatsappUrl = route.request().url();
     await route.fulfill({ status: 200, body: "whatsapp" });
   });
+  const email = newEmail("helena");
 
-  // "Comprar pelo WhatsApp" on the product page goes through the checkout
+  // Teste 18: there is no guest checkout — the bag waits while the visitor creates an account
   await page.goto("/produtos/dr-althea-345-relief-cream");
   await page.getByRole("button", { name: "Comprar pelo WhatsApp" }).click();
   await expect(page).toHaveURL(/\/finalizar$/);
-  await expect(page.getByRole("heading", { name: "Seus dados" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Entre para finalizar sua compra" })).toBeVisible();
+  await expect(page.getByLabel("Primeiro nome")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Continuar para o pagamento" })).toHaveCount(0);
+  await page.getByRole("link", { name: "Criar conta" }).click();
+  await expect(page).toHaveURL(/\/criar-conta\?next=%2Ffinalizar/);
+  await expect(page.getByRole("heading", { level: 1, name: "Crie sua conta MIVORA" })).toBeVisible();
+  await expect(page.getByText("Crie sua conta para acompanhar seus pedidos, salvar seus dados e ter uma experiência de compra mais prática.").filter({ visible: true })).toBeVisible();
+  const form = page.getByRole("form", { name: "Criar conta" });
+  // two columns on the computer
+  const firstBox = (await form.getByLabel("Nome", { exact: true }).boundingBox())!;
+  const lastBox = (await form.getByLabel("Sobrenome").boundingBox())!;
+  expect(Math.abs(lastBox.y - firstBox.y)).toBeLessThan(2);
+  expect(lastBox.x).toBeGreaterThan(firstBox.x + firstBox.width);
 
-  // validation, next to each field
-  await page.getByLabel("E-mail", { exact: true }).fill("helena@");
-  await page.getByLabel("Primeiro nome").fill("Helena");
-  await page.getByLabel("Sobrenome").fill("Prado");
-  await page.getByLabel("CPF", { exact: true }).fill("111.111.111-11");
-  await page.getByLabel("Telefone com DDD").fill("1234");
-  await page.getByRole("button", { name: "Continuar para o pagamento" }).click();
-  await expect(page.getByText("Digite um e-mail válido, ex.: nome@exemplo.com.br.")).toBeVisible();
-  await expect(page.getByText("CPF inválido. Confira os números.")).toBeVisible();
-  await expect(page.getByText("Digite um telefone com DDD, ex.: (11) 91234-5678.")).toBeVisible();
-  await expect(page.getByText("Informe o CEP para calcular a entrega.")).toBeVisible();
-  await expect(page.getByLabel("E-mail", { exact: true })).toBeFocused();
+  // Testes 2, 4 e 5: errors next to the fields; the password requirements update while typing
+  await form.getByRole("button", { name: "Criar minha conta" }).click();
+  await expect(form.getByText("Informe seu nome.")).toBeVisible();
+  await expect(form.getByText("Informe seu sobrenome.")).toBeVisible();
+  await expect(form.getByText("Digite um e-mail válido, ex.: nome@exemplo.com.br.")).toBeVisible();
+  await expect(form.getByText("A senha não cumpre todos os requisitos.")).toBeVisible();
+  await expect(form.getByLabel("Nome", { exact: true })).toBeFocused();
+  const rules = form.getByRole("list", { name: "Requisitos da senha" });
+  const rule = (label: string) => rules.getByRole("listitem").filter({ hasText: label });
+  await form.getByLabel("Nome", { exact: true }).fill("Helena");
+  await form.getByLabel("Sobrenome").fill("Prado");
+  await form.getByLabel("E-mail", { exact: true }).fill("helena@exemplo");
+  await form.getByLabel("Senha", { exact: true }).fill("abc");
+  await expect(rule("Pelo menos 8 caracteres")).toContainText("(pendente)");
+  await expect(rule("Uma letra minúscula")).toContainText("(cumprido)");
+  await expect(rule("Uma letra maiúscula")).toContainText("(pendente)");
+  await expect(rule("Um número")).toContainText("(pendente)");
+  await expect(rule("Um caractere especial")).toContainText("(pendente)");
+  await form.getByLabel("Confirmar senha").fill("abd");
+  await form.getByLabel("CPF (opcional)").fill("111.111.111-11");
+  await form.getByLabel("Telefone ou celular (opcional)").fill("1234");
+  await form.getByRole("button", { name: "Criar minha conta" }).click();
+  await expect(form.getByText("Digite um e-mail válido, ex.: nome@exemplo.com.br.")).toBeVisible();
+  await expect(form.getByText("A senha não cumpre todos os requisitos.")).toBeVisible();
+  await expect(form.getByText("As senhas não são iguais.")).toBeVisible();
+  await expect(form.getByText("CPF inválido. Confira os números.")).toBeVisible();
+  await expect(form.getByText("Digite um telefone com DDD, ex.: (11) 91234-5678.")).toBeVisible();
+  expect(await mailbox(request, "helena@exemplo")).toEqual([]);
 
-  // valid data (with masks) and marketing opt-in
-  const email = `helena${Date.now()}@exemplo.com.br`;
-  await page.getByLabel("E-mail", { exact: true }).fill(email);
-  await page.getByLabel("CPF", { exact: true }).fill("52998224725");
+  // valid data with the CPF and phone masks; the eye button shows the password
+  await form.getByLabel("E-mail", { exact: true }).fill(email);
+  await form.getByLabel("Senha", { exact: true }).fill(PASSWORD);
+  for (const label of ["Pelo menos 8 caracteres", "Uma letra maiúscula", "Uma letra minúscula", "Um número", "Um caractere especial"]) await expect(rule(label)).toContainText("(cumprido)");
+  await expect(form.getByLabel("Senha", { exact: true })).toHaveAttribute("type", "password");
+  await form.getByRole("button", { name: "Mostrar senha" }).first().click();
+  await expect(form.getByLabel("Senha", { exact: true })).toHaveAttribute("type", "text");
+  await form.getByLabel("Confirmar senha").fill(PASSWORD);
+  await form.getByLabel("CPF (opcional)").fill("52998224725");
+  await expect(form.getByLabel("CPF (opcional)")).toHaveValue("529.982.247-25");
+  await form.getByLabel("Telefone ou celular (opcional)").fill("27998765432");
+  await expect(form.getByLabel("Telefone ou celular (opcional)")).toHaveValue("(27) 99876-5432");
+  await form.getByLabel("Data de nascimento (opcional)").fill("1992-03-14");
+  await form.getByLabel("Gênero (opcional)").selectOption("feminino");
+  await form.getByRole("button", { name: "Criar minha conta" }).click();
+
+  // Teste 6: "CONFIRME SEU E-MAIL" — the account exists, but stays inactive until the link is opened
+  await expect(page.getByRole("heading", { name: "Confirme seu e-mail" })).toBeVisible();
+  await expect(page.getByText(/Estamos quase lá! Enviamos um link de confirmação para o seu e-mail\./).filter({ visible: true })).toBeVisible();
+  await expect(page.getByText(email).filter({ visible: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Reenviar e-mail \(\d+s\)/ })).toBeDisabled();
+  await expect(page.getByRole("link", { name: "Alterar e-mail" })).toBeVisible();
+  await expect(page.getByText(/caixa de spam/).filter({ visible: true })).toBeVisible();
+  let mails = await mailbox(request, email);
+  expect(mails.map((m) => m.type)).toEqual(["signup"]);
+
+  // Testes 11 e 19: a wrong password is refused; the right one, while the e-mail is unconfirmed, leads back to the confirmation
+  await page.getByRole("link", { name: "Voltar para o login" }).click();
+  await expect(page.getByRole("heading", { name: "Já tem uma conta?" })).toBeVisible();
+  await signIn(page, email, "Senha#Errada1");
+  await expect(page.getByRole("alert").filter({ hasText: "E-mail ou senha incorretos." })).toBeVisible();
+  await signIn(page, email);
+  await expect(page).toHaveURL(/\/confirmar-email\?email=/);
+  await expect(page.getByRole("heading", { name: "Confirme seu e-mail" })).toBeVisible();
+
+  // Teste 8: an expired link leads to a page that offers a new one; Teste 9: "Reenviar e-mail" sends it, with Supabase's waiting time
+  await request.post(`${AUTH}/test/expire-links?email=${encodeURIComponent(email)}`);
+  await page.goto(mails[0].link);
+  await expect(page.getByRole("heading", { name: "Link expirado ou inválido" })).toBeVisible();
+  await page.getByRole("textbox", { name: "E-mail", exact: true }).fill(email);
+  await page.getByRole("button", { name: "Reenviar e-mail" }).click();
+  await expect(page.getByText(`Se houver um cadastro aguardando confirmação para ${email}, um novo link foi enviado.`).filter({ visible: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Reenviar e-mail \(\d+s\)/ })).toBeDisabled();
+  mails = await mailbox(request, email);
+  expect(mails).toHaveLength(2);
+  await page.reload();
+  await page.getByRole("textbox", { name: "E-mail", exact: true }).fill(email);
+  await page.getByRole("button", { name: "Reenviar e-mail" }).click();
+  await expect(page.getByRole("alert").filter({ hasText: /Aguarde \d+ segundos para reenviar\./ })).toBeVisible();
+  expect(await mailbox(request, email)).toHaveLength(2);
+
+  // Testes 7 e 20: the valid link activates the account and returns to the checkout, signed in, with the bag
+  await page.goto(mails[1].link);
+  await expect(page).toHaveURL(/\/finalizar\?etapa=identificacao/);
+  await expect(page.getByText("E-mail confirmado! Sua conta está ativa e seu carrinho foi mantido.").filter({ visible: true })).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "Resumo do pedido" })).toContainText("345 Relief Cream");
+  // what was typed at sign-up is already filled in; the e-mail is the account's
+  await expect(page.getByText("Conectada com e-mail e senha").filter({ visible: true })).toBeVisible();
+  await expect(page.getByLabel("E-mail", { exact: true })).toHaveValue(email);
+  await expect(page.getByLabel("E-mail", { exact: true })).toBeDisabled();
+  await expect(page.getByLabel("Primeiro nome")).toHaveValue("Helena");
+  await expect(page.getByLabel("Sobrenome")).toHaveValue("Prado");
   await expect(page.getByLabel("CPF", { exact: true })).toHaveValue("529.982.247-25");
-  await page.getByLabel("Telefone com DDD").fill("27998765432");
   await expect(page.getByLabel("Telefone com DDD")).toHaveValue("(27) 99876-5432");
   await page.getByLabel(/Quero receber novidades/).check();
   await fillAddress(page, /Correios PAC/);
@@ -716,12 +859,7 @@ test("Cadastro — obrigatório para comprar, lembrado no aparelho, visível em 
   await expect.poll(() => whatsappUrl, { timeout: 15_000 }).toContain("https://wa.me/");
   expect(decodeURIComponent(whatsappUrl.split("text=")[1])).toContain("Helena Prado");
 
-  // remembered on this device
-  await page.goto("/minha-conta");
-  await expect(page.getByText("Helena Prado")).toBeVisible();
-  await expect(page.getByText("Recebe novidades e ofertas")).toBeVisible();
-
-  // the lead is in the admin, with consent, linked to the order; also in the newsletter list
+  // the customer is in the admin, with the consent and the order; also in the newsletter list
   await admin.goto(`/admin/clientes?q=${encodeURIComponent(email)}`);
   const row = admin.locator("tr").filter({ hasText: email });
   await expect(row).toContainText("Helena Prado");
@@ -731,22 +869,337 @@ test("Cadastro — obrigatório para comprar, lembrado no aparelho, visível em 
   await admin.goto("/admin/newsletter");
   await expect(admin.getByText(email)).toBeVisible();
 
-  // "Minha conta" also registers without buying
+  // Teste 3: signing up again with this e-mail shows the same neutral screen — no e-mail is sent and nothing changes
   const other = await browser.newContext({ storageState: RETURNING_VISITOR });
   const visitor = await other.newPage();
-  await visitor.goto("/minha-conta");
-  await visitor.getByLabel("Nome completo").fill("Iara Mendes");
-  await visitor.getByLabel("WhatsApp com DDD").fill("(31) 98888-1234");
-  const iara = `iara${Date.now()}@exemplo.com.br`;
-  await visitor.getByLabel("E-mail", { exact: true }).fill(iara);
-  await visitor.getByRole("button", { name: "Fazer cadastro" }).click();
-  await expect(visitor.getByText("Iara Mendes")).toBeVisible();
-  await admin.goto(`/admin/clientes?q=${encodeURIComponent(iara)}`);
-  await expect(admin.locator("tr").filter({ hasText: iara })).toContainText("Não");
+  await visitor.goto("/criar-conta");
+  await signUp(visitor, { first: "Outra", last: "Pessoa", email, password: "Outra#Senha1" });
+  expect(await mailbox(request, email)).toHaveLength(2);
+  await visitor.goto("/entrar");
+  await signIn(visitor, email, "Outra#Senha1");
+  await expect(visitor.getByRole("alert").filter({ hasText: "E-mail ou senha incorretos." })).toBeVisible();
   await other.close();
   await ctx.close();
 });
 
+test("Cadastro repetido antes da confirmação — vale a senha do cadastro mais recente; Google no mesmo e-mail não herda senha nem dados de quem não confirmou", async ({ browser, request }) => {
+  // someone types another person's e-mail first and never confirms it
+  const email = newEmail("dona");
+  const intruder = await browser.newContext({ storageState: RETURNING_VISITOR });
+  const intruderPage = await intruder.newPage();
+  await intruderPage.goto("/criar-conta");
+  await signUp(intruderPage, { first: "Intrusa", email, password: "Intrusa#123", cpf: "529.982.247-25" });
+
+  // later the owner of the inbox signs up with her own password (after Supabase's wait between e-mails)
+  await request.post(`${AUTH}/test/skip-wait?email=${encodeURIComponent(email)}`);
+  const ctx = await browser.newContext({ storageState: RETURNING_VISITOR });
+  const page = await ctx.newPage();
+  await page.goto("/criar-conta");
+  await signUp(page, { first: "Dona", last: "Caixa", email });
+  const mails = await mailbox(request, email);
+  expect(mails).toHaveLength(2);
+  // even the e-mail from the first attempt activates the account with the owner's password and data
+  await page.goto(mails[0].link);
+  await expect(page).toHaveURL(/\/minha-conta\?login=confirmado/);
+  const account = page.getByRole("region", { name: "Sua conta" });
+  await expect(account).toContainText("Dona Caixa");
+  await expect(account).not.toContainText("Intrusa");
+  await expect(account).not.toContainText("247-25");
+  await account.getByRole("button", { name: "Sair da conta" }).click();
+  await expect(page.getByRole("heading", { name: "Já tem uma conta?" })).toBeVisible();
+  await signIn(page, email, "Intrusa#123");
+  await expect(page.getByRole("alert").filter({ hasText: "E-mail ou senha incorretos." })).toBeVisible();
+  await signIn(page, email);
+  await expect(page.getByRole("region", { name: "Sua conta" })).toContainText("Dona Caixa");
+
+  // Google with an address someone registered without confirming: the account continues with Google only
+  const gmail = newEmail("gabi");
+  await intruderPage.goto("/criar-conta");
+  await signUp(intruderPage, { first: "Intrusa", email: gmail, password: "Intrusa#123", cpf: "529.982.247-25" });
+  await intruder.close();
+  const owner = await browser.newContext({ storageState: RETURNING_VISITOR });
+  const ownerPage = await owner.newPage();
+  await ownerPage.goto("/minha-conta");
+  await socialLogin(ownerPage, "Google", gmail, "Gabi Google");
+  const gAccount = ownerPage.getByRole("region", { name: "Sua conta" });
+  await expect(gAccount).toContainText("Gabi Google");
+  await expect(gAccount).toContainText("Conectada com Google");
+  await expect(gAccount).not.toContainText("Intrusa");
+  await expect(gAccount).not.toContainText("247-25");
+  await owner.close();
+  await page.getByRole("button", { name: "Sair da conta" }).click();
+  await expect(page.getByRole("heading", { name: "Já tem uma conta?" })).toBeVisible();
+  await signIn(page, gmail, "Intrusa#123");
+  await expect(page.getByRole("alert").filter({ hasText: "E-mail ou senha incorretos." })).toBeVisible();
+  await ctx.close();
+});
+
+test("Login — pop-over do cabeçalho, sessão mantida ao recarregar, Minha conta (dados, endereço, senha) e saída que encerra a sessão no servidor", async ({ browser, request }) => {
+  const email = await createAccount(request, { first_name: "Lara", last_name: "Lima" });
+  const ctx = await browser.newContext({ storageState: RETURNING_VISITOR });
+  const page = await ctx.newPage();
+  await page.goto("/produtos");
+  await page.getByRole("button", { name: "Minha conta", exact: true }).click();
+  const menu = page.getByRole("dialog", { name: "Entrar na sua conta" });
+  await expect(menu.getByText("Já tem uma conta?")).toBeVisible();
+  await expect(menu.getByText("ou entre com")).toBeVisible();
+  await expect(menu.getByRole("button", { name: "Continuar com Google" })).toBeVisible();
+  await expect(menu.getByRole("button", { name: "Continuar com Apple" })).toBeVisible();
+  await expect(menu.getByRole("link", { name: "Criar conta" })).toHaveAttribute("href", "/criar-conta?next=%2Fprodutos");
+  await menu.getByRole("button", { name: "Entrar", exact: true }).click();
+  await expect(menu.getByText("Digite um e-mail válido, ex.: nome@exemplo.com.br.")).toBeVisible();
+  await expect(menu.getByText("Digite sua senha.")).toBeVisible();
+  // Teste 11: Supabase Auth refuses a wrong password
+  await signIn(menu, email, "Senha#Errada1");
+  await expect(menu.getByRole("alert").filter({ hasText: "E-mail ou senha incorretos." })).toBeVisible();
+  // Teste 10: the right one signs in; the page comes back with the account in the header
+  await signIn(menu, email);
+  await expect(page).toHaveURL(/\/produtos$/);
+  await expect(page.getByRole("button", { name: "Minha conta (Lara)" })).toBeVisible();
+  // Teste 16: the session survives a reload — in Supabase's cookie, checked by the server; nothing in localStorage
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Minha conta (Lara)" })).toBeVisible();
+  expect(await page.evaluate(() => Object.keys(localStorage).filter((k) => /auth|token|sess|supabase|^sb-/i.test(k)))).toEqual([]);
+  expect((await ctx.cookies()).some((c) => /^sb-.+-auth-token/.test(c.name))).toBe(true);
+
+  await page.getByRole("button", { name: "Minha conta (Lara)" }).click();
+  const shortcuts = page.getByRole("dialog", { name: "Minha conta" });
+  await expect(shortcuts).toContainText("Olá, Lara");
+  await expect(shortcuts).toContainText(email);
+  await shortcuts.getByRole("link", { name: "Minha conta" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Minha conta" })).toBeVisible();
+  const account = page.getByRole("region", { name: "Sua conta" });
+  await expect(account).toContainText(email);
+  await expect(account).toContainText("E-mail confirmado");
+  await expect(account).toContainText("Conectada com e-mail e senha");
+  await expect(account.getByRole("region", { name: "Meus pedidos" })).toContainText("Você ainda não fez pedidos com esta conta.");
+
+  // personal data, with the optional birth date and gender
+  await account.getByRole("button", { name: "Editar dados" }).click();
+  const data = account.getByRole("form", { name: "Dados pessoais" });
+  await expect(data.getByLabel("Nome", { exact: true })).toHaveValue("Lara");
+  await data.getByLabel("Telefone ou celular").fill("21977776666");
+  await expect(data.getByLabel("Telefone ou celular")).toHaveValue("(21) 97777-6666");
+  await data.getByLabel("CPF", { exact: true }).fill("111.111.111-11");
+  await data.getByRole("button", { name: "Salvar dados" }).click();
+  await expect(data.getByText("CPF inválido. Confira os números.")).toBeVisible();
+  await data.getByLabel("CPF", { exact: true }).fill("52998224725");
+  await data.getByLabel("Data de nascimento (opcional)").fill("1990-05-20");
+  await data.getByLabel("Gênero (opcional)").selectOption("prefiro_nao_informar");
+  await data.getByRole("button", { name: "Salvar dados" }).click();
+  await expect(account.getByText("Dados salvos.")).toBeVisible();
+  await page.reload();
+  for (const text of ["(21) 97777-6666", "***.***.247-25", "20/05/1990", "Prefiro não informar"]) await expect(account).toContainText(text);
+
+  // a saved address, validated like the checkout's
+  await account.getByRole("button", { name: "Adicionar endereço" }).click();
+  const address = account.getByRole("form", { name: "Novo endereço" });
+  await expect(address.getByLabel("Nome de quem vai receber")).toHaveValue("Lara Lima");
+  await address.getByRole("button", { name: "Salvar endereço" }).click();
+  await expect(address.getByText("Digite um CEP válido, com 8 números.")).toBeVisible();
+  await address.getByLabel("CEP", { exact: true }).fill("01001000");
+  await expect(address.getByLabel("CEP", { exact: true })).toHaveValue("01001-000");
+  await address.getByLabel("Rua", { exact: true }).fill("Praça da Sé");
+  await address.getByLabel("Número", { exact: true }).fill("50");
+  await address.getByLabel("Bairro").fill("Sé");
+  await address.getByLabel("Cidade").fill("São Paulo");
+  await address.getByLabel("Estado").selectOption("SP");
+  await address.getByLabel("Usar como endereço principal").check();
+  await address.getByRole("button", { name: "Salvar endereço" }).click();
+  const addresses = account.getByRole("region", { name: "Endereços salvos" });
+  await expect(addresses).toContainText("Praça da Sé, 50");
+  await expect(addresses).toContainText("Principal");
+
+  // the password changes only with the current one, and the change signs out the other devices
+  const second = await browser.newContext({ storageState: RETURNING_VISITOR });
+  const secondPage = await second.newPage();
+  await secondPage.goto("/entrar");
+  await signIn(secondPage, email);
+  await expect(secondPage.getByRole("region", { name: "Sua conta" })).toBeVisible();
+  const security = account.getByRole("region", { name: "Senha e segurança" });
+  await security.getByLabel("Senha atual").fill("Senha#Errada1");
+  await security.getByLabel("Nova senha", { exact: true }).fill("Nova#Senha22");
+  await security.getByLabel("Confirmar nova senha").fill("Nova#Senha22");
+  await security.getByRole("button", { name: "Alterar senha" }).click();
+  await expect(security.getByRole("alert").filter({ hasText: "Senha atual incorreta." }).first()).toBeVisible();
+  await security.getByLabel("Senha atual").fill(PASSWORD);
+  await security.getByRole("button", { name: "Alterar senha" }).click();
+  await expect(security.getByText("Senha alterada com sucesso.")).toBeVisible();
+  await secondPage.reload();
+  await expect(secondPage.getByRole("heading", { name: "Já tem uma conta?" })).toBeVisible();
+  await second.close();
+
+  // Teste 17: "Sair" ends the session in Supabase Auth — the cookies from before stop working
+  const cookiesBefore = await ctx.cookies();
+  await page.getByRole("button", { name: "Minha conta (Lara)" }).click();
+  await page.getByRole("dialog", { name: "Minha conta" }).getByRole("button", { name: "Sair" }).click();
+  await expect(page.getByRole("button", { name: "Minha conta", exact: true })).toBeVisible();
+  await page.goto("/minha-conta");
+  await expect(page.getByRole("heading", { name: "Já tem uma conta?" })).toBeVisible();
+  const copied = await browser.newContext({ storageState: { cookies: cookiesBefore, origins: RETURNING_VISITOR.origins } });
+  const copiedPage = await copied.newPage();
+  await copiedPage.goto("/minha-conta");
+  await expect(copiedPage.getByRole("heading", { name: "Já tem uma conta?" })).toBeVisible();
+  await copied.close();
+  // the old password no longer works; the new one does
+  await signIn(page, email);
+  await expect(page.getByRole("alert").filter({ hasText: "E-mail ou senha incorretos." })).toBeVisible();
+  await signIn(page, email, "Nova#Senha22");
+  await expect(page.getByRole("region", { name: "Sua conta" })).toContainText("Lara Lima");
+  await ctx.close();
+});
+
+test("Esqueci a senha — resposta neutra, link de recuperação, link expirado ou já usado, nova senha com requisitos e login com ela", async ({ browser, request }) => {
+  const email = await createAccount(request, { first_name: "Rui", last_name: "Recupera" });
+  const ctx = await browser.newContext({ storageState: RETURNING_VISITOR });
+  const page = await ctx.newPage();
+  await page.goto("/entrar");
+  await page.getByRole("link", { name: "Esqueceu sua senha?" }).click();
+  await expect(page.getByRole("heading", { name: "Esqueceu sua senha?" })).toBeVisible();
+  await expect(page.getByText("Informe seu e-mail e enviaremos as instruções para você recuperar o acesso à sua conta.").filter({ visible: true })).toBeVisible();
+
+  // Teste 14: the same answer for an address without an account (nothing is sent) and for a real one
+  // the page reached by a link keeps the previous one hidden in memory: fields are looked up inside their form
+  const recoverEmail = () => page.getByRole("form", { name: "Recuperar senha" }).getByLabel("E-mail", { exact: true });
+  const nobody = newEmail("ninguem");
+  await recoverEmail().fill(nobody);
+  await page.getByRole("button", { name: "Enviar link de recuperação" }).click();
+  await expect(page.getByText(`Se houver uma conta com ${nobody}, você vai receber um e-mail com um link para criar uma nova senha.`).filter({ visible: true })).toBeVisible();
+  expect(await mailbox(request, nobody)).toEqual([]);
+  await page.goto("/esqueci-senha");
+  await recoverEmail().fill(email);
+  await page.getByRole("button", { name: "Enviar link de recuperação" }).click();
+  await expect(page.getByText(`Se houver uma conta com ${email}, você vai receber um e-mail com um link para criar uma nova senha.`).filter({ visible: true })).toBeVisible();
+  let mails = await mailbox(request, email);
+  expect(mails.map((m) => m.type)).toEqual(["recovery"]);
+
+  // an expired link offers a new one
+  await request.post(`${AUTH}/test/expire-links?email=${encodeURIComponent(email)}`);
+  await page.goto(mails[0].link);
+  await expect(page).toHaveURL(/\/esqueci-senha\?link=invalido$/);
+  await expect(page.getByText("O link de recuperação expirou ou já foi usado. Peça um novo abaixo.").filter({ visible: true })).toBeVisible();
+  await recoverEmail().fill(email);
+  await page.getByRole("button", { name: "Enviar link de recuperação" }).click();
+  await expect(page.getByText(`Se houver uma conta com ${email}`).filter({ visible: true })).toBeVisible();
+  mails = await mailbox(request, email);
+  expect(mails).toHaveLength(2);
+
+  // Teste 15: the new link opens "Crie uma nova senha"; weak or different passwords are refused
+  await page.goto(mails[1].link);
+  await expect(page).toHaveURL(/\/redefinir-senha$/);
+  await expect(page.getByRole("heading", { name: "Crie uma nova senha" })).toBeVisible();
+  const form = page.getByRole("form", { name: "Nova senha" });
+  await form.getByLabel("Nova senha", { exact: true }).fill("fraca");
+  await form.getByLabel("Confirmar nova senha").fill("fraco");
+  await form.getByRole("button", { name: "Salvar nova senha" }).click();
+  await expect(form.getByText("A senha não cumpre todos os requisitos.")).toBeVisible();
+  await expect(form.getByText("As senhas não são iguais.")).toBeVisible();
+  await form.getByLabel("Nova senha", { exact: true }).fill("Outra#Senha33");
+  await form.getByLabel("Confirmar nova senha").fill("Outra#Senha33");
+  await form.getByRole("button", { name: "Salvar nova senha" }).click();
+  await expect(page.getByText("Senha alterada com sucesso. Você já está conectada à sua conta.").filter({ visible: true })).toBeVisible();
+  // the link works only once
+  await page.goto(mails[1].link);
+  await expect(page).toHaveURL(/\/esqueci-senha\?link=invalido$/);
+
+  // the old password no longer works; the new one does
+  const fresh = await browser.newContext({ storageState: RETURNING_VISITOR });
+  const login = await fresh.newPage();
+  await login.goto("/entrar");
+  await signIn(login, email);
+  await expect(login.getByRole("alert").filter({ hasText: "E-mail ou senha incorretos." })).toBeVisible();
+  await signIn(login, email, "Outra#Senha33");
+  await expect(login.getByRole("region", { name: "Sua conta" })).toContainText("Rui Recupera");
+  await fresh.close();
+  // without the link's session the page offers a new link
+  await ctx.clearCookies();
+  await page.goto("/redefinir-senha");
+  await expect(page.getByRole("alert").filter({ hasText: "Este link de redefinição expirou ou já foi usado. Peça um novo para criar sua senha." })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Pedir um novo link" })).toHaveAttribute("href", "/esqueci-senha");
+  await ctx.close();
+});
+
+test("Isolamento — sem conta o banco recusa o pedido; cada conta lê e altera só os próprios dados", async ({ request }) => {
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+  const rest = `${SUPABASE_URL}/rest/v1`;
+  // Teste 18, no servidor: without a signed-in account the database itself refuses to create an order
+  const refused = await request.post(`${rest}/rpc/create_order_intent`, {
+    headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+    data: { p_items: [], p_customer: { name: "Sem Conta", email: "sem-conta@exemplo.com.br", phone: "11911110000" } },
+  });
+  expect([401, 403]).toContain(refused.status());
+  expect(await refused.text()).toMatch(/permission denied/);
+
+  // two accounts signed in with Supabase Auth (local stand-in)
+  const session = async (email: string) => {
+    const r = await request.post(`${AUTH}/token?grant_type=password`, { headers: { apikey: anonKey }, data: { email, password: PASSWORD } });
+    expect(r.ok()).toBe(true);
+    const s = (await r.json()) as { access_token: string; user: { id: string } };
+    return { id: s.user.id, headers: { apikey: anonKey, Authorization: `Bearer ${s.access_token}` } };
+  };
+  const anaEmail = await createAccount(request, { first_name: "Ana", last_name: "Isolada" });
+  const ana = await session(anaEmail);
+  const beto = await session(await createAccount(request, { first_name: "Beto", last_name: "Isolado" }));
+  const saved = await request.post(`${rest}/customer_addresses`, {
+    headers: { ...ana.headers, Prefer: "return=representation" },
+    data: { recipient: "Ana Isolada", cep: "01001000", street: "Praça da Sé", number: "1", district: "Sé", city: "São Paulo", uf: "SP" },
+  });
+  expect(saved.status()).toBe(201);
+  const [address] = (await saved.json()) as { id: string; user_id: string }[];
+  expect(address.user_id).toBe(ana.id);
+
+  // Teste 21: Beto sees none of Ana's rows and cannot change, delete or claim them
+  const read = async (who: { headers: Record<string, string> }, query: string) => {
+    const r = await request.get(`${rest}/${query}`, { headers: who.headers });
+    return r.ok() ? r.json() : [];
+  };
+  expect(await read(beto, "customer_addresses?select=id")).toEqual([]);
+  const changed = await request.patch(`${rest}/customer_addresses?id=eq.${address.id}`, { headers: { ...beto.headers, Prefer: "return=representation" }, data: { street: "Rua Trocada" } });
+  expect(await changed.json()).toEqual([]);
+  const removed = await request.delete(`${rest}/customer_addresses?id=eq.${address.id}`, { headers: { ...beto.headers, Prefer: "return=representation" } });
+  expect(await removed.json()).toEqual([]);
+  const claimed = await request.post(`${rest}/customer_addresses`, { headers: beto.headers, data: { user_id: ana.id, recipient: "Beto", cep: "01001000", street: "Rua X", number: "2", district: "Sé", city: "São Paulo", uf: "SP" } });
+  expect(claimed.ok()).toBe(false);
+  expect(await read(ana, "customer_addresses?select=street")).toEqual([{ street: "Praça da Sé" }]);
+  // customer records and orders are never readable directly; the account functions answer with the caller's own data
+  expect(await read(beto, "customers?select=email,cpf")).toEqual([]);
+  expect(await read(beto, "order_intents?select=code")).toEqual([]);
+  const me = await request.post(`${rest}/rpc/get_my_account`, { headers: beto.headers, data: {} });
+  expect(await me.json()).toMatchObject({ first_name: "Beto", saved: false });
+  expect(JSON.stringify(await (await request.post(`${rest}/rpc/get_my_account`, { headers: ana.headers, data: {} })).json())).toContain(anaEmail);
+  expect(await (await request.post(`${rest}/rpc/get_my_orders`, { headers: beto.headers, data: {} })).json()).toEqual([]);
+});
+
+test("Contas no celular (390 px) — login em tela cheia pelo cabeçalho, cadastro em uma coluna, confirmação e recuperação sem rolagem horizontal", async ({ browser }) => {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, storageState: RETURNING_VISITOR });
+  const page = await ctx.newPage();
+  const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  await page.goto("/");
+  await page.getByRole("button", { name: "Minha conta", exact: true }).tap();
+  const menu = page.getByRole("dialog", { name: "Entrar na sua conta" });
+  await expect(menu).toBeVisible();
+  const box = (await menu.boundingBox())!;
+  expect(box.x).toBeLessThanOrEqual(0);
+  expect(box.width).toBeGreaterThanOrEqual(389);
+  expect(box.height).toBeGreaterThanOrEqual(800);
+  await expect(menu.getByRole("button", { name: "Entrar", exact: true })).toBeInViewport();
+  expect(await overflow(), "login no cabeçalho").toBeLessThanOrEqual(0);
+  await menu.getByRole("button", { name: "Fechar" }).tap();
+  await expect(menu).toHaveCount(0);
+
+  await page.goto("/criar-conta");
+  const form = page.getByRole("form", { name: "Criar conta" });
+  const firstBox = (await form.getByLabel("Nome", { exact: true }).boundingBox())!;
+  const lastBox = (await form.getByLabel("Sobrenome").boundingBox())!;
+  expect(lastBox.y).toBeGreaterThan(firstBox.y + firstBox.height - 1);
+  expect(await overflow(), "cadastro").toBeLessThanOrEqual(0);
+  for (const url of ["/entrar", "/confirmar-email?email=teste%40exemplo.com.br", "/esqueci-senha", "/redefinir-senha", "/minha-conta"]) {
+    await page.goto(url);
+    await expect(page.locator("main h1, main h2").filter({ visible: true }).first()).toBeVisible();
+    expect(await overflow(), url).toBeLessThanOrEqual(0);
+  }
+  await ctx.close();
+});
 
 // ---------------------------------------------------------------------------
 // Pagamento online — Mercado Pago Checkout Pro (simulador local, nunca o Mercado Pago real)
@@ -836,8 +1289,7 @@ test("Pagamento online — Pix com QR Code aprovado pelo webhook, clique duplo s
 
   // The cart was emptied and the order is in "Minha conta" with its page
   await page.goto("/minha-conta");
-  await expect(page.getByText(code)).toBeVisible();
-  await page.getByRole("link", { name: "Ver pedido e pagamento" }).first().click();
+  await page.getByRole("region", { name: "Meus pedidos" }).getByRole("link", { name: code, exact: true }).click();
   await expect(page.getByText("Pagamento aprovado").filter({ visible: true }).first()).toBeVisible();
 
   // Admin: payment card, confirmed order, address and CPF for the invoice
@@ -854,10 +1306,12 @@ test("Pagamento online — Pix com QR Code aprovado pelo webhook, clique duplo s
   // Second order: the card is refused, then another card is approved — on the same order
   await page.goto("/produtos/skin1004-madagascar-centella-ampoule");
   await page.getByRole("button", { name: "Comprar agora" }).click();
-  // the buyer's data is remembered on this device
-  await expect(page.getByLabel("E-mail", { exact: true })).toHaveValue(email);
-  await expect(page.getByLabel("CPF", { exact: true })).toHaveValue("529.982.247-25");
-  await fillAddress(page, /Correios SEDEX/);
+  // the account keeps the buyer's data: only a summary is shown
+  await expect(page.getByRole("region", { name: "Dados da conta" })).toContainText(email);
+  await expect(page.getByRole("region", { name: "Dados da conta" })).toContainText("CPF ***.***.247-25");
+  // the address of the first order was saved in the account and comes selected
+  await expect(page.getByRole("radio", { name: /Bruna Online.*Praça da Sé, 100/ })).toBeChecked();
+  await page.getByRole("radio", { name: /Correios SEDEX/ }).check();
   await toPayment(page);
   await page.getByRole("radio", { name: /^Cartão de crédito/ }).check();
   const brick = page.locator('[data-mp-brick="cardPayment"]');
@@ -890,7 +1344,8 @@ test("Pagamento online — Pix com QR Code aprovado pelo webhook, clique duplo s
   // Third order: boleto / Mercado Pago balance on Mercado Pago's page; refused, then paid from the order page
   await page.goto("/produtos/skin1004-madagascar-centella-ampoule");
   await page.getByRole("button", { name: "Comprar agora" }).click();
-  await fillAddress(page, /Correios SEDEX/);
+  await expect(page.getByRole("radio", { name: /Bruna Online.*Praça da Sé, 100/ })).toBeChecked();
+  await page.getByRole("radio", { name: /Correios SEDEX/ }).check();
   await toPayment(page);
   await page.getByRole("radio", { name: /^Boleto ou saldo no Mercado Pago/ }).check();
   await toReview(page);
@@ -899,6 +1354,17 @@ test("Pagamento online — Pix com QR Code aprovado pelo webhook, clique duplo s
   await expect(page.getByText(`Total: ${brl(total)}`)).toBeVisible();
   await page.getByRole("button", { name: "Recusar pagamento" }).click();
   await expect(page.getByText("Pagamento não aprovado").filter({ visible: true }).first()).toBeVisible();
+  // another account opening this order's link cannot pay it: the order belongs to Bruna's account
+  const thirdOrder = page.url().match(/pedido\/([0-9a-f-]{36})/)![1];
+  const stranger = await browser.newContext({ storageState: RETURNING_VISITOR });
+  const strangerPage = await stranger.newPage();
+  await strangerPage.goto("/entrar");
+  await signIn(strangerPage, await createAccount(request, { first_name: "Outra", last_name: "Conta" }));
+  await expect(strangerPage).toHaveURL(/\/minha-conta$/);
+  await strangerPage.goto(`/pedido/${thirdOrder}`);
+  await strangerPage.getByRole("button", { name: "Tentar pagar novamente" }).click();
+  await expect(strangerPage.getByRole("alert").filter({ hasText: "Entre com a conta que fez este pedido para pagar." })).toBeVisible();
+  await stranger.close();
   await page.getByRole("button", { name: "Tentar pagar novamente" }).click();
   await expect(page.getByRole("heading", { name: "Mercado Pago — simulador local" })).toBeVisible();
   await page.getByRole("button", { name: "Aprovar pagamento com cartão" }).click();
@@ -1102,10 +1568,10 @@ test("Checkout — sacola vazia, dados mantidos ao atualizar a página e ao volt
   await page.getByRole("button", { name: "Adicionar ao carrinho" }).click();
   await page.getByRole("button", { name: "Fechar" }).click();
   await page.goto("/finalizar?etapa=identificacao");
+  const email = await fillIdentity(page, "Lia Refresh");
   // an unknown CEP is reported next to the field
   await page.getByLabel("CEP", { exact: true }).fill("99999-999");
   await expect(page.getByText("Não encontramos este CEP. Confira os números e tente de novo.")).toBeVisible();
-  const email = await fillIdentity(page, "Lia Refresh");
   await fillAddress(page, /Correios PAC/);
 
   // a refresh in the middle of the checkout keeps everything
@@ -1118,10 +1584,10 @@ test("Checkout — sacola vazia, dados mantidos ao atualizar a página e ao volt
   await expect(page).toHaveURL(/etapa=pagamento/);
   await page.reload();
   await expect(page.getByRole("heading", { name: "Pagamento", exact: true })).toBeVisible();
-  // the browser's back button returns to step 2 with the data
+  // the browser's back button returns to step 2 with the data (saved in the account by now)
   await page.goBack();
   await expect(page.getByRole("heading", { name: "Seus dados" })).toBeVisible();
-  await expect(page.getByLabel("Sobrenome")).toHaveValue("Refresh");
+  await expect(page.getByRole("region", { name: "Dados da conta" })).toContainText("Lia Refresh");
 
   // A product that becomes unavailable blocks the checkout, with a link back to the bag
   await editProductBySlug(admin, "celimax-pore-dark-spot-brightening-cream");
@@ -1152,7 +1618,8 @@ test("Login com Google — cliente nova volta à finalização com a sacola, com
   await page.getByRole("button", { name: "Fechar" }).click();
   await page.goto("/carrinho");
   await page.getByRole("link", { name: "Continuar para identificação" }).click();
-  await expect(page.getByText("ou continue com seus dados")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Entre para finalizar sua compra" })).toBeVisible();
+  await expect(page.getByText("ou entre com").filter({ visible: true })).toBeVisible();
   await socialLogin(page, "Google", googleEmail, "Ana Google");
   await expect(page).toHaveURL(/\/finalizar\?etapa=identificacao/);
   await expect(page.getByRole("complementary", { name: "Resumo do pedido" })).toContainText("345 Relief Cream");
@@ -1184,7 +1651,7 @@ test("Login com Google — cliente nova volta à finalização com a sacola, com
   await expect(account).toContainText(googleEmail);
   await expect(account).toContainText("Conectada com Google");
   await expect(account).toContainText("Praça da Sé, 100");
-  await expect(account.getByRole("link", { name: code })).toBeVisible();
+  await expect(account.getByRole("link", { name: code, exact: true })).toBeVisible();
 
   // Another device: the same Google account brings the saved data and address
   const other = await browser.newContext({ storageState: RETURNING_VISITOR });
@@ -1207,7 +1674,9 @@ test("Login com Google — cliente nova volta à finalização com a sacola, com
   await phone.getByRole("button", { name: "Alterar seus dados" }).click();
   await phone.getByRole("button", { name: "Sair da conta" }).click();
   await expect(phone.getByText("Você saiu da sua conta neste aparelho.")).toBeVisible();
-  await expect(phone.getByLabel("E-mail", { exact: true })).toHaveValue("");
+  await expect(phone.getByRole("heading", { name: "Entre para finalizar sua compra" })).toBeVisible();
+  await expect(phone.getByText("Ana Google")).toHaveCount(0);
+  await expect(phone.getByRole("button", { name: "Minha conta", exact: true })).toBeVisible();
   await expect(phone.getByRole("button", { name: "Continuar com Google" })).toBeVisible();
   await other.close();
   await ctx.close();
@@ -1225,7 +1694,7 @@ test("Login com Apple — cancelar volta sem perder a sacola; sem nome e com e-m
   await page.getByRole("button", { name: "Continuar com Apple" }).click();
   await expect(page.getByRole("heading", { name: "Login com Apple — simulador local" })).toBeVisible();
   await page.getByRole("button", { name: "Cancelar" }).click();
-  await expect(page.getByText("O login foi cancelado. Você pode tentar de novo ou continuar com seus dados.")).toBeVisible();
+  await expect(page.getByText("O login foi cancelado. Você pode tentar de novo ou entrar com seu e-mail.")).toBeVisible();
   await expect(page.getByRole("complementary", { name: "Resumo do pedido" })).toContainText("Madagascar Centella Ampoule");
 
   // Apple shares no name here and hides the real e-mail behind its relay address
@@ -1252,10 +1721,15 @@ test("Login com Apple — cancelar volta sem perder a sacola; sem nome e com e-m
   await ctx.close();
 });
 
-test("Sessão expirada — a finalização avisa, mantém os dados digitados e segue como visitante", async ({ browser }) => {
+test("Sessão expirada — a finalização pede para entrar de novo e mantém a sacola e os dados; sem sessão o servidor também recusa o pedido", async ({ browser }) => {
   const email = `sessao${Date.now()}@exemplo.com.br`;
   const ctx = await browser.newContext({ storageState: RETURNING_VISITOR });
   const page = await ctx.newPage();
+  let whatsappUrl = "";
+  await ctx.route("https://wa.me/**", async (route) => {
+    whatsappUrl = route.request().url();
+    await route.fulfill({ status: 200, body: "whatsapp" });
+  });
   await page.goto("/produtos/skin1004-madagascar-centella-ampoule");
   await page.getByRole("button", { name: "Adicionar ao carrinho" }).click();
   await page.getByRole("button", { name: "Fechar" }).click();
@@ -1268,14 +1742,23 @@ test("Sessão expirada — a finalização avisa, mantém os dados digitados e s
   // the session ends (cookies gone) before the data is saved
   await ctx.clearCookies();
   await page.getByRole("button", { name: "Continuar para o pagamento" }).click();
-  await expect(page.getByText("Sua sessão expirou. Entre de novo ou continue como visitante: seus dados foram mantidos.")).toBeVisible();
-  await expect(page.getByLabel("E-mail", { exact: true })).toBeEnabled();
-  await expect(page.getByLabel("E-mail", { exact: true })).toHaveValue(email);
-  await expect(page.getByLabel("Primeiro nome")).toHaveValue("Rita");
+  await expect(page.getByText("Sua sessão expirou. Entre de novo para continuar: seus dados foram mantidos.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Entre para finalizar sua compra" })).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "Resumo do pedido" })).toContainText("Madagascar Centella Ampoule");
+  // signing in again brings back what was typed
+  await socialLogin(page, "Google", email, "Rita Sessão");
   await expect(page.getByLabel("CPF", { exact: true })).toHaveValue("529.982.247-25");
   await expect(page.getByLabel("Número", { exact: true })).toHaveValue("100");
-  await expect(page.getByRole("button", { name: "Continuar com Google" })).toBeVisible();
+  await expect(page.getByRole("radio", { name: /Correios PAC/ })).toBeChecked();
   await toPayment(page);
+  await toReview(page);
+
+  // the order itself is refused by the server without a session (not only by the screen): back to the sign-in
+  await ctx.clearCookies();
+  await page.getByRole("button", { name: "Confirmar e enviar pelo WhatsApp" }).click();
+  await expect(page.getByText("Entre na sua conta para finalizar a compra. Seu carrinho continua salvo.")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Entre para finalizar sua compra" })).toBeVisible();
+  expect(whatsappUrl).toBe("");
   await ctx.close();
 });
 
@@ -1301,10 +1784,15 @@ test("Checkout no celular (390 px) — resumo recolhível e nenhuma etapa com ro
   await expect(toggle).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByRole("complementary", { name: "Resumo do pedido" }).getByText("Madagascar Centella Ampoule")).toBeVisible();
 
-  await page.getByRole("button", { name: "Continuar para o pagamento" }).click();
-  await expect(page.getByText("Informe seu primeiro nome.")).toBeVisible();
-  expect(await overflow(), "identificação com erros").toBeLessThanOrEqual(0);
+  // buying needs an account: the sign-in fits the phone too
+  await expect(page.getByRole("heading", { name: "Entre para finalizar sua compra" })).toBeVisible();
+  expect(await overflow(), "entrar para comprar").toBeLessThanOrEqual(0);
   await fillIdentity(page, "Mila Celular");
+  await page.getByLabel("Telefone com DDD").fill("");
+  await page.getByRole("button", { name: "Continuar para o pagamento" }).click();
+  await expect(page.getByText("Digite um telefone com DDD, ex.: (11) 91234-5678.")).toBeVisible();
+  expect(await overflow(), "identificação com erros").toBeLessThanOrEqual(0);
+  await page.getByLabel("Telefone com DDD").fill("(11) 97654-3210");
   await fillAddress(page, /Correios SEDEX/);
   expect(await overflow(), "entrega").toBeLessThanOrEqual(0);
   await toPayment(page);

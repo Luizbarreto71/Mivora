@@ -71,7 +71,7 @@ Reprodução do mockup enviado pela dona da loja, sem trocar a stack nem apagar 
 - **Fotos:** a home usa as fotos de campanha enviadas e fotos reais dos produtos. Três fotos de produto com fundo cinza de estúdio ganharam fundo branco (originais em `assets/originals/products/`).
 
 ### Cadastro obrigatório e captação de leads (13/10/2026)
-- **Para comprar, a cliente se cadastra:** nome completo, WhatsApp com DDD e e-mail, sem senha. O cadastro é feito na primeira etapa de `/finalizar` (ou em Minha conta, sem precisar comprar) e fica lembrado no aparelho para as próximas compras, com “Alterar dados” e “Sair deste aparelho”.
+- **Substituído em 16/10/2026:** o cadastro sem senha deu lugar à conta com e-mail e senha (veja “Contas obrigatórias”, abaixo). O que segue sobre a tabela `customers`, o consentimento e o painel continua valendo.
 - O botão “Comprar pelo WhatsApp” da página de produto agora passa pelo carrinho e pelo cadastro. As consultas (preço, disponibilidade, previsão) continuam indo direto para o WhatsApp.
 - **No banco:** tabela `customers` (só o admin lê), gravada pelas funções `register_customer` e `create_order_intent`, que **exige** o cadastro e liga o pedido a ele (`order_intents.customer_id`). O cadastro é atualizado pelo e-mail; o destino da entrega completa cidade/UF/CEP; há contagem de pedidos e limite de cadastros por minuto.
 - **Marketing só com consentimento:** a caixa “Quero receber novidades…” é opcional e vem desmarcada. Quem marca entra também na lista da newsletter (origem “cadastro”). Desmarcar depois revoga o consentimento.
@@ -96,12 +96,12 @@ Reprodução do mockup enviado pela dona da loja, sem trocar a stack nem apagar 
 
 ### Finalização em 4 etapas e login com Google e Apple (15/10/2026)
 - **Etapas:** 1 Sacola (`/carrinho`) → 2 Identificação e entrega → 3 Pagamento → 4 Revisão, em `/finalizar?etapa=…`, com indicador de progresso. O voltar do navegador funciona e uma etapa aberta por link só aparece com as anteriores completas.
-- **Seus dados:** e-mail, primeiro nome, sobrenome, CPF (dígitos conferidos) e telefone, com máscaras e mensagens ao lado de cada campo. Compra como visitante continua possível.
+- **Seus dados:** e-mail, primeiro nome, sobrenome, CPF (dígitos conferidos) e telefone, com máscaras e mensagens ao lado de cada campo. Desde 16/10/2026 é preciso entrar na conta para comprar (veja “Contas obrigatórias”).
 - **Entrega:** o CEP preenche rua, bairro, cidade e estado; a cliente informa número, complemento, referência e quem recebe. As opções e os valores vêm da cotação real (zonas do painel e Melhor Envio). Sem opção com valor definido, só “Combinar pelo WhatsApp” fica disponível.
 - **Rascunho:** os dados ficam na aba do navegador (`sessionStorage`) e sobrevivem a recarregar a página e à ida ao Google/Apple. Dados de cartão nunca são guardados: depois de recarregar, o cartão é digitado de novo.
 - **Sem pedido duplicado:** cada tentativa leva um identificador. Clique duplo, nova tentativa após erro de rede ou cartão recusado reaproveitam o mesmo pedido (índice único no banco e chaves de idempotência no Mercado Pago).
 - **Login com Google e Apple:** pelo Supabase Auth (OAuth com PKCE, `/auth/callback`). Os botões só aparecem para provedores ativados no Supabase. A conta traz nome e e-mail; a finalização pede só o que falta e salva os dados na conta. A Apple manda o nome apenas na primeira autorização e pode usar um e-mail privado de encaminhamento: os dois casos são tratados. Dados já salvos só aparecem para a conta que os salvou, com e-mail verificado, e nunca são associados só porque alguém digitou o mesmo e-mail.
-- **Conta:** endereços salvos (até 10, um principal) e pedidos feitos com a conta aparecem em Minha conta e na finalização. Se a sessão expirar no meio da compra, a cliente é avisada e continua como visitante sem perder o que digitou.
+- **Conta:** endereços salvos (até 10, um principal) e pedidos feitos com a conta aparecem em Minha conta e na finalização. Se a sessão expirar no meio da compra, a cliente é avisada, entra de novo e continua sem perder o que digitou.
 - **Painel:** o pedido mostra o endereço completo, o CPF e se foi feito com conta; o CSV ganhou essas colunas.
 
 ### Análise de Pele com IA (16/10/2026)
@@ -112,6 +112,16 @@ Reprodução do mockup enviado pela dona da loja, sem trocar a stack nem apagar 
 - **Recomendações:** só produtos reais, publicados, disponíveis e com preço. As necessidades vêm das categorias de necessidade de cada produto e a etapa da rotina vem do tipo de produto; benefícios, modo de uso e avisos vêm do cadastro. Retinoides e esfoliantes (tags `retinoide`/`esfoliante`) ficam à noite e nunca juntos. Em cada produto do painel, o quadro “Análise de pele” permite tirar o produto das sugestões, trocar etapa ou horário, cadastrar precauções e escolher uma alternativa para quando estiver indisponível. A cliente pode ajustar as necessidades no resultado (sem nova foto) e adicionar um produto ou a rotina inteira ao carrinho, depois de ver a lista e o total.
 - **Painel:** Configurações → “Análise de Pele com IA” (ligar/desligar, intervalo do pop-up, limite de análises por dia, situação da chave e uso do dia). Conteúdo → “Análise de pele — pop-up de lançamento” e “— seção da home” (textos, destaques, botões, links, imagem, cor e datas).
 - **Custo:** cada análise é cobrada pela Anthropic (estimativa de US$ 0,05 a 0,10 com o Claude Opus 5.5). O limite diário protege contra uso excessivo; há também limite por IP.
+
+### Contas obrigatórias: login, cadastro e confirmação de e-mail (16/10/2026)
+- **Comprar exige conta.** Não há compra como visitante: a finalização mostra “Entre para finalizar sua compra” (e-mail e senha, Google ou Apple) e a sacola continua salva. O bloqueio também está no servidor (as ações de pedido e de pagamento conferem a sessão no Supabase Auth; um pedido feito com conta só é pago por essa conta) e no banco (`create_order_intent` só aceita conta com e-mail confirmado, usa sempre o e-mail da conta e não pode ser chamada por visitantes).
+- **Entrar:** o ícone de conta do cabeçalho abre “Já tem uma conta?” (tela cheia no celular) com e-mail, senha com mostrar/ocultar, “Esqueceu sua senha?”, “Criar conta” e os botões do Google e da Apple; a mesma tela existe em `/entrar`. Senha errada mostra “E-mail ou senha incorretos.”; uma conta sem e-mail confirmado vai para a tela de confirmação.
+- **Criar conta (`/criar-conta`):** nome, sobrenome, e-mail, senha e confirmação, com os requisitos mostrados enquanto a cliente digita (8 caracteres, letra maiúscula, letra minúscula, número e caractere especial). CPF (dígitos conferidos), telefone, data de nascimento e gênero são opcionais. Um e-mail que já tem conta recebe a mesma resposta, sem revelar o cadastro.
+- **Confirmação obrigatória (`/confirmar-email`):** “Confirme seu e-mail”, com reenviar (respeitando o intervalo do Supabase), alterar e-mail e voltar para o login. O link é validado pelo Supabase Auth em `/auth/confirm`; vencido ou já usado, a página oferece um novo. Depois de confirmar, a cliente volta para onde estava (a finalização, com a sacola) já conectada.
+- **Esqueci a senha (`/esqueci-senha` → `/redefinir-senha`):** resposta neutra, link do Supabase e nova senha com os mesmos requisitos. Trocar a senha (aqui ou em Minha conta, que pede a senha atual) encerra as sessões dos outros aparelhos.
+- **Minha conta:** dados pessoais (data de nascimento e gênero opcionais), e-mail e situação da confirmação, troca de senha, endereços (incluir e excluir), pedidos com link para a página de cada um, relatórios da análise de pele e sair. Cada conta lê e altera só os próprios dados (RLS e funções do banco). Pedidos feitos antes, como visitante, continuam listados no aparelho em que foram feitos.
+- **Sessão:** cookies do Supabase Auth, renovados pelo `proxy.ts` e conferidos no servidor a cada ação; nada no `localStorage` vale como prova de login. “Sair” encerra a sessão no Supabase.
+- **Cadastro repetido antes da confirmação:** o Supabase guarda a senha do primeiro cadastro de um e-mail ainda não confirmado. Para que quem digitou o e-mail de outra pessoa não fique com a senha dessa conta, o servidor faz o cadastro mais recente definir a senha e os dados (chave de serviço + função `pending_email_signup`). Google ou Apple com o e-mail de um cadastro não confirmado seguem só com o provedor: o Supabase descarta a senha e os dados digitados nesse cadastro.
 
 ## 2. Estrutura
 
@@ -163,6 +173,7 @@ tests/                    unit (Vitest), db (PGlite: RLS/RPC/estoque), e2e (Play
 - **RLS em todas as tabelas.** Visitantes só leem dados publicados. Custo de aquisição, SKU, código de barras e notas internas ficam em `product_private`, que só o admin lê.
 - Pedidos, estoque e auditoria **não aceitam escrita direta**: tudo passa por funções `SECURITY DEFINER` que validam permissões e dados (preços sempre do banco, quantidades de 1 a 99, estoque, limite de pedidos por minuto).
 - Toda Server Action e rota do admin confere de novo a sessão e o papel em `admin_users`. Esconder botões nunca é a única barreira.
+- **Contas de clientes:** senhas só no Supabase Auth (nunca no banco da loja nem em logs); limite de tentativas por IP no login, cadastro, reenvio e recuperação, além dos limites do próprio Supabase; respostas neutras para não revelar quem tem conta; links de confirmação e recuperação validados pelo Supabase; trocar a senha encerra as outras sessões.
 - **Pagamentos:** a chave de serviço do Supabase é usada só no servidor, para gravar resultados de pagamento já confirmados na API do Mercado Pago. Visitantes leem um recibo do pedido (`get_order_receipt`, pelo ID aleatório do pedido) sem telefone, e-mail, CEP ou observações.
 - Uploads: confere o tipo real pelos primeiros bytes do arquivo, limita o tamanho, recodifica com `sharp` (o que remove metadados e conteúdo embutido) e o bucket só aceita escrita de admins.
 - Auditoria automática por gatilhos (quem, o quê, quais campos) em `/admin/auditoria`.
@@ -188,7 +199,7 @@ npm run test:e2e                                                                
 npm run test:e2e:fresh
 ```
 
-O script gera o `.env.local` e cria o admin `admin@mivora.local` / `mivora-local-123`. Ele emula apenas o login por senha e o Storage: **não use em produção**. Para os testes de frete, ele também simula o ViaCEP e o Melhor Envio (CEPs `29055-100`, `29100-010` e `01001-000`), e o `test:e2e:fresh` se recusa a rodar se as cotações apontarem para o serviço real.
+O script gera o `.env.local` e cria o admin `admin@mivora.local` / `mivora-local-123`. Ele emula o Supabase Auth (login por senha, cadastro com e-mail de confirmação guardado numa caixa de testes, recuperação de senha e um simulador do Google e da Apple) e o Storage: **não use em produção**. Para os testes de frete, ele também simula o ViaCEP e o Melhor Envio (CEPs `29055-100`, `29100-010` e `01001-000`), e o `test:e2e:fresh` se recusa a rodar se as cotações apontarem para o serviço real.
 
 ## 6. Pendências antes do lançamento
 
@@ -213,6 +224,12 @@ O checklist também aparece no painel (`/admin`, card “Preparação para o lan
 8. **Páginas institucionais:** revisar privacidade, termos, envio e trocas com a assessoria e desmarcar “pendente de revisão”.
 9. **Entrega e frete:** informar o CEP de origem e criar as opções reais (faixas de CEP ou cidades, taxa, prazo) em Configurações. Para cotar Correios e transportadoras, gerar o token no Melhor Envio e cadastrar `MELHOR_ENVIO_TOKEN` na Vercel/Hostinger. Revisar as políticas de envio e de privacidade, que ganharam um parágrafo sobre a calculadora.
 10. **Domínio** e `NEXT_PUBLIC_SITE_URL`.
+10. **E-mails das contas (sem isso, o cadastro não se completa):** no Supabase → Authentication:
+    - **SMTP próprio** (Settings → SMTP), por exemplo Resend, Brevo ou o e-mail da Hostinger. O envio padrão do Supabase só entrega para os e-mails da equipe do projeto e tem limite muito baixo por hora.
+    - **URL Configuration:** Site URL `https://mivoracosmeticos.com.br` e, em Redirect URLs, `https://mivoracosmeticos.com.br/**` e `https://www.mivoracosmeticos.com.br/**`.
+    - **Email Templates:** em “Confirm signup”, use o link `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email&redirect_to={{ .RedirectTo }}`; em “Reset Password”, o mesmo com `type=recovery`. Assim o link funciona mesmo aberto em outro aparelho. Com o modelo padrão, a conta é confirmada, mas quem abre o link em outro aparelho precisa entrar com a senha.
+    - **Providers → Email:** manter “Confirm email” ligado e, nos requisitos de senha, mínimo de 8 caracteres com minúsculas, maiúsculas, números e símbolos (a mesma regra da loja, conferida também pelo Supabase).
+    - **`SUPABASE_SERVICE_ROLE_KEY`** nas variáveis do servidor (Vercel e Hostinger), usada também pelos pagamentos. Sem ela, a proteção do cadastro repetido não é aplicada.
 10. **Análise de Pele com IA:** criar uma chave em console.anthropic.com (API Keys, com créditos ou forma de pagamento na conta), cadastrar `ANTHROPIC_API_KEY` nas variáveis do servidor (Vercel e Hostinger) e fazer um novo deploy. Opcional: enviar fotos editoriais licenciadas para o pop-up e para a seção em Conteúdo (sem elas, aparece a foto do produto em destaque) e revisar o quadro “Análise de pele” dos produtos.
 10. **Login com Google e Apple:** no Supabase → Authentication → Providers, ative Google (ID e chave secreta do cliente OAuth criado no Google Cloud, com o redirecionamento `https://iknqowwmxtaqmwqjzhsr.supabase.co/auth/v1/callback`) e Apple (Services ID, Team ID, Key ID e a chave .p8; a chave secreta gerada vence a cada 6 meses). Em Authentication → URL Configuration, cadastre `https://mivoracosmeticos.com.br/auth/callback` (e a versão com `www`) nas Redirect URLs. Sem isso, os botões não aparecem.
 10. **Cartão e Pix no site:** a Public Key de produção do Mercado Pago em Configurações (sem ela, o cartão não aparece) e uma chave Pix cadastrada na conta do Mercado Pago (sem ela, o Mercado Pago recusa o Pix).

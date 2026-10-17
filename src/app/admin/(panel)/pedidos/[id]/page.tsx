@@ -142,7 +142,7 @@ export default async function OrderDetailPage({ params }: PageProps<"/admin/pedi
                   <span className="tabular-nums">{formatCpf(order.customer_cpf)}</span>
                 </p>
               ) : null}
-              {order.user_id ? <p className="text-xs text-muted">Pedido feito com conta (login Google/Apple).</p> : null}
+              {order.user_id ? <p className="text-xs text-muted">Pedido feito com conta.</p> : null}
             </div>
           </Card>
 

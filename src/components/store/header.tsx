@@ -9,6 +9,7 @@ import { WhatsAppIcon } from "@/components/brand/social-icons";
 import { Sheet } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 import { buildWhatsAppUrl } from "@/lib/whatsapp";
+import { AccountMenu } from "./auth/account-menu";
 import { useCart } from "./cart-context";
 import { HeaderSearch } from "./header-search";
 import { SearchDialog } from "./search-dialog";
@@ -72,9 +73,15 @@ export function Header({ nav, registered }: { nav: NavData; registered: boolean 
           <HeaderSearch className="hidden w-full lg:block" />
 
           <div className="-mr-2.5 flex items-center justify-end">
-            <Link href="/minha-conta" className={ICON_BUTTON} aria-label="Minha conta">
-              <User className="h-5 w-5" strokeWidth={1.5} />
-            </Link>
+            <Suspense
+              fallback={
+                <Link href="/minha-conta" className={ICON_BUTTON} aria-label="Minha conta">
+                  <User className="h-5 w-5" strokeWidth={1.5} />
+                </Link>
+              }
+            >
+              <AccountMenu buttonClassName={ICON_BUTTON} />
+            </Suspense>
             <Link href="/favoritos" className={cn(ICON_BUTTON, "hidden sm:flex")} aria-label={`Favoritos${favoriteCount ? ` (${favoriteCount})` : ""}`}>
               <Heart className="h-5 w-5" strokeWidth={1.5} />
               {favoriteCount > 0 ? <span className="absolute right-2.5 top-2.5 h-1.5 w-1.5 rounded-full bg-ink" /> : null}

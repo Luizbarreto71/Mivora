@@ -10,8 +10,8 @@ export const WELCOME_SESSION_KEY = "mivora.welcome.session";
 
 export type PopupMemory = { dismissedAt?: number; startedAt?: number };
 
-/** Pages where the pop-up never opens: buying, paying, the analysis itself and sign-in returns */
-const QUIET_PATHS = ["/carrinho", "/finalizar", "/pedido/", "/analise-de-pele", "/auth/", "/minha-conta"];
+/** Pages where the pop-up never opens: buying, paying, the analysis itself, signing in or up and sign-in returns */
+const QUIET_PATHS = ["/carrinho", "/finalizar", "/pedido/", "/analise-de-pele", "/auth/", "/minha-conta", "/entrar", "/criar-conta", "/confirmar-email", "/esqueci-senha", "/redefinir-senha"];
 
 export function quietPath(pathname: string) {
   return QUIET_PATHS.some((p) => (p.endsWith("/") ? pathname.startsWith(p) : pathname === p || pathname.startsWith(`${p}/`)));

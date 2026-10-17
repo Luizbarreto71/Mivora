@@ -12,7 +12,7 @@ export default function AccountPage() {
     <div className="container-page py-10 sm:py-14">
       <Breadcrumbs items={[{ label: "Minha conta" }]} className="mb-8" />
       <h1 className="heading-display text-[2rem] sm:text-[2.5rem]">Minha conta</h1>
-      <p className="mb-10 mt-2 max-w-2xl text-[0.9375rem] leading-relaxed text-muted">Seus pedidos e favoritos salvos neste aparelho.</p>
+      <p className="mb-10 mt-2 max-w-2xl text-[0.9375rem] leading-relaxed text-muted">Seus dados, endereços, pedidos e a segurança da sua conta.</p>
       <AccountOverview />
     </div>
   );

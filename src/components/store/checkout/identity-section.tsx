@@ -1,7 +1,6 @@
 "use client";
 
 import { LogOut, Pencil, UserRound } from "lucide-react";
-import { SocialSignIn } from "@/components/store/auth/social-sign-in";
 import { Checkbox, Field, Input } from "@/components/ui/form";
 import type { Account } from "@/lib/store/account-actions";
 import { formatCpf, formatPhoneInput, normalizeCpf, type CheckoutIdentity, type IdentityField } from "@/lib/store/checkout-data";
@@ -24,13 +23,11 @@ type Props = {
   onEdit: () => void;
   onSignOut: () => void;
   signingOut: boolean;
-  providers: { google: boolean; apple: boolean };
-  nextUrl: string;
-  beforeRedirect: () => void;
   notice: { tone: "info" | "error"; text: string } | null;
 };
 
-export function IdentitySection({ account, identity, onChange, errors, editing, complete, onEdit, onSignOut, signingOut, providers, nextUrl, beforeRedirect, notice }: Props) {
+/** "Seus dados" of the signed-in account (buying needs an account): only what is missing is asked. */
+export function IdentitySection({ account, identity, onChange, errors, editing, complete, onEdit, onSignOut, signingOut, notice }: Props) {
   const signedIn = Boolean(account);
   return (
     <section aria-labelledby="seus-dados" className="space-y-5">
@@ -75,20 +72,7 @@ export function IdentitySection({ account, identity, onChange, errors, editing, 
         </div>
       ) : null}
 
-      {account === null ? (
-        <>
-          <SocialSignIn providers={providers} next={nextUrl} beforeRedirect={beforeRedirect} />
-          {providers.google || providers.apple ? (
-            <div className="flex items-center gap-3 text-xs text-muted" role="separator">
-              <span className="h-px flex-1 bg-line" />
-              ou continue com seus dados
-              <span className="h-px flex-1 bg-line" />
-            </div>
-          ) : null}
-        </>
-      ) : null}
-
-      {account === null || (account && (editing || !complete)) ? (
+      {account && (editing || !complete) ? (
         <div className="grid gap-4 sm:grid-cols-2">
           {account && !complete ? <p className="text-sm text-ink-soft sm:col-span-2">Complete os dados que faltam para finalizar a compra. Eles ficam salvos na sua conta.</p> : null}
           <Field label="E-mail" htmlFor="co-email" error={errors.email} className="sm:col-span-2" hint={signedIn ? "E-mail da sua conta" : undefined}>

@@ -139,30 +139,81 @@ const readBody = (req) =>
     req.on("end", () => resolve(Buffer.concat(chunks)));
   });
 const bearer = (req) => (req.headers.authorization ?? "").replace(/^Bearer\s+/i, "") || req.headers.apikey;
-// Local users (the admin plus customers who "sign in with Google / Apple" through the OAuth stand-in below)
-const localUsers = new Map([[adminId, { id: adminId, email: cfg.adminEmail, provider: "email", meta: {} }]]);
-const refreshTokens = new Map();
-const userObject = (id = adminId) => {
-  const u = localUsers.get(id) ?? localUsers.get(adminId);
+// Local users: the admin, customers with e-mail and password, and customers who "sign in with Google / Apple"
+// through the OAuth stand-in below. Passwords are kept hashed in memory (local test stack only).
+const passwordHash = (p) => createHash("sha256").update(`local-auth:${p}`).digest("hex");
+const localUsers = new Map([[adminId, { id: adminId, email: cfg.adminEmail, provider: "email", meta: {}, password: passwordHash(cfg.adminPassword), confirmedAt: new Date(0).toISOString() }]]);
+const refreshTokens = new Map(); // refresh token → { userId, sessionId }
+const sessionOwner = new Map(); // session id → user id
+const userObject = (id) => {
+  const u = localUsers.get(id);
+  if (!u) return null;
   return {
     id: u.id,
     aud: "authenticated",
     role: "authenticated",
     email: u.email,
-    email_confirmed_at: new Date(0).toISOString(),
+    email_confirmed_at: u.confirmedAt ?? null,
+    confirmed_at: u.confirmedAt ?? null,
     app_metadata: { provider: u.provider, providers: [u.provider] },
     user_metadata: u.meta,
-    identities: [],
+    identities: [{ id: u.id, user_id: u.id, provider: u.provider, identity_data: { email: u.email, sub: u.id } }],
     created_at: new Date(0).toISOString(),
   };
 };
 function session(id = adminId) {
   const now = Math.floor(Date.now() / 1000);
   const user = userObject(id);
-  const access_token = signJwt({ sub: user.id, role: "authenticated", aud: "authenticated", email: user.email, iat: now, exp: now + 3600, session_id: randomUUID() });
+  const sessionId = randomUUID();
+  const access_token = signJwt({ sub: user.id, role: "authenticated", aud: "authenticated", email: user.email, iat: now, exp: now + 3600, session_id: sessionId });
   const refresh_token = randomUUID();
-  refreshTokens.set(refresh_token, user.id);
+  refreshTokens.set(refresh_token, { userId: user.id, sessionId });
+  sessionOwner.set(sessionId, user.id);
   return { access_token, token_type: "bearer", expires_in: 3600, expires_at: now + 3600, refresh_token, user };
+}
+const revokedSessions = new Set();
+const authError = (res, status, error_code, msg) => json(res, status, { code: status, error_code, msg });
+const findUserByEmail = (email) => [...localUsers.values()].find((u) => u.email === String(email ?? "").trim().toLowerCase()) ?? null;
+
+// E-mails Supabase Auth would send (confirmation, recovery), kept in a mailbox the tests can read
+const mailbox = [];
+const otpTokens = new Map(); // token hash → { userId, type, expiresAt, used, challenge }
+const lastSent = new Map(); // e-mail → time of the last confirmation / recovery e-mail
+const EMAIL_INTERVAL_MS = 60_000;
+function sendAuthMail(user, type, redirectTo, challenge = null) {
+  const wait = EMAIL_INTERVAL_MS - (Date.now() - (lastSent.get(user.email) ?? 0));
+  if (wait > 0) return Math.ceil(wait / 1000);
+  lastSent.set(user.email, Date.now());
+  const tokenHash = randomUUID().replace(/-/g, "") + randomUUID().replace(/-/g, "");
+  otpTokens.set(tokenHash, { userId: user.id, type, expiresAt: Date.now() + 24 * 3600_000, used: false, challenge });
+  const linkType = type === "recovery" ? "recovery" : "email";
+  const safeRedirect = /^http:\/\/localhost:3000\//.test(redirectTo ?? "") ? redirectTo : LOCAL_SITE;
+  mailbox.push({
+    to: user.email,
+    type,
+    at: Date.now(),
+    // template recommended in the README: {{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=…&redirect_to={{ .RedirectTo }}
+    link: `${LOCAL_SITE}/auth/confirm?token_hash=${tokenHash}&type=${linkType}&redirect_to=${encodeURIComponent(safeRedirect)}`,
+    // Supabase's default template ({{ .ConfirmationURL }}): verified by Supabase, then back with a PKCE code
+    confirmationUrl: `http://localhost:${cfg.gatewayPort}/auth/v1/verify?token=${tokenHash}&type=${type}&redirect_to=${encodeURIComponent(safeRedirect)}`,
+  });
+  return 0;
+}
+function createAuthUser(email, password, meta, confirmed) {
+  const id = psql([
+    "-d",
+    cfg.db,
+    "-tAc",
+    `insert into auth.users (email, email_confirmed_at, raw_user_meta_data, raw_app_meta_data) values (${sqlText(email)}, ${confirmed ? "now()" : "null"}, ${sqlText(JSON.stringify(meta ?? {}))}::jsonb, ${sqlText(JSON.stringify({ provider: "email", providers: ["email"] }))}::jsonb) returning id`,
+  ]).stdout.trim().split(/\r?\n/)[0].trim();
+  const user = { id, email, provider: "email", meta: meta ?? {}, password: passwordHash(password), confirmedAt: confirmed ? new Date().toISOString() : null };
+  localUsers.set(id, user);
+  return user;
+}
+function confirmAuthUser(user) {
+  if (user.confirmedAt) return;
+  user.confirmedAt = new Date().toISOString();
+  psql(["-d", cfg.db, "-tAc", `update auth.users set email_confirmed_at = now() where id = ${sqlText(user.id)}`]);
 }
 // SQL literal kept ASCII (U& escapes): command-line arguments lose accents on Windows
 const sqlText = (v) => {
@@ -182,7 +233,16 @@ function oauthUser(provider, email, name) {
       "-tAc",
       `insert into auth.users (email, email_confirmed_at, raw_user_meta_data, raw_app_meta_data) values (${sqlText(email)}, now(), ${sqlText(JSON.stringify(meta))}::jsonb, ${sqlText(JSON.stringify({ provider, providers: [provider] }))}::jsonb) returning id`,
     ]).stdout.trim().split(/\r?\n/)[0].trim(); // psql on Windows ends lines with \r
-  if (!localUsers.has(id) || existing) localUsers.set(id, { id, email, provider: localUsers.get(id)?.provider ?? provider, meta: localUsers.get(id)?.meta ?? meta });
+  const known = localUsers.get(id);
+  if (known && !known.confirmedAt) {
+    // like Supabase: an address never confirmed loses the password and the data typed at sign-up (whoever typed them
+    // may not own the e-mail); the account goes on with the provider's verified identity only
+    Object.assign(known, { password: null, meta, provider });
+    psql(["-d", cfg.db, "-tAc", `update auth.users set raw_user_meta_data = ${sqlText(JSON.stringify(meta))}::jsonb, raw_app_meta_data = ${sqlText(JSON.stringify({ provider, providers: [provider] }))}::jsonb where id = ${sqlText(id)}`]);
+    confirmAuthUser(known);
+    return id;
+  }
+  localUsers.set(id, { id, email, provider: known?.provider ?? provider, meta: known?.meta ?? meta, password: known?.password ?? null, confirmedAt: known?.confirmedAt ?? new Date().toISOString() });
   return id;
 }
 const oauthCodes = new Map();
@@ -406,16 +466,20 @@ const server = http.createServer(async (req, res) => {
       upstream.on("error", (e) => json(res, 502, { message: e.message }));
       return req.pipe(upstream);
     }
-    // Auth (email/password for the single local admin)
+    // Auth: e-mail and password (admin and customers), with Supabase's answers for wrong or unconfirmed accounts
     if (url.pathname === "/auth/v1/token") {
       const body = JSON.parse((await readBody(req)).toString() || "{}");
       if (url.searchParams.get("grant_type") === "password") {
-        if (body.email !== cfg.adminEmail || body.password !== cfg.adminPassword) return json(res, 400, { error: "invalid_grant", error_description: "Invalid login credentials", code: "invalid_credentials", msg: "Invalid login credentials" });
-        return json(res, 200, session());
+        const user = findUserByEmail(body.email);
+        if (!user || !user.password || user.password !== passwordHash(String(body.password ?? ""))) return authError(res, 400, "invalid_credentials", "Invalid login credentials");
+        if (!user.confirmedAt) return authError(res, 400, "email_not_confirmed", "Email not confirmed");
+        return json(res, 200, session(user.id));
       }
       if (url.searchParams.get("grant_type") === "refresh_token") {
-        const owner = refreshTokens.get(body.refresh_token);
-        return json(res, 200, session(owner ?? adminId));
+        const entry = refreshTokens.get(body.refresh_token);
+        if (!entry || !localUsers.has(entry.userId)) return authError(res, 400, "refresh_token_not_found", "Invalid Refresh Token: Refresh Token Not Found");
+        refreshTokens.delete(body.refresh_token);
+        return json(res, 200, session(entry.userId));
       }
       if (url.searchParams.get("grant_type") === "pkce") {
         const entry = oauthCodes.get(body.auth_code);
@@ -429,10 +493,128 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === "/auth/v1/user") {
       const claims = verifyJwt(bearer(req));
-      if (!claims?.sub) return json(res, 401, { code: 401, msg: "invalid JWT" });
-      return json(res, 200, userObject(claims.sub));
+      const revoked = Boolean(claims?.session_id && revokedSessions.has(claims.session_id));
+      if (!claims?.sub || revoked) return authError(res, 401, "session_not_found", "invalid JWT");
+      const user = localUsers.get(claims.sub);
+      if (!user) return authError(res, 404, "user_not_found", "User not found");
+      if (req.method === "PUT") {
+        const body = JSON.parse((await readBody(req)).toString() || "{}");
+        if (body.password !== undefined) {
+          if (String(body.password).length < 6) return authError(res, 422, "weak_password", "Password should be at least 6 characters.");
+          if (user.password === passwordHash(String(body.password))) return authError(res, 422, "same_password", "New password should be different from the old password.");
+          user.password = passwordHash(String(body.password));
+        }
+        if (body.data && typeof body.data === "object") user.meta = { ...user.meta, ...body.data };
+      }
+      return json(res, 200, userObject(user.id));
+    }
+    // Sign-up with e-mail and password: unconfirmed account + confirmation e-mail. An address that already has a
+    // confirmed account gets the same answer and no e-mail (Supabase never reveals who is registered).
+    if (url.pathname === "/auth/v1/signup" && req.method === "POST") {
+      const body = JSON.parse((await readBody(req)).toString() || "{}");
+      const email = String(body.email ?? "").trim().toLowerCase();
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return authError(res, 400, "validation_failed", "Unable to validate email address: invalid format");
+      if (String(body.password ?? "").length < 6) return authError(res, 422, "weak_password", "Password should be at least 6 characters.");
+      const redirectTo = url.searchParams.get("redirect_to");
+      let user = findUserByEmail(email);
+      if (user?.confirmedAt) {
+        return json(res, 200, { id: randomUUID(), aud: "authenticated", role: "authenticated", email, identities: [], user_metadata: {}, app_metadata: {}, created_at: new Date().toISOString() });
+      }
+      // an unconfirmed address keeps its first password and data, as in Supabase ("we can't be sure of their claimed
+      // identity"): the store's server replaces them through the admin API below
+      if (!user) user = createAuthUser(email, String(body.password), body.data ?? {}, false);
+      const wait = sendAuthMail(user, "signup", redirectTo, body.code_challenge || null);
+      if (wait) return authError(res, 429, "over_email_send_rate_limit", `For security purposes, you can only request this after ${wait} seconds.`);
+      return json(res, 200, { ...userObject(user.id), confirmation_sent_at: new Date().toISOString() });
+    }
+    if (url.pathname === "/auth/v1/resend" && req.method === "POST") {
+      const body = JSON.parse((await readBody(req)).toString() || "{}");
+      const user = findUserByEmail(body.email);
+      if (user && !user.confirmedAt) {
+        const wait = sendAuthMail(user, "signup", url.searchParams.get("redirect_to"));
+        if (wait) return authError(res, 429, "over_email_send_rate_limit", `For security purposes, you can only request this after ${wait} seconds.`);
+      }
+      return json(res, 200, {});
+    }
+    if (url.pathname === "/auth/v1/recover" && req.method === "POST") {
+      const body = JSON.parse((await readBody(req)).toString() || "{}");
+      const user = findUserByEmail(body.email);
+      if (user?.password) {
+        const wait = sendAuthMail(user, "recovery", url.searchParams.get("redirect_to"), body.code_challenge || null);
+        if (wait) return authError(res, 429, "over_email_send_rate_limit", `For security purposes, you can only request this after ${wait} seconds.`);
+      }
+      return json(res, 200, {});
+    }
+    // Link verification: token_hash (recommended template, works on any device) or the default link with a PKCE code
+    if (url.pathname === "/auth/v1/verify") {
+      const fromLink = req.method === "GET";
+      const body = fromLink ? {} : JSON.parse((await readBody(req)).toString() || "{}");
+      const hash = fromLink ? url.searchParams.get("token") : body.token_hash;
+      const entry = hash ? otpTokens.get(hash) : null;
+      const valid = entry && !entry.used && entry.expiresAt > Date.now();
+      if (fromLink) {
+        const redirectTo = url.searchParams.get("redirect_to") || LOCAL_SITE;
+        const join = redirectTo.includes("?") ? "&" : "?";
+        if (!valid) {
+          res.writeHead(303, { location: `${redirectTo}${join}error=access_denied&error_code=otp_expired&error_description=${encodeURIComponent("Email link is invalid or has expired")}` });
+          return res.end();
+        }
+        entry.used = true;
+        const user = localUsers.get(entry.userId);
+        if (entry.type === "signup") confirmAuthUser(user);
+        const code = randomUUID();
+        oauthCodes.set(code, { userId: user.id, challenge: entry.challenge });
+        res.writeHead(303, { location: `${redirectTo}${join}code=${code}` });
+        return res.end();
+      }
+      if (!valid) return authError(res, 403, "otp_expired", "Email link is invalid or has expired");
+      entry.used = true;
+      const user = localUsers.get(entry.userId);
+      if (entry.type === "signup") confirmAuthUser(user);
+      return json(res, 200, session(user.id));
+    }
+    // Test-only helpers (never part of Supabase): read the mailbox, expire links, create accounts quickly
+    if (url.pathname === "/auth/v1/test/mailbox" && req.method === "GET") {
+      const email = String(url.searchParams.get("email") ?? "").toLowerCase();
+      return json(res, 200, mailbox.filter((m) => m.to === email));
+    }
+    if (url.pathname === "/auth/v1/test/expire-links" && req.method === "POST") {
+      const user = findUserByEmail(url.searchParams.get("email"));
+      for (const entry of otpTokens.values()) if (user && entry.userId === user.id) entry.expiresAt = 0;
+      if (user) lastSent.delete(user.email);
+      return json(res, 200, { ok: Boolean(user) });
+    }
+    if (url.pathname === "/auth/v1/test/skip-wait" && req.method === "POST") {
+      lastSent.delete(String(url.searchParams.get("email") ?? "").trim().toLowerCase());
+      return json(res, 200, { ok: true });
+    }
+    if (url.pathname === "/auth/v1/test/users" && req.method === "POST") {
+      const body = JSON.parse((await readBody(req)).toString() || "{}");
+      const email = String(body.email ?? "").trim().toLowerCase();
+      if (findUserByEmail(email)) return json(res, 409, { error: "exists" });
+      const user = createAuthUser(email, String(body.password ?? ""), body.data ?? {}, body.confirmed !== false);
+      return json(res, 200, { id: user.id });
     }
     if (url.pathname === "/auth/v1/settings") return json(res, 200, { external: { google: true, apple: true, email: true }, disable_signup: false });
+    // Admin API (service role only), like Supabase's PUT /admin/users/{id}: password and metadata (null removes a key)
+    const adminUser = url.pathname.match(/^\/auth\/v1\/admin\/users\/([0-9a-f-]{36})$/);
+    if (adminUser && req.method === "PUT") {
+      if (verifyJwt(bearer(req))?.role !== "service_role") return authError(res, 403, "not_admin", "User not allowed");
+      const user = localUsers.get(adminUser[1]);
+      if (!user) return authError(res, 404, "user_not_found", "User not found");
+      const body = JSON.parse((await readBody(req)).toString() || "{}");
+      if (typeof body.password === "string") user.password = passwordHash(body.password);
+      if (body.user_metadata && typeof body.user_metadata === "object") {
+        const meta = { ...user.meta };
+        for (const [key, value] of Object.entries(body.user_metadata)) {
+          if (value === null) delete meta[key];
+          else meta[key] = value;
+        }
+        user.meta = meta;
+        psql(["-d", cfg.db, "-tAc", `update auth.users set raw_user_meta_data = ${sqlText(JSON.stringify(meta))}::jsonb where id = ${sqlText(user.id)}`]);
+      }
+      return json(res, 200, userObject(user.id));
+    }
     // OAuth stand-in for Google / Apple (PKCE, like Supabase Auth): authorize page → code → token exchange
     if (url.pathname === "/auth/v1/authorize" && req.method === "GET") {
       const provider = url.searchParams.get("provider");
@@ -456,6 +638,15 @@ const server = http.createServer(async (req, res) => {
       return res.end();
     }
     if (url.pathname === "/auth/v1/logout") {
+      // ends the session for real: its refresh tokens stop working and its access token is refused by /user
+      // scope: local (this session, the default here), others (every other session of the user) or global (all)
+      const claims = verifyJwt(bearer(req));
+      if (claims?.session_id) {
+        const scope = url.searchParams.get("scope") ?? "global";
+        const ended = scope === "local" ? [claims.session_id] : [...sessionOwner].filter(([sid, uid]) => uid === claims.sub && (scope !== "others" || sid !== claims.session_id)).map(([sid]) => sid);
+        for (const sid of ended) revokedSessions.add(sid);
+        for (const [token, entry] of refreshTokens) if (ended.includes(entry.sessionId)) refreshTokens.delete(token);
+      }
       res.writeHead(204);
       return res.end();
     }

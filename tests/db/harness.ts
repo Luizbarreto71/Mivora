@@ -26,6 +26,13 @@ export async function createTestDb() {
 
 export type TestDb = Awaited<ReturnType<typeof createTestDb>>;
 
+let defaultUser = "";
+/** Statements outside asRole act for this signed-in customer (orders require an account since migration 021). */
+export async function setDefaultUser(db: TestDb, userId: string) {
+  defaultUser = userId;
+  await db.query(`select set_config('request.jwt.claim.sub', $1, false)`, [userId]);
+}
+
 /** Runs `fn` as an API role (anon, an authenticated user or the server's service_role), like PostgREST does. */
 export async function asRole<T>(
   db: TestDb,
@@ -39,6 +46,6 @@ export async function asRole<T>(
     return await fn();
   } finally {
     await db.exec(`reset role`);
-    await db.query(`select set_config('request.jwt.claim.sub', '', false)`);
+    await db.query(`select set_config('request.jwt.claim.sub', $1, false)`, [defaultUser]);
   }
 }

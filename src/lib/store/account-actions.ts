@@ -29,6 +29,9 @@ export type Account = {
   lastName: string | null;
   phone: string | null;
   cpf: string | null;
+  /** Optional, "YYYY-MM-DD" */
+  birthDate: string | null;
+  gender: string | null;
   marketing: boolean;
   addresses: AccountAddress[];
 };
@@ -43,6 +46,8 @@ type RawAccount = {
   last_name: string | null;
   phone: string | null;
   cpf: string | null;
+  birth_date: string | null;
+  gender: string | null;
   marketing: boolean;
 };
 
@@ -101,6 +106,8 @@ export async function getMyAccount(): Promise<Account | null> {
     lastName: a.last_name,
     phone: a.phone,
     cpf: a.cpf,
+    birthDate: a.birth_date ?? null,
+    gender: a.gender ?? null,
     marketing: a.marketing,
     addresses: ((addresses.data ?? []) as RawAddress[]).map(mapAddress),
   };
@@ -108,13 +115,15 @@ export async function getMyAccount(): Promise<Account | null> {
 
 export type AccountResult<T> = { ok: true; value: T } | { ok: false; error: string; expired?: boolean; field?: string };
 
-const EXPIRED = { ok: false as const, expired: true, error: "Sua sessão expirou. Entre de novo ou continue como visitante: seus dados foram mantidos." };
+const EXPIRED = { ok: false as const, expired: true, error: "Sua sessão expirou. Entre de novo para continuar: seus dados foram mantidos." };
 
 const ACCOUNT_ERRORS: Record<string, { error: string; field?: string }> = {
   invalid_name: { error: "Informe nome e sobrenome.", field: "firstName" },
   invalid_phone: { error: "Digite um telefone com DDD, ex.: (11) 91234-5678.", field: "phone" },
   invalid_cpf: { error: "CPF inválido. Confira os números.", field: "cpf" },
   email_not_verified: { error: "Confirme o seu e-mail na conta para salvar os dados." },
+  invalid_birth_date: { error: "Data de nascimento inválida.", field: "birthDate" },
+  invalid_gender: { error: "Escolha uma das opções de gênero.", field: "gender" },
   rate_limited: { error: "Muitos cadastros ao mesmo tempo. Tente de novo em instantes." },
 };
 
@@ -124,6 +133,13 @@ const accountSchema = z.object({
   phone: z.string().trim().max(30),
   cpf: z.string().trim().max(20),
   marketing: z.boolean().optional(),
+  /** Account page only: birth date and gender are saved (and can be cleared) when present */
+  profile: z
+    .object({
+      birthDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+      gender: z.string().max(30).nullable(),
+    })
+    .optional(),
 });
 
 /** Saves the signed-in customer's data (and links this verified e-mail's customer record to the account). */
@@ -138,6 +154,7 @@ export async function saveMyAccount(input: unknown): Promise<AccountResult<null>
     p_phone: parsed.data.phone,
     p_cpf: parsed.data.cpf,
     p_marketing: parsed.data.marketing ?? null,
+    ...(parsed.data.profile ? { p_birth_date: parsed.data.profile.birthDate, p_gender: parsed.data.profile.gender, p_profile: true } : {}),
   });
   if (error) {
     if (/not_authenticated/.test(error.message)) return EXPIRED;

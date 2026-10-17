@@ -30,8 +30,7 @@ import {
   type PayMethod,
 } from "@/lib/store/checkout-data";
 import { attemptFor, clearDraft, EMPTY_DRAFT, readDraft, saveDraft, stepFromUrl, type CheckoutDraft, type CheckoutStep } from "@/lib/store/checkout-draft";
-import { readDeviceCustomer, saveDeviceCustomer } from "@/lib/store/customer";
-import { rememberDeviceOrder } from "@/lib/store/order-history";
+import { forgetDeviceCustomer } from "@/lib/store/customer";
 import { quoteShipping } from "@/lib/store/shipping-actions";
 import { clearCoupon, saveCoupon, savedCoupon } from "@/lib/store/welcome";
 import type { DeliveryZone } from "@/lib/types";
@@ -47,6 +46,9 @@ import { OrderSummary } from "./order-summary";
 import { PaymentSection } from "./payment-section";
 import { ReviewSection } from "./review-section";
 import { CheckoutSteps } from "./steps";
+import { SESSION_CHANGED } from "../auth/account-menu";
+import { ConfirmEmail } from "../auth/confirm-email";
+import { LoginForm } from "../auth/login-form";
 
 const LAST_ORDER_KEY = "mivora.lastOrder";
 /** Long labels wrap on narrow phones instead of widening the page */
@@ -55,9 +57,11 @@ type LastOrder = { code: string; url: string; summarized: boolean; at: number };
 
 const LOGIN_NOTICE: Record<string, { tone: "info" | "error"; text: string }> = {
   ok: { tone: "info", text: "Pronto, você entrou na sua conta. Seu carrinho foi mantido." },
-  cancelado: { tone: "info", text: "O login foi cancelado. Você pode tentar de novo ou continuar com seus dados." },
-  erro: { tone: "error", text: "Não foi possível entrar agora. Tente de novo ou continue com seus dados." },
+  confirmado: { tone: "info", text: "E-mail confirmado! Sua conta está ativa e seu carrinho foi mantido." },
+  cancelado: { tone: "info", text: "O login foi cancelado. Você pode tentar de novo ou entrar com seu e-mail." },
+  erro: { tone: "error", text: "Não foi possível entrar agora. Tente de novo." },
 };
+const CHECKOUT_URL = "/finalizar?etapa=identificacao";
 
 function sameIdentity(a: CheckoutIdentity, account: Account) {
   return (
@@ -89,7 +93,7 @@ export function CheckoutFlow({
   minimumOrderCents: number | null;
 }) {
   const { lines, totals, hydrated, clear } = useCart();
-  const { whatsappNumber, welcomeOffer, onlinePayment, applePay, cardPayments, mercadoPagoPublicKey, maxInstallments, socialProviders } = useStoreConfig();
+  const { whatsappNumber, welcomeOffer, onlinePayment, applePay, cardPayments, mercadoPagoPublicKey, maxInstallments } = useStoreConfig();
   useCartRefresh(true);
   const applePayAvailable = useApplePayAvailable(applePay && onlinePayment);
 
@@ -125,16 +129,7 @@ export function CheckoutFlow({
   // ------------------------------------------------------------------ restore (refresh, return from sign-in)
   useEffect(() => {
     let d = readDraft();
-    if (!d.identity.email) {
-      const c = readDeviceCustomer();
-      if (c) {
-        const [first, last] = splitFullName(c.name);
-        d = {
-          ...d,
-          identity: { email: c.email, firstName: c.firstName ?? first, lastName: c.lastName ?? last, phone: formatPhoneInput(c.phone), cpf: c.cpf ? formatCpf(c.cpf) : "", marketing: c.marketing },
-        };
-      }
-    }
+    forgetDeviceCustomer();
     if (!d.address.cep) {
       try {
         const cep = normalizeCep(localStorage.getItem("mivora.cep"));
@@ -398,6 +393,7 @@ export function CheckoutFlow({
     await signOutAccount().catch(() => null);
     setSigningOut(false);
     setAccount(null);
+    window.dispatchEvent(new Event(SESSION_CHANGED));
     setEditingIdentity(false);
     // a shared device does not keep the account's data after signing out
     setDraft((d) => ({ ...d, identity: EMPTY_IDENTITY, addressId: null, address: { ...EMPTY_ADDRESS, cep: d.address.cep } }));
@@ -434,6 +430,7 @@ export function CheckoutFlow({
         if (!saved.ok) {
           if (saved.expired) {
             setAccount(null);
+            window.dispatchEvent(new Event(SESSION_CHANGED));
             setNotice({ tone: "error", text: saved.error });
           } else if (saved.field) {
             setIdentityErrors({ [saved.field]: saved.error });
@@ -446,16 +443,7 @@ export function CheckoutFlow({
       }
       setEditingIdentity(false);
     } else {
-      const phone = normalizeBrPhone(draft.identity.phone)!;
-      saveDeviceCustomer({
-        name: `${draft.identity.firstName.trim()} ${draft.identity.lastName.trim()}`,
-        firstName: draft.identity.firstName.trim(),
-        lastName: draft.identity.lastName.trim(),
-        email: draft.identity.email.trim(),
-        phone,
-        cpf: normalizeCpf(draft.identity.cpf),
-        marketing: draft.identity.marketing,
-      });
+      return;
     }
     setNotice(null);
     if (!payMethod) {
@@ -514,7 +502,6 @@ export function CheckoutFlow({
   const finish = (result: Extract<PlaceOrderResult, { ok: true }>) => {
     if (result.kind === "whatsapp") {
       const order: LastOrder = { code: result.code, url: result.url, summarized: result.summarized, at: timestamp() };
-      rememberDeviceOrder({ code: result.code, url: result.url, at: order.at, summarized: result.summarized });
       try {
         sessionStorage.setItem(LAST_ORDER_KEY, JSON.stringify(order));
       } catch {
@@ -527,7 +514,6 @@ export function CheckoutFlow({
       window.location.assign(result.url);
       return;
     }
-    rememberDeviceOrder({ code: result.code, url: result.kind === "redirect" ? result.orderUrl : result.url });
     clear();
     clearCoupon();
     clearDraft();
@@ -554,6 +540,18 @@ export function CheckoutFlow({
         payment,
       }).catch(() => ({ ok: false as const, error: "Não foi possível registrar o pedido agora. Verifique sua conexão e tente de novo.", retryable: true }));
       if (!result.ok) {
+        // the session ended or the e-mail is not confirmed: back to the sign-in / confirmation, nothing is lost
+        if ("loginRequired" in result && result.loginRequired) {
+          setAccount(null);
+          window.dispatchEvent(new Event(SESSION_CHANGED));
+          setNotice({ tone: "error", text: result.error });
+          goTo("identificacao");
+          return;
+        }
+        if ("confirmRequired" in result && result.confirmRequired) {
+          setAccount((a) => (a ? { ...a, emailVerified: false } : a));
+          return;
+        }
         // a refused card token cannot be used again: back to the card form, with the reason
         if ("step" in result && result.step === "pagamento" && payMethod === "card") {
           setCard(null);
@@ -611,7 +609,6 @@ export function CheckoutFlow({
   }
 
   const reachable: ("pagamento" | "revisao")[] = step2Valid ? (payMethod && (payMethod !== "card" || card) ? ["pagamento", "revisao"] : ["pagamento"]) : [];
-  const nextUrl = "/finalizar?etapa=identificacao";
   const blockedByCart = totals.hasUnavailableItems || belowStoreMinimum || zoneBelowMinimum;
 
   return (
@@ -654,7 +651,11 @@ export function CheckoutFlow({
             </div>
           ) : null}
 
-          {step === "identificacao" ? (
+          {account === null ? (
+            <CheckoutLoginGate notice={notice} />
+          ) : account && !account.emailVerified ? (
+            <ConfirmEmail email={account.email} next={CHECKOUT_URL} />
+          ) : step === "identificacao" ? (
             <>
               <IdentitySection
                 account={account}
@@ -666,9 +667,6 @@ export function CheckoutFlow({
                 onEdit={() => setEditingIdentity(true)}
                 onSignOut={signOut}
                 signingOut={signingOut}
-                providers={socialProviders}
-                nextUrl={nextUrl}
-                beforeRedirect={() => saveDraft(draft)}
                 notice={notice}
               />
               <div className="border-t border-line" />
@@ -713,7 +711,7 @@ export function CheckoutFlow({
             </>
           ) : null}
 
-          {step === "pagamento" ? (
+          {account?.emailVerified && step === "pagamento" ? (
             <>
               <PaymentSection
                 available={available}
@@ -738,7 +736,7 @@ export function CheckoutFlow({
             </>
           ) : null}
 
-          {step === "revisao" && payMethod ? (
+          {account?.emailVerified && step === "revisao" && payMethod ? (
             <>
               <ReviewSection
                 lines={totals.purchasableLines}
@@ -796,6 +794,28 @@ export function CheckoutFlow({
 }
 
 const timestamp = () => Date.now();
+
+/** No guest checkout: buying needs a signed-in account; the bag stays saved in this browser meanwhile. */
+function CheckoutLoginGate({ notice }: { notice: { tone: "info" | "error"; text: string } | null }) {
+  return (
+    <section aria-labelledby="checkout-login" className="border border-line p-5 sm:p-8">
+      <h2 id="checkout-login" className="text-lg font-semibold">
+        Entre para finalizar sua compra
+      </h2>
+      <p className="mt-2 text-sm leading-relaxed text-ink-soft">
+        Para comprar na MIVORA é preciso ter uma conta com o e-mail confirmado. Seu carrinho continua salvo e você volta para cá depois de entrar ou criar a conta.
+      </p>
+      {notice ? (
+        <p className={notice.tone === "error" ? "mt-4 border border-danger/30 bg-danger/5 px-4 py-3 text-sm text-danger" : "mt-4 border border-rose-ink/20 bg-rose-soft px-4 py-3 text-sm"} role="status">
+          {notice.text}
+        </p>
+      ) : null}
+      <div className="mt-6 max-w-md">
+        <LoginForm next={CHECKOUT_URL} idPrefix="checkout" />
+      </div>
+    </section>
+  );
+}
 
 /** Delivery option picked in the cart for this CEP (same tab). */
 function cartChoice(cep: string) {
