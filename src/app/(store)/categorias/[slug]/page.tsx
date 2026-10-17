@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { Breadcrumbs } from "@/components/store/breadcrumbs";
-import { CatalogSkeleton, CatalogView } from "@/components/store/catalog/catalog-view";
+import { CatalogPageSkeleton, CatalogView } from "@/components/store/catalog/catalog-view";
 import Image from "next/image";
 import Link from "next/link";
 import { getCategories, getCategoryBySlug } from "@/lib/catalog/queries";
@@ -75,13 +75,7 @@ async function CategoryContent({ params, searchParams }: PageProps<"/categorias/
 
 export default function CategoryPage(props: PageProps<"/categorias/[slug]">) {
   return (
-    <Suspense
-      fallback={
-        <div className="container-page py-16">
-          <CatalogSkeleton />
-        </div>
-      }
-    >
+    <Suspense fallback={<CatalogPageSkeleton />}>
       <CategoryContent {...props} />
     </Suspense>
   );
