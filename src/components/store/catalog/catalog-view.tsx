@@ -122,7 +122,7 @@ function Pagination({ basePath, filters, page, pageCount }: { basePath: string; 
 }
 
 /** Loading state of category and brand pages: the title band keeps its place, so nothing jumps when it arrives. */
-export function CatalogPageSkeleton() {
+export function CatalogPageSkeleton({ variant = "category" }: { variant?: "category" | "brand" }) {
   return (
     <div aria-busy="true" aria-label="Carregando produtos">
       <div className="bg-ivory">
@@ -130,13 +130,23 @@ export function CatalogPageSkeleton() {
           <div className="mb-8 h-4 w-48 animate-pulse rounded bg-sand" />
           <div className="mb-3 h-3 w-28 animate-pulse rounded bg-sand" />
           <div className="h-10 w-72 max-w-full animate-pulse rounded bg-sand sm:h-[3.25rem]" />
-          <div className="mt-3 h-5 w-24 animate-pulse rounded bg-sand" />
-          <div className="mt-4 h-7 w-full max-w-xl animate-pulse rounded bg-sand" />
-          <div className="mt-8 flex flex-wrap gap-2">
-            {[0, 1, 2].map((i) => (
-              <div key={i} className="h-10 w-36 animate-pulse rounded-full bg-sand" />
-            ))}
-          </div>
+          {variant === "category" ? (
+            <>
+              <div className="mt-3 h-5 w-24 animate-pulse rounded bg-sand" />
+              <div className="mt-4 h-7 w-full max-w-xl animate-pulse rounded bg-sand" />
+              <div className="mt-8 flex flex-wrap gap-2">
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="h-10 w-36 animate-pulse rounded-full bg-sand" />
+                ))}
+              </div>
+            </>
+          ) : (
+            <>
+              {/* brand: tagline and a two-line description */}
+              <div className="mt-3 h-5 w-64 max-w-full animate-pulse rounded bg-sand" />
+              <div className="mt-4 h-14 w-full max-w-2xl animate-pulse rounded bg-sand" />
+            </>
+          )}
         </div>
       </div>
       <div className="container-page py-10 sm:py-14">

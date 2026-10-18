@@ -41,7 +41,7 @@ async function BrandContent({ params, searchParams }: PageProps<"/marcas/[slug]"
 
 export default function BrandPage(props: PageProps<"/marcas/[slug]">) {
   return (
-    <Suspense fallback={<CatalogPageSkeleton />}>
+    <Suspense fallback={<CatalogPageSkeleton variant="brand" />}>
       <BrandContent {...props} />
     </Suspense>
   );

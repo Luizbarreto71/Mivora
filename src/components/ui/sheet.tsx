@@ -1,7 +1,8 @@
 "use client";
 
 import { X } from "lucide-react";
-import { useEffect, useRef, type ReactNode } from "react";
+import { useLayoutEffect, useRef, type ReactNode } from "react";
+import { lockBodyScroll } from "@/lib/scroll-lock";
 import { cn } from "@/lib/utils";
 
 /** Accessible side panel (cart, mobile menu, filters). */
@@ -24,11 +25,10 @@ export function Sheet({
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) return;
     const previouslyFocused = document.activeElement as HTMLElement | null;
-    const { overflow } = document.body.style;
-    document.body.style.overflow = "hidden";
+    const unlock = lockBodyScroll();
     panelRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -50,7 +50,7 @@ export function Sheet({
     };
     document.addEventListener("keydown", onKey);
     return () => {
-      document.body.style.overflow = overflow;
+      unlock();
       document.removeEventListener("keydown", onKey);
       previouslyFocused?.focus?.();
     };

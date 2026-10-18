@@ -2,7 +2,8 @@
 
 import { ChevronLeft, ChevronRight, Play, X, ZoomIn } from "lucide-react";
 import Image from "next/image";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { lockBodyScroll } from "@/lib/scroll-lock";
 import type { ImageRef } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { ProductImagePlaceholder } from "../placeholder";
@@ -37,18 +38,17 @@ export function ProductGallery({ images, videoUrl, name, brand }: { images: Imag
     [media.length],
   );
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!lightbox) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setLightbox(false);
       if (e.key === "ArrowRight") goTo(index + 1);
       if (e.key === "ArrowLeft") goTo(index - 1);
     };
-    const { overflow } = document.body.style;
-    document.body.style.overflow = "hidden";
+    const unlock = lockBodyScroll();
     document.addEventListener("keydown", onKey);
     return () => {
-      document.body.style.overflow = overflow;
+      unlock();
       document.removeEventListener("keydown", onKey);
     };
   }, [lightbox, index, goTo]);

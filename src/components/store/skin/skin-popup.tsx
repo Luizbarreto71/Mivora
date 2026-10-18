@@ -3,8 +3,9 @@
 import { ArrowRight, Check, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { buttonClasses } from "@/components/ui/button";
+import { lockBodyScroll } from "@/lib/scroll-lock";
 import { markPopupSession, popupDue, popupShownThisSession, quietPath, readPopupMemory, rememberPopup, welcomeShownThisSession } from "@/lib/skin/popup-schedule";
 import { welcomeSeen } from "@/lib/store/welcome";
 import type { Banner } from "@/lib/types";
@@ -46,10 +47,10 @@ export function SkinLaunchPopup({ banner, intervalDays }: { banner: Banner; inte
     [intervalDays],
   );
 
-  useEffect(() => {
+  // layout effect: the pop-up opens on its own, so its first frame must already have the final layout (no layout shift)
+  useLayoutEffect(() => {
     if (!open) return;
-    const { overflow } = document.body.style;
-    document.body.style.overflow = "hidden";
+    const unlock = lockBodyScroll();
     dialogRef.current?.querySelector<HTMLElement>("[data-autofocus]")?.focus({ preventScroll: true });
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -73,7 +74,7 @@ export function SkinLaunchPopup({ banner, intervalDays }: { banner: Banner; inte
     };
     document.addEventListener("keydown", onKey);
     return () => {
-      document.body.style.overflow = overflow;
+      unlock();
       document.removeEventListener("keydown", onKey);
     };
   }, [open, close]);

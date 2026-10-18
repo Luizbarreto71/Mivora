@@ -1,8 +1,10 @@
 "use client";
 
 import { Check, Copy, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Logo } from "@/components/brand/logo";
+import { buttonClasses } from "@/components/ui/button";
+import { lockBodyScroll } from "@/lib/scroll-lock";
 import { markWelcomeSeen, saveCoupon, welcomeSeen } from "@/lib/store/welcome";
 import { cn } from "@/lib/utils";
 import { useStoreConfig } from "./store-config";
@@ -34,15 +36,15 @@ export function WelcomeIntro() {
     [welcomeOffer],
   );
 
-  useEffect(() => {
+  // layout effect: the screen opens on its own, so its first frame must already have the final layout (no layout shift)
+  useLayoutEffect(() => {
     if (!open) return;
-    const { overflow } = document.body.style;
-    document.body.style.overflow = "hidden";
+    const unlock = lockBodyScroll();
     dialogRef.current?.focus({ preventScroll: true });
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && close(true);
     document.addEventListener("keydown", onKey);
     return () => {
-      document.body.style.overflow = overflow;
+      unlock();
       document.removeEventListener("keydown", onKey);
     };
   }, [open, close]);
@@ -75,7 +77,7 @@ export function WelcomeIntro() {
     >
       {/* soft atmosphere */}
       <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute left-1/2 top-[38%] h-[70vmin] w-[70vmin] -translate-x-1/2 -translate-y-1/2 animate-intro-glow rounded-full bg-[radial-gradient(circle,rgba(234,221,221,0.75)_0%,rgba(251,248,242,0)_68%)]" />
+        <div className="absolute inset-x-0 top-[calc(38%_-_35vmin)] mx-auto h-[70vmin] w-[70vmin] animate-intro-glow rounded-full bg-[radial-gradient(circle,rgba(234,221,221,0.75)_0%,rgba(251,248,242,0)_68%)]" />
       </div>
 
       <button
@@ -104,7 +106,7 @@ export function WelcomeIntro() {
         </p>
 
         {welcomeOffer ? (
-          <div className="mt-9 w-full animate-fade-up border border-ink/10 bg-paper/80 px-6 py-7 shadow-[0_30px_60px_-40px_rgba(17,17,17,0.35)] backdrop-blur [animation-delay:1.65s] sm:px-10">
+          <div className="mt-9 w-full animate-fade-up rounded-panel border border-line bg-paper/80 px-6 py-7 shadow-[0_30px_60px_-40px_rgba(17,17,17,0.35)] backdrop-blur [animation-delay:1.65s] sm:px-10">
             <p className="eyebrow text-ink/70">Presente de boas-vindas</p>
             <p className="mt-3 text-[3rem] font-bold leading-none tracking-[-0.03em] sm:text-[3.5rem]">
               {welcomeOffer.percent}% <span className="text-[0.5em] tracking-[0.12em]">OFF</span>
@@ -113,7 +115,7 @@ export function WelcomeIntro() {
             <button
               type="button"
               onClick={copy}
-              className="group mx-auto mt-6 flex h-12 items-center gap-3 border border-dashed border-ink/40 px-5 transition hover:border-ink"
+              className="group mx-auto mt-6 flex h-12 items-center gap-3 rounded-control border border-dashed border-ink/40 px-5 transition hover:border-ink"
               aria-label={`Copiar cupom ${welcomeOffer.code}`}
             >
               <span className="text-sm font-semibold tracking-[0.28em]">{welcomeOffer.code}</span>
@@ -123,7 +125,7 @@ export function WelcomeIntro() {
               </span>
             </button>
             <p className="mt-4 text-xs leading-relaxed text-muted">
-              Guardamos o cupom para você: ele já aparece ao finalizar o pedido pelo WhatsApp. Válido para a primeira compra.
+              Guardamos o cupom para você: ele já aparece aplicado quando você finalizar a compra. Válido para a primeira compra.
             </p>
           </div>
         ) : null}
@@ -132,7 +134,7 @@ export function WelcomeIntro() {
           <button
             type="button"
             onClick={() => close(true)}
-            className="inline-flex h-13 min-h-[3.25rem] w-full max-w-xs items-center justify-center bg-ink px-8 text-xs font-semibold uppercase tracking-[0.18em] text-paper transition hover:bg-ink-soft"
+            className={buttonClasses("primary", "lg", "w-full max-w-xs")}
           >
             {welcomeOffer ? "Quero meu desconto" : "Começar a explorar"}
           </button>

@@ -4,7 +4,8 @@ import { ArrowRight, Search, X } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
+import { lockBodyScroll } from "@/lib/scroll-lock";
 import { Price } from "./price";
 import { useSearchSuggestions } from "./use-search-suggestions";
 
@@ -16,15 +17,14 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
   const [q, setQ] = useState("");
   const { data, loading, empty } = useSearchSuggestions(q);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) return;
     inputRef.current?.focus();
-    const { overflow } = document.body.style;
-    document.body.style.overflow = "hidden";
+    const unlock = lockBodyScroll();
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", onKey);
     return () => {
-      document.body.style.overflow = overflow;
+      unlock();
       document.removeEventListener("keydown", onKey);
     };
   }, [open, onClose]);
