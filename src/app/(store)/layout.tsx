@@ -27,6 +27,7 @@ export default async function StoreLayout({ children }: { children: React.ReactN
   ]);
   const onlinePayment = settings.online_payment_enabled && mercadoPagoConfig().ready;
   const skinAnalysis = settings.skin_analysis_enabled && skinAiConfigured();
+  const whatsappNumber = normalizeWhatsAppNumber(settings.whatsapp_number);
 
   const nav: NavData = {
     productTypes: categories.filter((c) => c.kind === "product_type" && !c.parent_id && c.productCount > 0).map(({ slug, name }) => ({ slug, name })),
@@ -39,7 +40,7 @@ export default async function StoreLayout({ children }: { children: React.ReactN
   return (
     <StoreConfigProvider
       value={{
-        whatsappNumber: normalizeWhatsAppNumber(settings.whatsapp_number),
+        whatsappNumber,
         whatsappGreeting: settings.whatsapp_greeting,
         deliverySummary: settings.delivery_summary,
         businessHours: settings.business_hours,
@@ -66,7 +67,8 @@ export default async function StoreLayout({ children }: { children: React.ReactN
           <TopBar
             messages={[
               ...(settings.welcome_offer_enabled ? [`${settings.welcome_offer_percent}% OFF na primeira compra · cupom ${settings.welcome_offer_code}`] : []),
-              ...settings.top_bar_messages,
+              // a WhatsApp message only shows once the store has a number
+              ...settings.top_bar_messages.filter((m) => whatsappNumber || !/whatsapp/i.test(m)),
             ]}
           />
         )}

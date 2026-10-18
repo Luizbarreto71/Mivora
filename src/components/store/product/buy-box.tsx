@@ -19,7 +19,9 @@ import { useStoreConfig } from "../store-config";
 export function BuyBox({ product }: { product: ProductDetail }) {
   const { add, close } = useCart();
   const router = useRouter();
-  const { whatsappNumber, whatsappGreeting, deliverySummary, businessHours, siteUrl, comingSoonInquiry, welcomeOffer, shippingCalculator, onlinePayment } = useStoreConfig();
+  const { whatsappNumber, whatsappGreeting, deliverySummary, businessHours, siteUrl, comingSoonInquiry, welcomeOffer, shippingCalculator, onlinePayment, socialProviders } = useStoreConfig();
+  // only the sign-in methods and channels that are switched on
+  const signInMethods = ["e-mail e senha", socialProviders.google && "Google", socialProviders.apple && "Apple"].filter(Boolean).join(", ").replace(/, ([^,]+)$/, " ou $1");
   const [variantId, setVariantId] = useState<string | null>(product.variants[0]?.id ?? null);
   const [quantity, setQuantity] = useState(1);
   const [showSticky, setShowSticky] = useState(false);
@@ -85,7 +87,7 @@ export function BuyBox({ product }: { product: ProductDetail }) {
         )}
         <FavoriteButton productId={product.id} productName={product.name} className="-mr-2 -mt-1 bg-ivory" />
       </div>
-      {priceCents == null && !comingSoon ? <p className="mt-2 text-sm text-muted">Fale com a gente pelo WhatsApp para saber o valor atual.</p> : null}
+      {priceCents == null && !comingSoon && whatsappNumber ? <p className="mt-2 text-sm text-muted">Fale com a gente pelo WhatsApp para saber o valor atual.</p> : null}
       {comingSoon ? (
         <div className="mt-5 rounded-card bg-ivory p-4 text-sm leading-relaxed text-ink-soft" role="note">
           <p className="font-semibold text-ink">Este produto ainda não está disponível.</p>
@@ -173,11 +175,22 @@ export function BuyBox({ product }: { product: ProductDetail }) {
         ) : null}
         <li className="flex gap-3">
           <Truck className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.5} />
-          <span>{deliverySummary ?? "Entrega combinada pelo WhatsApp, de acordo com a sua região."}</span>
+          <span>
+            {deliverySummary ??
+              (shippingCalculator
+                ? "Frete e prazo calculados pelo CEP."
+                : whatsappNumber
+                  ? "Entrega combinada pelo WhatsApp, de acordo com a sua região."
+                  : "Opções de entrega informadas na finalização da compra.")}
+          </span>
         </li>
         <li className="flex gap-3">
           <Check className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.5} />
-          <span>{onlinePayment ? "Compra com a sua conta MIVORA (e-mail e senha, Google ou Apple). Se preferir, finalize com atendimento humano pelo WhatsApp." : "Compra com a sua conta MIVORA e finalização com atendimento humano pelo WhatsApp."}</span>
+          <span>
+            {onlinePayment
+              ? `Compra com a sua conta MIVORA (${signInMethods}).${whatsappNumber ? " Se preferir, finalize com atendimento humano pelo WhatsApp." : ""}`
+              : "Compra com a sua conta MIVORA e finalização com atendimento humano pelo WhatsApp."}
+          </span>
         </li>
         <li className="flex gap-3">
           <CreditCard className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.5} />

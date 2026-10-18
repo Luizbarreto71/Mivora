@@ -92,7 +92,7 @@ export function CartLineItem({ line, compact = false }: { line: CartLine; compac
 
 export function CartSummary({ className }: { className?: string }) {
   const { totals } = useCart();
-  const { welcomeOffer } = useStoreConfig();
+  const { welcomeOffer, onlinePayment } = useStoreConfig();
   const allUnpriced = totals.purchasableLines.length > 0 && totals.purchasableLines.every((l) => l.unitPriceCents == null);
   return (
     <div className={cn("space-y-2 text-sm", className)}>
@@ -108,11 +108,15 @@ export function CartSummary({ className }: { className?: string }) {
         <p className="text-xs leading-relaxed text-muted">Itens com preço sob consulta não entram no subtotal. O valor será informado no WhatsApp.</p>
       ) : null}
       {welcomeOffer ? (
-        <p className="bg-blush/60 px-3 py-2 text-xs leading-relaxed text-ink">
+        <p className="rounded-control bg-blush/60 px-3 py-2 text-xs leading-relaxed text-ink">
           Primeira compra? Use o cupom <strong className="tracking-[0.14em]">{welcomeOffer.code}</strong> ao finalizar e ganhe {welcomeOffer.percent}% de desconto.
         </p>
       ) : null}
-      <p className="text-xs leading-relaxed text-muted">Entrega e pagamento são combinados no atendimento pelo WhatsApp.</p>
+      <p className="text-xs leading-relaxed text-muted">
+        {onlinePayment
+          ? "Entrega e pagamento (Pix, cartão ou boleto pelo Mercado Pago) são escolhidos na finalização da compra."
+          : "Entrega e pagamento são combinados no atendimento pelo WhatsApp."}
+      </p>
     </div>
   );
 }
