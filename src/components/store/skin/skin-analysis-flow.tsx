@@ -5,13 +5,11 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { Button, buttonClasses } from "@/components/ui/button";
 import type { SkinNeedResult, SkinObservation } from "@/lib/skin/analysis";
-import { planForNeeds } from "@/lib/skin/actions";
 import { rememberPopup } from "@/lib/skin/popup-schedule";
 import type { SkinPlan } from "@/lib/skin/recommend";
-import type { SkinNeed } from "@/lib/skin/taxonomy";
 import { cn } from "@/lib/utils";
 import { preparePhoto, type PreparedPhoto } from "./prepare-photo";
-import { NeedsPicker, ProductsView, RoutineView, SaveReport, SkinDisclaimer, type SkinResult } from "./skin-result";
+import { ProductsView, RoutineView, SaveReport, SkinDisclaimer, type SkinResult } from "./skin-result";
 
 type Step = "inicio" | "consentimento" | "foto" | "analise" | "produtos" | "rotina";
 const STEPS: { key: Step; label: string }[] = [
@@ -61,7 +59,6 @@ export function SkinAnalysisFlow({ available, intervalDays }: { available: boole
   const [stage, setStage] = useState<Stage | null>(null);
   const [failure, setFailure] = useState<{ message: string; retry: boolean; newPhoto: boolean } | null>(null);
   const [result, setResult] = useState<SkinResult | null>(null);
-  const [updating, setUpdating] = useState(false);
   const headingRef = useRef<HTMLDivElement>(null);
   const photoRef = useRef<PreparedPhoto | null>(null);
 
@@ -153,22 +150,10 @@ export function SkinAnalysisFlow({ available, intervalDays }: { available: boole
       setFailure({ message: outcome.message, retry: !photoProblem && outcome.error !== "daily_limit" && outcome.error !== "rate_limited", newPhoto: photoProblem });
       return;
     }
-    const next: SkinResult = { analysis: outcome.analysis, plan: outcome.plan, analyzedAt: outcome.analyzedAt, selectedNeeds: outcome.analysis.needs.map((n) => n.need) };
+    const next: SkinResult = { analysis: outcome.analysis, plan: outcome.plan, analyzedAt: outcome.analyzedAt };
     setResult(next);
     storeResult(next);
     go("produtos");
-  };
-
-  const changeNeeds = async (needs: SkinNeed[]) => {
-    if (!result) return;
-    const ranked = needs.map((need) => ({ need, priority: result.analysis.needs.find((n) => n.need === need)?.priority ?? ("media" as const) }));
-    setUpdating(true);
-    const r = await planForNeeds(ranked).catch(() => null);
-    setUpdating(false);
-    if (!r?.ok) return;
-    const next = { ...result, plan: r.plan, selectedNeeds: needs };
-    setResult(next);
-    storeResult(next);
   };
 
   const restart = () => {
@@ -475,12 +460,7 @@ export function SkinAnalysisFlow({ available, intervalDays }: { available: boole
             </div>
 
             <div className="mt-8">
-              {step === "produtos" ? (
-                <div className="space-y-8">
-                  <NeedsPicker result={result} onNeedsChange={changeNeeds} updating={updating} />
-                  <ProductsView plan={result.plan} />
-                </div>
-              ) : null}
+              {step === "produtos" ? <ProductsView plan={result.plan} /> : null}
               {step === "rotina" ? <RoutineView plan={result.plan} /> : null}
             </div>
 

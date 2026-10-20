@@ -2011,8 +2011,9 @@ test("Análise de pele — consentimento obrigatório, foto inadequada, falha do
   await expect(page.getByRole("tab")).toHaveText([/^Produtos \(\d+\)$/, "Rotina"]);
   await expect(page.getByText("A pele aparenta ressecamento nas maçãs do rosto.")).toHaveCount(0);
   await expect(page.getByText("Características observadas")).toHaveCount(0);
-  // the need the photo suggested comes selected, and the medical disclaimer stays
-  await expect(page.getByRole("button", { name: "Hidratação", exact: true })).toHaveAttribute("aria-pressed", "true");
+  // no needs picker: the products follow what the photo suggested; the medical disclaimer stays
+  await expect(page.getByText("O que você quer cuidar")).toHaveCount(0);
+  await expect(page.locator("main article").first()).toContainText("Indicado para hidratação");
   await expect(page.getByText(/não um diagnóstico médico, e não substitui a avaliação de um dermatologista/)).toBeVisible();
 
   // products: only real, available catalogue products, with their current price and links
@@ -2055,11 +2056,6 @@ test("Análise de pele — consentimento obrigatório, foto inadequada, falha do
   // the store's cart drawer opens with the products; it is closed to go on
   await page.getByRole("dialog", { name: /Sacola/ }).getByRole("button", { name: "Fechar" }).click();
 
-  // adjusting the needs recomputes from the catalogue, without a new photo
-  await page.getByRole("tab", { name: /Produtos/ }).click();
-  await page.getByRole("button", { name: "Conforto da pele" }).click();
-  await expect(page.getByRole("button", { name: "Conforto da pele" })).toHaveAttribute("aria-pressed", "true");
-
   // another photo, another result (consent asked again)
   await page.getByRole("button", { name: "Refazer análise" }).click();
   await page.getByRole("checkbox", { name: /Concordo com o uso da minha foto/ }).check();
@@ -2067,8 +2063,7 @@ test("Análise de pele — consentimento obrigatório, foto inadequada, falha do
   await page.getByLabel("Escolher foto da galeria").setInputFiles(await photo(225, 110, 110));
   await page.getByRole("button", { name: "Analisar minha foto" }).click();
   await expect(page.getByRole("heading", { name: "Produtos recomendados" })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole("button", { name: "Conforto da pele" })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("button", { name: "Hidratação", exact: true })).toHaveAttribute("aria-pressed", "false");
+  await expect(page.locator("main article").first()).toContainText("Indicado para conforto da pele");
   await ctx.close();
 });
 

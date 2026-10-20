@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Info, Loader2, Moon, ShoppingBag, Sun } from "lucide-react";
+import { Check, Info, Moon, ShoppingBag, Sun } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -8,10 +8,9 @@ import { buttonClasses } from "@/components/ui/button";
 import { formatBRL } from "@/lib/money";
 import type { SkinNeedResult, SkinObservation } from "@/lib/skin/analysis";
 import type { Recommendation, RoutineSlot, SkinPlan } from "@/lib/skin/recommend";
-import { NEED_LABEL, NEEDS, ROUTINE_STEP_LABEL, type SkinNeed } from "@/lib/skin/taxonomy";
+import { ROUTINE_STEP_LABEL } from "@/lib/skin/taxonomy";
 import { getMyAccount } from "@/lib/store/account-actions";
 import { saveSkinReport } from "@/lib/skin/actions";
-import { cn } from "@/lib/utils";
 import { useCart } from "../cart-context";
 import { cartLineFromProduct } from "../product-actions";
 
@@ -19,43 +18,7 @@ export type SkinResult = {
   analysis: { summary: string; observations: SkinObservation[]; needs: SkinNeedResult[]; limitations: string[] };
   plan: SkinPlan;
   analyzedAt: string;
-  /** Needs currently used for the products (the AI's, adjusted by the customer) */
-  selectedNeeds: SkinNeed[];
 };
-
-/** What the recommendations take care of: starts with the needs the photo suggested; the customer can adjust it. */
-export function NeedsPicker({ result, onNeedsChange, updating }: { result: SkinResult; onNeedsChange: (needs: SkinNeed[]) => void; updating: boolean }) {
-  const toggle = (need: SkinNeed) =>
-    onNeedsChange(result.selectedNeeds.includes(need) ? result.selectedNeeds.filter((n) => n !== need) : [...result.selectedNeeds, need]);
-  return (
-    <fieldset>
-      <legend className="text-[0.8125rem] font-semibold">O que você quer cuidar</legend>
-      <p className="mt-1 text-xs text-muted">Começamos pelo que a análise da sua foto indicou. Toque para ajustar: os produtos e a rotina são atualizados.</p>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {NEEDS.map((need) => {
-          const on = result.selectedNeeds.includes(need);
-          return (
-            <button
-              key={need}
-              type="button"
-              aria-pressed={on}
-              disabled={updating}
-              onClick={() => toggle(need)}
-              className={cn("min-h-10 rounded-full border px-3.5 text-[0.8125rem] transition disabled:opacity-60", on ? "border-ink bg-ink text-paper" : "border-line bg-paper hover:border-ink/40")}
-            >
-              {NEED_LABEL[need]}
-            </button>
-          );
-        })}
-      </div>
-      {updating ? (
-        <p className="mt-2 flex items-center gap-2 text-xs text-muted" role="status">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Atualizando suas recomendações…
-        </p>
-      ) : null}
-    </fieldset>
-  );
-}
 
 export function SkinDisclaimer() {
   return (
@@ -86,7 +49,7 @@ export function ProductsView({ plan }: { plan: SkinPlan }) {
   if (!plan.recommendations.length) {
     return (
       <p className="border border-line bg-ivory p-6 text-sm leading-relaxed text-ink-soft">
-        No momento não encontramos no catálogo produtos disponíveis que correspondam a estas necessidades. Ajuste acima o que você quer cuidar ou explore o catálogo.
+        No momento não encontramos no catálogo produtos disponíveis que correspondam a estas necessidades. Explore o catálogo ou refaça a análise com outra foto.
       </p>
     );
   }

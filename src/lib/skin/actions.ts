@@ -1,26 +1,9 @@
 "use server";
 
 import { z } from "zod";
-import { getStoreSettings } from "@/lib/catalog/queries";
 import { isSupabaseConfigured } from "@/lib/env";
 import { createServerSupabase } from "@/lib/supabase/server";
-import { getSkinCatalog } from "./catalog";
-import { buildSkinPlan, type SkinPlan } from "./recommend";
 import { CHARACTERISTICS, NEEDS, OBSERVATION_STATUS, PRIORITIES } from "./taxonomy";
-
-const needsSchema = z
-  .array(z.object({ need: z.enum(NEEDS), priority: z.enum(PRIORITIES) }))
-  .max(NEEDS.length)
-  .refine((list) => new Set(list.map((n) => n.need)).size === list.length);
-
-/** Recomputes the products and the routine when the customer adjusts the needs (no AI call, catalogue only). */
-export async function planForNeeds(input: unknown): Promise<{ ok: true; plan: SkinPlan } | { ok: false; error: string }> {
-  const parsed = needsSchema.safeParse(input);
-  if (!parsed.success) return { ok: false, error: "Escolha as necessidades novamente." };
-  const settings = await getStoreSettings();
-  if (!settings.skin_analysis_enabled) return { ok: false, error: "A análise de pele não está disponível no momento." };
-  return { ok: true, plan: buildSkinPlan(parsed.data, await getSkinCatalog()) };
-}
 
 const text = (max: number) => z.string().trim().min(1).max(max);
 const reportSchema = z.object({
