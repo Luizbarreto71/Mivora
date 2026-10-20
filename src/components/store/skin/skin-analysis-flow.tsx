@@ -11,15 +11,14 @@ import type { SkinPlan } from "@/lib/skin/recommend";
 import type { SkinNeed } from "@/lib/skin/taxonomy";
 import { cn } from "@/lib/utils";
 import { preparePhoto, type PreparedPhoto } from "./prepare-photo";
-import { AnalysisView, ProductsView, RoutineView, SaveReport, type SkinResult } from "./skin-result";
+import { NeedsPicker, ProductsView, RoutineView, SaveReport, SkinDisclaimer, type SkinResult } from "./skin-result";
 
-type Step = "inicio" | "consentimento" | "foto" | "analise" | "resultado" | "produtos" | "rotina";
+type Step = "inicio" | "consentimento" | "foto" | "analise" | "produtos" | "rotina";
 const STEPS: { key: Step; label: string }[] = [
   { key: "inicio", label: "Início" },
   { key: "consentimento", label: "Consentimento" },
   { key: "foto", label: "Foto" },
   { key: "analise", label: "Análise" },
-  { key: "resultado", label: "Resultado" },
   { key: "produtos", label: "Produtos" },
   { key: "rotina", label: "Rotina" },
 ];
@@ -71,7 +70,7 @@ export function SkinAnalysisFlow({ available, intervalDays }: { available: boole
     if (saved) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setResult(saved);
-      setStep("resultado");
+      setStep("produtos");
     }
     return () => {
       if (photoRef.current) URL.revokeObjectURL(photoRef.current.url);
@@ -157,7 +156,7 @@ export function SkinAnalysisFlow({ available, intervalDays }: { available: boole
     const next: SkinResult = { analysis: outcome.analysis, plan: outcome.plan, analyzedAt: outcome.analyzedAt, selectedNeeds: outcome.analysis.needs.map((n) => n.need) };
     setResult(next);
     storeResult(next);
-    go("resultado");
+    go("produtos");
   };
 
   const changeNeeds = async (needs: SkinNeed[]) => {
@@ -450,17 +449,17 @@ export function SkinAnalysisFlow({ available, intervalDays }: { available: boole
           </section>
         ) : null}
 
-        {result && (step === "resultado" || step === "produtos" || step === "rotina") ? (
+        {result && (step === "produtos" || step === "rotina") ? (
           <section aria-labelledby="skin-result">
             <div className="flex flex-wrap items-end justify-between gap-4">
               <div>
                 <p className="text-[0.6875rem] font-semibold uppercase tracking-[0.2em] text-rose-ink">Análise de pele com IA</p>
                 <h2 id="skin-result" className="heading-display mt-2 text-[1.875rem] sm:text-[2.375rem]">
-                  {step === "resultado" ? "Sua análise está pronta" : step === "produtos" ? "Produtos recomendados" : "Sua rotina personalizada"}
+                  {step === "produtos" ? "Produtos recomendados" : "Sua rotina personalizada"}
                 </h2>
               </div>
               <div className="flex flex-wrap gap-2" role="tablist" aria-label="Resultado da análise">
-                {(["resultado", "produtos", "rotina"] as const).map((s) => (
+                {(["produtos", "rotina"] as const).map((s) => (
                   <button
                     key={s}
                     type="button"
@@ -469,28 +468,29 @@ export function SkinAnalysisFlow({ available, intervalDays }: { available: boole
                     onClick={() => go(s)}
                     className={cn("min-h-10 rounded-full border px-4 text-[0.8125rem] transition", step === s ? "border-ink bg-ink text-paper" : "border-line hover:border-ink/40")}
                   >
-                    {s === "resultado" ? "Análise" : s === "produtos" ? `Produtos (${result.plan.recommendations.length})` : "Rotina"}
+                    {s === "produtos" ? `Produtos (${result.plan.recommendations.length})` : "Rotina"}
                   </button>
                 ))}
               </div>
             </div>
 
             <div className="mt-8">
-              {step === "resultado" ? <AnalysisView result={result} photoUrl={photo?.url ?? null} onNeedsChange={changeNeeds} updating={updating} /> : null}
-              {step === "produtos" ? <ProductsView plan={result.plan} /> : null}
+              {step === "produtos" ? (
+                <div className="space-y-8">
+                  <NeedsPicker result={result} onNeedsChange={changeNeeds} updating={updating} />
+                  <ProductsView plan={result.plan} />
+                </div>
+              ) : null}
               {step === "rotina" ? <RoutineView plan={result.plan} /> : null}
             </div>
 
             <div className="mt-10 space-y-5 border-t border-line pt-6">
-              {step === "resultado" ? (
-                <Button size="lg" className="w-full gap-3 sm:w-auto" onClick={() => go("produtos")}>
-                  Ver produtos recomendados <ArrowRight className="h-4 w-4" strokeWidth={1.75} />
-                </Button>
-              ) : step === "produtos" ? (
+              {step === "produtos" ? (
                 <Button size="lg" className="w-full gap-3 sm:w-auto" onClick={() => go("rotina")}>
                   Ver minha rotina <ArrowRight className="h-4 w-4" strokeWidth={1.75} />
                 </Button>
               ) : null}
+              <SkinDisclaimer />
               <SaveReport result={result} />
               <div className="flex flex-wrap gap-x-6 gap-y-3 text-sm">
                 <button type="button" onClick={restart} className="inline-flex items-center gap-2 font-semibold underline underline-offset-4">

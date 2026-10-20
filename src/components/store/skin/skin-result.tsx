@@ -8,7 +8,7 @@ import { buttonClasses } from "@/components/ui/button";
 import { formatBRL } from "@/lib/money";
 import type { SkinNeedResult, SkinObservation } from "@/lib/skin/analysis";
 import type { Recommendation, RoutineSlot, SkinPlan } from "@/lib/skin/recommend";
-import { CHARACTERISTIC_LABEL, NEED_LABEL, NEEDS, OBSERVATION_STATUS_LABEL, ROUTINE_STEP_LABEL, type SkinNeed } from "@/lib/skin/taxonomy";
+import { NEED_LABEL, NEEDS, ROUTINE_STEP_LABEL, type SkinNeed } from "@/lib/skin/taxonomy";
 import { getMyAccount } from "@/lib/store/account-actions";
 import { saveSkinReport } from "@/lib/skin/actions";
 import { cn } from "@/lib/utils";
@@ -23,123 +23,45 @@ export type SkinResult = {
   selectedNeeds: SkinNeed[];
 };
 
-const STATUS_STYLE = {
-  evidente: "bg-rose text-rose-ink",
-  leve: "bg-beige text-ink",
-  nao_observado: "bg-ivory text-muted",
-  sem_evidencia: "bg-ivory text-muted",
-} as const;
-
-export function AnalysisView({
-  result,
-  photoUrl,
-  onNeedsChange,
-  updating,
-}: {
-  result: SkinResult;
-  photoUrl: string | null;
-  onNeedsChange: (needs: SkinNeed[]) => void;
-  updating: boolean;
-}) {
-  const { analysis } = result;
-  const seen = analysis.observations.filter((o) => o.status !== "sem_evidencia");
-  const unknown = analysis.observations.filter((o) => o.status === "sem_evidencia");
+/** What the recommendations take care of: starts with the needs the photo suggested; the customer can adjust it. */
+export function NeedsPicker({ result, onNeedsChange, updating }: { result: SkinResult; onNeedsChange: (needs: SkinNeed[]) => void; updating: boolean }) {
   const toggle = (need: SkinNeed) =>
     onNeedsChange(result.selectedNeeds.includes(need) ? result.selectedNeeds.filter((n) => n !== need) : [...result.selectedNeeds, need]);
-
   return (
-    <div className="space-y-10">
-      <div className="grid gap-6 sm:grid-cols-[9rem_minmax(0,1fr)] sm:items-start">
-        <div className="relative mx-auto h-36 w-36 overflow-hidden rounded-full border-4 border-rose bg-ivory sm:mx-0">
-          {photoUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element -- local object URL, never uploaded anywhere for display
-            <img src={photoUrl} alt="Sua foto (fica só neste aparelho)" className="h-full w-full object-cover" />
-          ) : (
-            <span className="flex h-full items-center justify-center px-4 text-center text-xs text-muted">A foto não fica salva</span>
-          )}
-        </div>
-        <div>
-          <p className="text-sm leading-relaxed text-ink-soft">{analysis.summary}</p>
-          <p className="mt-2 text-xs text-muted">Análise feita em {new Date(result.analyzedAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}.</p>
-        </div>
+    <fieldset>
+      <legend className="text-[0.8125rem] font-semibold">O que você quer cuidar</legend>
+      <p className="mt-1 text-xs text-muted">Começamos pelo que a análise da sua foto indicou. Toque para ajustar: os produtos e a rotina são atualizados.</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {NEEDS.map((need) => {
+          const on = result.selectedNeeds.includes(need);
+          return (
+            <button
+              key={need}
+              type="button"
+              aria-pressed={on}
+              disabled={updating}
+              onClick={() => toggle(need)}
+              className={cn("min-h-10 rounded-full border px-3.5 text-[0.8125rem] transition disabled:opacity-60", on ? "border-ink bg-ink text-paper" : "border-line bg-paper hover:border-ink/40")}
+            >
+              {NEED_LABEL[need]}
+            </button>
+          );
+        })}
       </div>
+      {updating ? (
+        <p className="mt-2 flex items-center gap-2 text-xs text-muted" role="status">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Atualizando suas recomendações…
+        </p>
+      ) : null}
+    </fieldset>
+  );
+}
 
-      <section aria-labelledby="caracteristicas">
-        <h3 id="caracteristicas" className="text-base font-semibold">
-          Características observadas
-        </h3>
-        <ul className="mt-4 grid gap-3 sm:grid-cols-2">
-          {seen.map((o) => (
-            <li key={o.characteristic} className="border border-line bg-paper p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-sm font-semibold">{CHARACTERISTIC_LABEL[o.characteristic]}</span>
-                <span className={cn("rounded-full px-2.5 py-0.5 text-[0.6875rem] font-medium", STATUS_STYLE[o.status])}>{OBSERVATION_STATUS_LABEL[o.status]}</span>
-              </div>
-              <p className="mt-2 text-sm leading-relaxed text-ink-soft">{o.finding}</p>
-              <p className="mt-1.5 text-xs leading-relaxed text-muted">{o.explanation}</p>
-            </li>
-          ))}
-        </ul>
-        {unknown.length ? (
-          <p className="mt-3 text-xs leading-relaxed text-muted">
-            Com esta foto não foi possível avaliar: {unknown.map((o) => CHARACTERISTIC_LABEL[o.characteristic].toLowerCase()).join(", ")}.
-          </p>
-        ) : null}
-      </section>
-
-      <section aria-labelledby="necessidades-pele">
-        <h3 id="necessidades-pele" className="text-base font-semibold">
-          Necessidades que podem ser consideradas
-        </h3>
-        {analysis.needs.length ? (
-          <ul className="mt-3 space-y-2 text-sm">
-            {analysis.needs.map((n) => (
-              <li key={n.need} className="flex gap-2.5">
-                <Check className="mt-0.5 h-4 w-4 shrink-0 text-rose-ink" strokeWidth={2} />
-                <span>
-                  <strong className="font-semibold">{NEED_LABEL[n.need]}</strong> — <span className="text-ink-soft">{n.reason}</span>
-                </span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="mt-3 text-sm text-ink-soft">A análise não apontou uma necessidade específica. Você pode escolher abaixo o que deseja cuidar.</p>
-        )}
-        <fieldset className="mt-5">
-          <legend className="text-[0.8125rem] font-semibold">Ajuste o que você quer cuidar</legend>
-          <p className="mt-1 text-xs text-muted">Os produtos e a rotina são atualizados com a sua escolha.</p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {NEEDS.map((need) => {
-              const on = result.selectedNeeds.includes(need);
-              return (
-                <button
-                  key={need}
-                  type="button"
-                  aria-pressed={on}
-                  disabled={updating}
-                  onClick={() => toggle(need)}
-                  className={cn("min-h-10 rounded-full border px-3.5 text-[0.8125rem] transition disabled:opacity-60", on ? "border-ink bg-ink text-paper" : "border-line bg-paper hover:border-ink/40")}
-                >
-                  {NEED_LABEL[need]}
-                </button>
-              );
-            })}
-          </div>
-          {updating ? (
-            <p className="mt-2 flex items-center gap-2 text-xs text-muted" role="status">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Atualizando suas recomendações…
-            </p>
-          ) : null}
-        </fieldset>
-      </section>
-
-      <div className="flex gap-3 border border-line bg-ivory p-4 text-xs leading-relaxed text-ink-soft">
-        <Info className="mt-0.5 h-4 w-4 shrink-0 text-rose-ink" strokeWidth={1.75} />
-        <div>
-          <p>Esta é uma análise cosmética e visual feita a partir de uma foto, não um diagnóstico médico, e não substitui a avaliação de um dermatologista.</p>
-          {analysis.limitations.length ? <p className="mt-1.5">Limitações desta foto: {analysis.limitations.join(" ")}</p> : null}
-        </div>
-      </div>
+export function SkinDisclaimer() {
+  return (
+    <div className="flex gap-3 rounded-card border border-line bg-ivory p-4 text-xs leading-relaxed text-ink-soft">
+      <Info className="mt-0.5 h-4 w-4 shrink-0 text-rose-ink" strokeWidth={1.75} />
+      <p>Esta é uma análise cosmética e visual feita a partir de uma foto, não um diagnóstico médico, e não substitui a avaliação de um dermatologista.</p>
     </div>
   );
 }
@@ -164,7 +86,7 @@ export function ProductsView({ plan }: { plan: SkinPlan }) {
   if (!plan.recommendations.length) {
     return (
       <p className="border border-line bg-ivory p-6 text-sm leading-relaxed text-ink-soft">
-        No momento não encontramos no catálogo produtos disponíveis que correspondam a estas necessidades. Ajuste as necessidades no resultado ou explore o catálogo.
+        No momento não encontramos no catálogo produtos disponíveis que correspondam a estas necessidades. Ajuste acima o que você quer cuidar ou explore o catálogo.
       </p>
     );
   }

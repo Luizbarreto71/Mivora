@@ -2000,23 +2000,22 @@ test("Análise de pele — consentimento obrigatório, foto inadequada, falha do
   await page.getByRole("button", { name: "Analisar minha foto" }).click();
   await expect(page.getByText("O serviço de análise está ocupado agora. Tente de novo em instantes.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Tentar de novo" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Sua análise está pronta" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Produtos recomendados" })).toHaveCount(0);
   await page.getByRole("button", { name: "Voltar para a foto" }).click();
 
   // a real analysis: the result follows the photo
   await page.getByLabel("Trocar foto").setInputFiles(await photo(230, 200, 180));
   await page.getByRole("button", { name: "Analisar minha foto" }).click();
-  await expect(page.getByRole("heading", { name: "Sua análise está pronta" })).toBeVisible({ timeout: 20_000 });
-  const traits = page.getByRole("region", { name: "Características observadas" });
-  await expect(traits).toContainText("Hidratação");
-  await expect(traits).toContainText("Merece atenção");
-  await expect(traits).toContainText("A pele aparenta ressecamento nas maçãs do rosto.");
-  await expect(page.getByText("Com esta foto não foi possível avaliar: poros.")).toBeVisible();
-  await expect(page.getByRole("region", { name: "Necessidades que podem ser consideradas" })).toContainText("Hidratação — A aparência de ressecamento");
+  // the result opens on the products: no analysis tab or analysis text, only products and routine
+  await expect(page.getByRole("heading", { name: "Produtos recomendados" })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("tab")).toHaveText([/^Produtos \(\d+\)$/, "Rotina"]);
+  await expect(page.getByText("A pele aparenta ressecamento nas maçãs do rosto.")).toHaveCount(0);
+  await expect(page.getByText("Características observadas")).toHaveCount(0);
+  // the need the photo suggested comes selected, and the medical disclaimer stays
+  await expect(page.getByRole("button", { name: "Hidratação", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByText(/não um diagnóstico médico, e não substitui a avaliação de um dermatologista/)).toBeVisible();
 
   // products: only real, available catalogue products, with their current price and links
-  await page.getByRole("button", { name: "Ver produtos recomendados" }).click();
   const cards = page.locator("main article");
   await expect(cards.first()).toBeVisible();
   const names = await cards.locator("h3").allTextContents();
@@ -2036,7 +2035,7 @@ test("Análise de pele — consentimento obrigatório, foto inadequada, falha do
   await cards.first().getByRole("link", { name: "Ver produto" }).click();
   await expect(page.getByRole("heading", { level: 1, name: names[0] })).toBeVisible();
   await page.goBack();
-  await expect(page.getByRole("heading", { name: "Sua análise está pronta" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Produtos recomendados" })).toBeVisible();
 
   // add one product with the store's cart
   await page.getByRole("tab", { name: /Produtos/ }).click();
@@ -2057,7 +2056,7 @@ test("Análise de pele — consentimento obrigatório, foto inadequada, falha do
   await page.getByRole("dialog", { name: /Sacola/ }).getByRole("button", { name: "Fechar" }).click();
 
   // adjusting the needs recomputes from the catalogue, without a new photo
-  await page.getByRole("tab", { name: "Análise" }).click();
+  await page.getByRole("tab", { name: /Produtos/ }).click();
   await page.getByRole("button", { name: "Conforto da pele" }).click();
   await expect(page.getByRole("button", { name: "Conforto da pele" })).toHaveAttribute("aria-pressed", "true");
 
@@ -2067,9 +2066,9 @@ test("Análise de pele — consentimento obrigatório, foto inadequada, falha do
   await page.getByRole("button", { name: "Continuar" }).click();
   await page.getByLabel("Escolher foto da galeria").setInputFiles(await photo(225, 110, 110));
   await page.getByRole("button", { name: "Analisar minha foto" }).click();
-  await expect(page.getByRole("heading", { name: "Sua análise está pronta" })).toBeVisible({ timeout: 20_000 });
-  await expect(page.getByRole("region", { name: "Características observadas" })).toContainText("Vermelhidão");
-  await expect(page.getByRole("region", { name: "Necessidades que podem ser consideradas" })).toContainText("Conforto da pele");
+  await expect(page.getByRole("heading", { name: "Produtos recomendados" })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("button", { name: "Conforto da pele" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Hidratação", exact: true })).toHaveAttribute("aria-pressed", "false");
   await ctx.close();
 });
 
@@ -2092,7 +2091,7 @@ test("Análise de pele — relatório salvo na conta (consentimento à parte), p
   await page.getByRole("button", { name: "Continuar" }).click();
   await page.getByLabel("Escolher foto da galeria").setInputFiles(await photo(230, 200, 180));
   await page.getByRole("button", { name: "Analisar minha foto" }).click();
-  await expect(page.getByRole("heading", { name: "Sua análise está pronta" })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("heading", { name: "Produtos recomendados" })).toBeVisible({ timeout: 20_000 });
   const save = page.getByRole("button", { name: "Salvar relatório" });
   await expect(save).toBeDisabled();
   await page.getByRole("checkbox", { name: /salvar o texto deste relatório/ }).check();
@@ -2145,8 +2144,7 @@ test("Análise de pele — relatório salvo na conta (consentimento à parte), p
   await v.getByRole("button", { name: "Continuar" }).click();
   await v.getByLabel("Escolher foto da galeria").setInputFiles(await photo(230, 200, 180));
   await v.getByRole("button", { name: "Analisar minha foto" }).click();
-  await expect(v.getByRole("heading", { name: "Sua análise está pronta" })).toBeVisible({ timeout: 20_000 });
-  await v.getByRole("button", { name: "Ver produtos recomendados" }).click();
+  await expect(v.getByRole("heading", { name: "Produtos recomendados" })).toBeVisible({ timeout: 20_000 });
   await expect(v.locator('main article a[href="/produtos/dr-althea-345-relief-cream"]')).toHaveCount(0);
   await admin.getByLabel("Pode aparecer nas recomendações da análise de pele").check();
   await admin.getByRole("button", { name: "Salvar análise de pele" }).click();
@@ -2211,7 +2209,7 @@ test("Análise de pele no celular (390 px) — pop-up proporcional, seção da h
   await expect(page.getByRole("img", { name: "Pré-visualização da sua foto" })).toBeVisible();
   expect(await overflow(), "foto").toBeLessThanOrEqual(0);
   await page.getByRole("button", { name: "Analisar minha foto" }).tap();
-  await expect(page.getByRole("heading", { name: "Sua análise está pronta" })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByRole("heading", { name: "Produtos recomendados" })).toBeVisible({ timeout: 20_000 });
   expect(await overflow(), "resultado").toBeLessThanOrEqual(0);
   await page.getByRole("tab", { name: /Produtos/ }).tap();
   await expect(page.locator("main article").first()).toBeVisible();
