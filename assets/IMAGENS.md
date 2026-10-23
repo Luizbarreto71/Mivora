@@ -53,3 +53,11 @@ Sem marcas de terceiros visíveis e sem rostos identificáveis.
 | public/editorial/categoria-fragrancias.webp | Pétalas rosadas em detalhe | https://unsplash.com/photos/E44CYHqUl1c |
 | public/editorial/editorial-rotina.webp | Texturas de cuidados com a pele e folhas verdes | https://unsplash.com/photos/g6q3lFAe3kA |
 | public/editorial/editorial-conta-gotas.webp | Gota de sérum aplicada na mão com conta-gotas | https://unsplash.com/photos/80wCkpt-IKE |
+
+## Fotos do catálogo BIGS K-Beauty (21/10/2026)
+
+Fotos de produto extraídas do catálogo de atacado "BIGS K-Beauty" de 21/10/2026, enviado pela proprietária da loja, que informou que as fotos são da loja e autorizou o uso no site (23/10/2026).
+
+- 558 arquivos em `public/products/<slug>.webp`, um por produto importado. A lista completa (código do catálogo → produto, categoria e se tem foto) está em `assets/catalogo-bigs-2026-10-21.csv`. Os preços de atacado não ficam no repositório.
+- Tratamento: fundo cinza-claro convertido em branco, recorte do espaço vazio, produto centralizado em quadrado de 600 px (WebP). As fotos originais do catálogo têm 300 px, por isso ampliações pequenas (no máximo 2,2×). Elas ficam menos nítidas que as fotos oficiais de 1200 px quando ampliadas na página do produto.
+- 7 itens do catálogo não tinham foto (Tsubaki Kit Damage, Tsubaki Kit Moist, Dr. Althea 2% Salicylic Acid Clear, Elroel Blanc Cover Cream Stick Light, VT Cosmetics V-Mode Gua Sha, Lattafa Asad Bourbon, Lattafa Emeer). Esses produtos foram cadastrados como rascunho até receberem foto.
