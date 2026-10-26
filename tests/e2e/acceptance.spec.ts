@@ -670,6 +670,9 @@ test("Home premium — cabeçalho, busca, seções do mockup, produto em abas, n
   const categories = page.getByRole("region", { name: "Compre por categoria" });
   await expect(categories.getByRole("link", { name: /Séruns e ampolas/ })).toHaveAttribute("href", "/categorias/seruns-e-ampolas");
   await expect(categories.getByRole("link", { name: /Séruns e ampolas/ })).toContainText(/\d+ produtos?/);
+  // each category is shown with one of its products, not an editorial photo
+  await expect(categories.locator("img").first()).toBeVisible();
+  await expect(categories.locator('img[src*="editorial"]')).toHaveCount(0);
   await expect(page.getByRole("list", { name: "Destaques da curadoria" }).locator("article").first()).toBeVisible();
   const guides = page.getByRole("region", { name: "Escolha com segurança" });
   await expect(guides.getByRole("link", { name: /Monte seu ritual em etapas/ })).toHaveAttribute("href", "/ritual");

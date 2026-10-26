@@ -47,10 +47,16 @@ export default async function HomePage() {
   const brandRow = brands.filter((b) => b.productCount > 0).slice(0, 5);
   const needRow = needs.filter((n) => n.productCount > 0).slice(0, 5);
   const heroProduct = [...featured.items, ...recent.items].find((p) => p.image) ?? null;
-  const categoryRow: CategoryTile[] = categories
-    .filter((c) => !c.parent_id && c.image_url && c.productCount > 0)
-    .map((c) => ({ slug: c.slug, name: c.name, image: c.image_url!, productCount: c.productCount }))
-    .slice(0, 8);
+  // "Compre por categoria": every product type with products, shown with one of its own products
+  // (same order as the listing: available and curated first), never the same product twice
+  const topCategories = categories.filter((c) => !c.parent_id && c.productCount > 0).slice(0, 12);
+  const showcases = await Promise.all(topCategories.map((c) => listProducts({ categoria: [c.slug] }, 6)));
+  const shown = new Set<string>();
+  const categoryRow: CategoryTile[] = topCategories.map((c, i) => {
+    const product = showcases[i].items.find((p) => p.image && !shown.has(p.id)) ?? showcases[i].items.find((p) => p.image);
+    if (product) shown.add(product.id);
+    return { slug: c.slug, name: c.name, image: product?.image?.url ?? null, productCount: c.productCount };
+  });
   const skinOn = settings.skin_analysis_enabled && skinAiConfigured();
   const guides: Guide[] = [
     {
