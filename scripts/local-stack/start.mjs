@@ -323,6 +323,8 @@ async function anthropicDouble(req, res) {
   if (req.headers["x-api-key"] !== TEST_ANTHROPIC_KEY) return anthropicError(res, 401, "authentication_error", "invalid x-api-key");
   const betas = String(req.headers["anthropic-beta"] ?? "");
   const body = JSON.parse((await readBody(req)).toString() || "{}");
+  const systemText = (Array.isArray(body.system) ? body.system : [{ text: body.system ?? "" }]).map((b) => b.text ?? "").join(" ");
+  if (/lista diária|ficha olfativa|Perfume VIP AI/.test(systemText)) return vipDouble(body, betas, systemText, res);
   const image = (body.messages?.[0]?.content ?? []).find((b) => b.type === "image");
   // the request the store must send: current model, server-side fallback, structured output, one JPEG photo
   if (
@@ -387,6 +389,112 @@ async function anthropicDouble(req, res) {
     stop_sequence: null,
     usage: { input_tokens: 1800, output_tokens: 420 },
   });
+}
+
+// Anthropic double for the VIP community agent: splits the list, "researches" with a canned web search
+// result (a perfume named "Desconhecido" is never found) and writes only from the data it receives.
+function vipDouble(body, betas, systemText, res) {
+  if (body.model !== "claude-opus-5-5" || body.fallbacks !== "default" || !betas.includes("server-side-fallback-2026-07-01")) {
+    return anthropicError(res, 400, "invalid_request_error", "unexpected request shape");
+  }
+  const first = body.messages?.[0]?.content;
+  const user = typeof first === "string" ? first : JSON.stringify(first ?? "");
+  const reply = (content, stop_reason = "end_turn") =>
+    json(res, 200, { id: "msg_local_" + randomUUID().slice(0, 8), type: "message", role: "assistant", model: body.model, content, stop_reason, stop_sequence: null, usage: { input_tokens: 900, output_tokens: 200 } });
+  const structured = body.output_config?.format?.type === "json_schema";
+  if (systemText.includes("lista diária")) {
+    if (!structured) return anthropicError(res, 400, "invalid_request_error", "structured output expected");
+    const list = user.replace(/^<lista>\n?/, "").replace(/\n?<\/lista>$/, "");
+    const itens = list
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => /R\$|\d\s*ml/i.test(l))
+      .map((l) => {
+        // like a model would, it drops the leading emoji
+        const line = l.replace(/^[^\p{L}\p{N}]+/u, "");
+        const nome = line.replace(/\s*[—-]?\s*R\$.*$/, "").replace(/\s*\d+\s*ml.*$/i, "").trim();
+        return { linhas: [line], marca: nome.split(" ")[0], nome, observacoes: "" };
+      });
+    return reply([{ type: "text", text: JSON.stringify({ itens }) }]);
+  }
+  if (systemText.includes("ficha olfativa")) {
+    const tools = body.tools ?? [];
+    const sheet = tools.find((t) => t.name === "registrar_ficha");
+    if (!tools.some((t) => t.type === "web_search_20260209") || !tools.some((t) => t.type === "web_fetch_20260209") || !sheet?.strict) {
+      return anthropicError(res, 400, "invalid_request_error", "web tools and a strict registrar_ficha tool expected");
+    }
+    const unknown = /Desconhecido/i.test(user);
+    const url = "https://www.fragrantica.com.br/perfume/Lattafa-Perfumes/Asad-63546.html";
+    return reply(
+      [
+        { type: "server_tool_use", id: "srvtoolu_local1", name: "web_search", input: { query: "Lattafa Asad fragrantica" } },
+        { type: "web_search_tool_result", tool_use_id: "srvtoolu_local1", content: [{ type: "web_search_result", url, title: "Asad Lattafa Perfumes", encrypted_content: "local", page_age: null }] },
+        {
+          type: "tool_use",
+          id: "toolu_local1",
+          name: "registrar_ficha",
+          input: {
+            status: unknown ? "nao_encontrada" : "confirmada",
+            identificado_como: unknown ? "" : "Lattafa Asad Eau de Parfum",
+            concentracao: unknown ? "" : "Eau de Parfum",
+            genero: unknown ? "" : "masculino",
+            familia: unknown ? "" : "Âmbar especiado",
+            notas_topo: unknown ? [] : ["pimenta-preta", "abacaxi"],
+            notas_coracao: unknown ? [] : ["café"],
+            notas_fundo: unknown ? [] : ["baunilha", "âmbar"],
+            notas_gerais: [],
+            perfil: unknown ? "" : "Especiado e adocicado, com fundo quente de baunilha.",
+            ocasioes: unknown ? [] : ["noite", "outono"],
+            observacoes: unknown ? "Nenhuma fonte confiável encontrada." : "",
+            fontes: unknown ? [] : [{ titulo: "Fragrantica", url }],
+          },
+        },
+      ],
+      "tool_use",
+    );
+  }
+  if (!structured) return anthropicError(res, 400, "invalid_request_error", "structured output expected");
+  const name = /- Perfume: (.+)/.exec(user)?.[1] ?? "Perfume";
+  const price = /- Preço: (R\$ [\d.,]+)/.exec(user)?.[1];
+  const notes = /Notas de topo: (.+)/.exec(user)?.[1];
+  const texto = ["*" + name + "*", notes ? "Abre com " + notes + ", sobre um fundo quente." : "Uma assinatura elegante para o dia a dia.", price ? "💎 " + price : null].filter(Boolean).join("\n");
+  return reply([{ type: "text", text: JSON.stringify({ texto }) }]);
+}
+
+// Z-API double for the VIP community (never the real WhatsApp): one connected number in one community,
+// and every message "sent" is kept so the tests can read what the community would have received.
+const TEST_ZAPI = { instance: "local-instance", token: "local-token", client: "local-client-token" };
+const ZAPI_COMMUNITY = "98372465382764532938";
+const zapiSent = [];
+async function zapiDouble(req, res, url) {
+  if (url.pathname === "/zapi/test/sent") return json(res, 200, zapiSent);
+  const m = url.pathname.match(/^\/zapi\/instances\/([^/]+)\/token\/([^/]+)\/(.+)$/);
+  if (!m || m[1] !== TEST_ZAPI.instance || m[2] !== TEST_ZAPI.token) return json(res, 400, { error: "Instance not found" });
+  if (req.headers["client-token"] !== TEST_ZAPI.client) return json(res, 400, { error: "null not allowed" });
+  const route = m[3];
+  if (route === "status" && req.method === "GET") return json(res, 200, { connected: true, smartphoneConnected: true, session: true });
+  if (route === "communities" && req.method === "GET") return json(res, 200, [{ name: "MIVORA VIP", id: ZAPI_COMMUNITY }]);
+  if (route === "communities-metadata/" + ZAPI_COMMUNITY && req.method === "GET") {
+    return json(res, 200, {
+      name: "MIVORA VIP",
+      id: ZAPI_COMMUNITY,
+      subGroups: [
+        { name: "MIVORA VIP", phone: "120363019502650977-group", isGroupAnnouncement: true },
+        { name: "Conversa VIP", phone: "120363019502650978-group", isGroupAnnouncement: false },
+      ],
+    });
+  }
+  if ((route === "send-text" || route === "send-image") && req.method === "POST") {
+    const body = JSON.parse((await readBody(req)).toString() || "{}");
+    const text = route === "send-text" ? body.message : body.caption;
+    if (!body.phone || (route === "send-text" && !text) || (route === "send-image" && !String(body.image ?? "").startsWith("data:image/png;base64,"))) {
+      return json(res, 400, { error: "invalid message" });
+    }
+    const messageId = "LOCAL" + String(zapiSent.length + 1).padStart(4, "0");
+    zapiSent.push({ route, phone: body.phone, text: text ?? "", messageId, at: Date.now() });
+    return json(res, 200, { zaapId: "Z" + messageId, messageId, id: messageId });
+  }
+  return json(res, 404, { error: "not found" });
 }
 
 const MP_SDK_STUB = `(function () {
@@ -659,6 +767,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, testCarrierQuote(JSON.parse((await readBody(req)).toString() || "{}")));
     }
     if (url.pathname === "/anthropic/v1/messages" && req.method === "POST") return anthropicDouble(req, res);
+    if (url.pathname.startsWith("/zapi/")) return zapiDouble(req, res, url);
     // Mercado Pago test doubles
     if (url.pathname.startsWith("/mercadopago/")) {
       const mpPath = url.pathname.slice("/mercadopago".length);
@@ -930,7 +1039,9 @@ writeFileSync(
     // online payments against the Mercado Pago doubles; the service role key is the local one
     `export MERCADOPAGO_BASE_URL=http://localhost:${cfg.gatewayPort}/mercadopago\nexport NEXT_PUBLIC_MERCADOPAGO_SDK_URL=http://localhost:${cfg.gatewayPort}/mercadopago/js/v2\nexport MERCADOPAGO_ACCESS_TOKEN=${TEST_MP_TOKEN}\nexport MERCADOPAGO_WEBHOOK_SECRET=${TEST_MP_WEBHOOK_SECRET}\nexport SUPABASE_SERVICE_ROLE_KEY=${serviceKey}\n` +
     // skin analysis against the Anthropic double (never the real API)
-    `export ANTHROPIC_API_KEY=${TEST_ANTHROPIC_KEY}\nexport ANTHROPIC_BASE_URL=http://localhost:${cfg.gatewayPort}/anthropic\n`,
+    `export ANTHROPIC_API_KEY=${TEST_ANTHROPIC_KEY}\nexport ANTHROPIC_BASE_URL=http://localhost:${cfg.gatewayPort}/anthropic\n` +
+    // VIP community posts against the Z-API double (never the real WhatsApp)
+    `export ZAPI_BASE_URL=http://localhost:${cfg.gatewayPort}/zapi/instances\nexport ZAPI_INSTANCE_ID=${TEST_ZAPI.instance}\nexport ZAPI_INSTANCE_TOKEN=${TEST_ZAPI.token}\nexport ZAPI_CLIENT_TOKEN=${TEST_ZAPI.client}\n`,
 );
 
 // .env.local for the Next.js app

@@ -2216,3 +2216,76 @@ test("Análise de pele no celular (390 px) — pop-up proporcional, seção da h
   expect(await overflow(), "rotina").toBeLessThanOrEqual(0);
   await ctx.close();
 });
+
+test("Comunidade VIP: lista do dia → pesquisa e texto → aprovação → post no grupo de avisos (dublês da IA e da Z-API)", async ({ request }) => {
+  test.setTimeout(120_000);
+  const serviceHeaders = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" };
+
+  // 1. the dedicated number, its community and the sending window
+  await admin.goto("/admin/comunidade-vip/configuracoes");
+  await admin.getByRole("button", { name: "Verificar conexão e buscar comunidades" }).click();
+  await expect(admin.getByText(/Número conectado\. Escolha abaixo/)).toBeVisible();
+  await admin.getByRole("button", { name: "Usar esta" }).click();
+  await expect(admin.getByText("Comunidade “MIVORA VIP” escolhida.")).toBeVisible();
+  await admin.reload();
+  await expect(admin.getByLabel("Código do grupo de avisos")).toHaveValue("120363019502650977-group");
+  await admin.getByLabel("Primeiro post do dia").fill("00:00");
+  await admin.getByLabel("Último post do dia").fill("23:59");
+  await admin.getByLabel("Intervalo entre posts (minutos)").fill("60");
+  await admin.getByLabel("Fechamento de todos os posts").fill("Para garantir o seu, chame no privado.");
+  await admin.getByLabel(/Envio automático ligado/).check();
+  await admin.getByRole("button", { name: "Salvar configurações" }).click();
+  await expect(admin.getByText("Configurações salvas. O envio automático está ligado.")).toBeVisible();
+
+  // 2. the day's list: one perfume found on the web, one not found and without price
+  await admin.goto("/admin/comunidade-vip");
+  await admin.getByLabel("Lista", { exact: true }).fill("Lista VIP de hoje\n✨ Lattafa Asad EDP 100ml — R$ 189,90\nPerfume Desconhecido 50ml\nBoa semana!");
+  await admin.getByRole("button", { name: "Preparar posts" }).click();
+  await expect(admin).toHaveURL(/\/admin\/comunidade-vip\/[0-9a-f-]{36}$/);
+  await expect(admin.getByText("Preparação concluída.")).toBeVisible({ timeout: 60_000 });
+  const card = (name: RegExp) => admin.locator("section").filter({ has: admin.getByRole("heading", { name }) });
+  const asad = card(/^1\. Lattafa Asad EDP/);
+  const unknown = card(/^2\. Perfume Desconhecido/);
+  await expect(asad.getByText("Pronto", { exact: true })).toBeVisible();
+  await expect(asad.getByLabel("Texto do post")).toHaveValue(/pimenta-preta[\s\S]*\n💎 R\$ 189,90/);
+  await expect(asad.getByText(/Ficha confirmada: Lattafa Asad Eau de Parfum/)).toBeVisible();
+  await expect(unknown.getByText("Revisar", { exact: true })).toBeVisible();
+  await expect(unknown.getByText(/A lista não informa o preço/)).toBeVisible();
+  await expect(unknown.getByText(/Não encontrei este perfume com segurança/)).toBeVisible();
+  await expect(unknown.getByLabel("Texto do post")).not.toHaveValue(/R\$/);
+
+  // 3. nothing goes out while a post still needs a decision
+  admin.once("dialog", (d) => d.accept());
+  await admin.getByRole("button", { name: "Aprovar o dia" }).click();
+  await expect(admin.getByText(/Ainda há 1 post para resolver/)).toBeVisible();
+  await unknown.getByRole("button", { name: "Ignorar" }).click();
+  await expect(unknown.getByText("Ignorado", { exact: true })).toBeVisible();
+  admin.once("dialog", (d) => d.accept());
+  await admin.getByRole("button", { name: "Aprovar o dia" }).click();
+  await expect(asad.getByText("Agendado", { exact: true })).toBeVisible();
+  await expect(admin.getByText(/Aprovada em/)).toBeVisible();
+
+  // 4. the clock: the post goes out when its time comes, once, with the closing, to the announcement group
+  const early = await request.post("/api/cron/comunidade-vip");
+  expect(await early.json()).toEqual({ state: "idle" });
+  const due = await request.patch(`${SUPABASE_URL}/rest/v1/vip_posts?status=eq.agendado`, { headers: serviceHeaders, data: { scheduled_for: new Date(Date.now() - 60_000).toISOString() } });
+  expect(due.ok()).toBe(true);
+  const tick = await request.post("/api/cron/comunidade-vip");
+  expect(await tick.json()).toMatchObject({ state: "sent" });
+  expect(await (await request.post("/api/cron/comunidade-vip")).json()).toEqual({ state: "idle" });
+  const sent = (await (await request.get(`${SUPABASE_URL}/zapi/test/sent`)).json()) as { phone: string; text: string; route: string }[];
+  expect(sent).toHaveLength(1);
+  expect(sent[0]).toMatchObject({ phone: "120363019502650977-group", route: "send-text" });
+  expect(sent[0].text).toMatch(/pimenta-preta[\s\S]*R\$ 189,90\n\nPara garantir o seu, chame no privado\.$/);
+  expect(sent[0].text).not.toMatch(/Desconhecido/);
+  await admin.reload();
+  await expect(asad.getByText("Enviado", { exact: true })).toBeVisible();
+  await expect(asad.getByText(/confirmado pela Z-API/)).toBeVisible();
+
+  // 5. the same perfume the next day is held for review instead of being repeated
+  await admin.goto("/admin/comunidade-vip");
+  await admin.getByLabel("Lista", { exact: true }).fill("Lattafa Asad EDP 100ml R$ 189,90");
+  await admin.getByRole("button", { name: "Preparar posts" }).click();
+  await expect(admin.getByText("Preparação concluída.")).toBeVisible({ timeout: 60_000 });
+  await expect(card(/^1\. Lattafa Asad EDP/).getByText(/já foi publicado em/)).toBeVisible();
+});

@@ -47,6 +47,11 @@ case "${ANTHROPIC_BASE_URL:-}" in
   http://localhost:*) ;;
   *) echo "Refusing to run E2E without the local Anthropic double"; exit 1 ;;
 esac
+# VIP community posts must hit the local Z-API double, never a real WhatsApp community
+case "${ZAPI_BASE_URL:-}" in
+  http://localhost:*) ;;
+  *) echo "Refusing to run E2E without the local Z-API double"; exit 1 ;;
+esac
 # Same build as Vercel (npm run build uses webpack): Turbopack accepts imports that webpack refuses
 npm run build > .next-build.log 2>&1 || { tail -40 .next-build.log; exit 1; }
 npx next start -p 3000 > .next-start.log 2>&1 &
