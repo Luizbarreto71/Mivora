@@ -211,8 +211,15 @@ export type RawSheet = {
   notas_coracao: string[];
   notas_fundo: string[];
   notas_gerais: string[];
+  acordes: string[];
+  perfumistas: string[];
+  ano_lancamento: string;
+  fixacao: string;
+  projecao: string;
+  fonte_desempenho: string;
   perfil: string;
   ocasioes: string[];
+  imagem_url: string;
   observacoes: string;
   fontes: { titulo: string; url: string }[];
 };
@@ -227,13 +234,28 @@ export type FragranceSheet = {
   heartNotes: string[];
   baseNotes: string[];
   generalNotes: string[];
+  accords: string[];
+  perfumers: string[];
+  launchYear: number | null;
+  /** Fixação and projeção only as rated by the users of the site named in performanceSource. */
+  longevity: string | null;
+  sillage: string | null;
+  performanceSource: string | null;
   profile: string | null;
   occasions: string[];
   remarks: string | null;
   sources: { title: string; url: string }[];
+  /** Bottle photo kept in the store's storage, and where it came from. */
+  imageUrl: string | null;
+  imageSource: string | null;
 };
 
-const cleanList = (l: string[], max = 30) => [...new Set(l.map(squash).filter(Boolean))].slice(0, max);
+/** Photos worth trying for a sheet, best first (not stored: the chosen one is downloaded and kept). */
+export type ImageCandidate = { url: string; source: string };
+
+// WhatsApp formatting characters inside researched values would break the post's bold and italics
+const plain = (s: string) => squash(s.replace(/[*_~`]/g, ""));
+const cleanList = (l: string[], max = 30) => [...new Set(l.map(plain).filter(Boolean))].slice(0, max);
 
 /** URLs and hosts that really came back from the web tools (any *_tool_result block). */
 export function seenOnTheWeb(blocks: unknown[]) {
@@ -242,7 +264,7 @@ export function seenOnTheWeb(blocks: unknown[]) {
   for (const block of blocks) {
     const type = (block as { type?: string } | null)?.type ?? "";
     if (!type.endsWith("_tool_result")) continue;
-    for (const m of JSON.stringify(block).matchAll(/https?:\/\/[^\s"'\\<>]+/g)) {
+    for (const m of JSON.stringify(block).matchAll(/https?:\/\/[^\s"'\\<>)]+/g)) {
       urls.add(m[0].replace(/\/$/, ""));
       try {
         hosts.add(new URL(m[0]).hostname.replace(/^www\./, ""));
@@ -254,13 +276,46 @@ export function seenOnTheWeb(blocks: unknown[]) {
   return { urls, hosts };
 }
 
+const hostOf = (url: string) => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+};
+const isFragrantica = (host: string) => /(^|\.)fragrantica\.[a-z.]+$/.test(host);
+const isParfumo = (host: string) => /(^|\.)parfumo\.[a-z.]+$/.test(host);
+
+/**
+ * Fragrantica serves each perfume's bottle photo at an address made from the number of its page.
+ * Used only when the page's own name matches the perfume both ways, so a flanker or a different
+ * perfume never lends its photo ("Asad" never takes "Asad Elixir" or "Asad Bourbon").
+ */
+export function fragranticaImage(sourceUrl: string, item: Pick<ListItem, "brand" | "name">): string | null {
+  if (!isFragrantica(hostOf(sourceUrl))) return null;
+  const m = new URL(sourceUrl).pathname.match(/\/perfume\/([^/]+)\/([^/]+)-(\d+)\.html$/i);
+  if (!m) return null;
+  const brandTokens = identityTokens(m[1].replace(/-/g, " "));
+  const nameTokens = identityTokens(m[2].replace(/-/g, " "));
+  const wanted = identityTokens(`${item.brand ?? ""} ${item.name}`);
+  const page = new Set([...brandTokens, ...nameTokens]);
+  if (nameTokens.length === 0 || !wanted.every((t) => page.has(t))) return null;
+  if (!nameTokens.every((t) => wanted.includes(t))) return null;
+  return `https://fimgs.net/mdimg/perfume/o.${m[3]}.jpg`;
+}
+
 /**
  * Keeps only sources the research really reached; a "confirmed" sheet without one becomes
- * "partial", and a perfume not found carries no notes at all.
+ * "partial", a perfume not found carries no notes at all, and fixação/projeção survive only with a
+ * Fragrantica or Parfumo page among those sources.
  */
-export function normalizeSheet(input: RawSheet, seen: { urls: Set<string>; hosts: Set<string> }): FragranceSheet {
+export function normalizeSheet(
+  input: RawSheet,
+  seen: { urls: Set<string>; hosts: Set<string> },
+  item: Pick<ListItem, "brand" | "name"> | null = null,
+): FragranceSheet & { imageCandidates: ImageCandidate[] } {
   const sources = input.fontes
-    .map((f) => ({ title: squash(f.titulo).slice(0, 200), url: f.url.trim() }))
+    .map((f) => ({ title: plain(f.titulo).slice(0, 200), url: f.url.trim() }))
     .filter((f) => {
       try {
         const u = new URL(f.url);
@@ -272,28 +327,120 @@ export function normalizeSheet(input: RawSheet, seen: { urls: Set<string>; hosts
     })
     .slice(0, 8);
   let status = input.status;
-  let remarks = squash(input.observacoes) || null;
+  let remarks = plain(input.observacoes) || null;
   if (status === "confirmada" && sources.length === 0) {
     status = "parcial";
     remarks = [remarks, "Nenhuma das fontes citadas pôde ser conferida nesta pesquisa."].filter(Boolean).join(" ");
   }
   const empty = status === "nao_encontrada";
+
+  const performanceHost = hostOf(input.fonte_desempenho);
+  const performanceOk = !empty && sources.some((s) => hostOf(s.url) === performanceHost) && (isFragrantica(performanceHost) || isParfumo(performanceHost));
+  const year = Number(input.ano_lancamento.trim());
+  const launchYear = Number.isInteger(year) && year >= 1700 && year <= new Date().getFullYear() + 1 ? year : null;
+
+  const imageCandidates: ImageCandidate[] = [];
+  if (!empty) {
+    const official = input.imagem_url.trim();
+    if (/^https?:\/\//.test(official) && seen.hosts.has(hostOf(official))) imageCandidates.push({ url: official, source: hostOf(official) });
+    if (item) {
+      for (const s of sources) {
+        const url = fragranticaImage(s.url, item);
+        if (url && !imageCandidates.some((c) => c.url === url)) imageCandidates.push({ url, source: "Fragrantica" });
+      }
+    }
+  }
+
   return {
     status,
-    identifiedAs: squash(input.identificado_como).slice(0, 200) || null,
-    concentration: squash(input.concentracao).slice(0, 60) || null,
-    gender: squash(input.genero).slice(0, 40) || null,
-    family: empty ? null : squash(input.familia).slice(0, 160) || null,
+    identifiedAs: plain(input.identificado_como).slice(0, 200) || null,
+    concentration: plain(input.concentracao).slice(0, 60) || null,
+    gender: plain(input.genero).slice(0, 40) || null,
+    family: empty ? null : plain(input.familia).slice(0, 160) || null,
     topNotes: empty ? [] : cleanList(input.notas_topo),
     heartNotes: empty ? [] : cleanList(input.notas_coracao),
     baseNotes: empty ? [] : cleanList(input.notas_fundo),
     generalNotes: empty ? [] : cleanList(input.notas_gerais),
-    profile: empty ? null : squash(input.perfil).slice(0, 800) || null,
+    accords: empty ? [] : cleanList(input.acordes, 8),
+    perfumers: empty ? [] : cleanList(input.perfumistas, 4),
+    launchYear: empty ? null : launchYear,
+    longevity: performanceOk ? plain(input.fixacao).slice(0, 60) || null : null,
+    sillage: performanceOk ? plain(input.projecao).slice(0, 60) || null : null,
+    performanceSource: performanceOk ? (isFragrantica(performanceHost) ? "Fragrantica" : "Parfumo") : null,
+    profile: empty ? null : plain(input.perfil).slice(0, 800) || null,
     occasions: empty ? [] : cleanList(input.ocasioes, 8),
     remarks: remarks?.slice(0, 800) ?? null,
     sources,
+    imageUrl: null,
+    imageSource: null,
+    imageCandidates,
   };
 }
+
+// ---------------------------------------------------------------------------
+// The post: an opening written by the AI + the sheet laid out by the store, always the same way
+// ---------------------------------------------------------------------------
+
+/** "a, b e c" */
+export function joinPt(items: string[]) {
+  if (items.length <= 1) return items.join("");
+  return `${items.slice(0, -1).join(", ")} e ${items[items.length - 1]}`;
+}
+
+/** The perfume's name without the size, version and gender the list may carry (they get their own line). */
+export function displayName(name: string) {
+  const out = name
+    .replace(/(?<![\d.,])\d{1,4}\s*ml\b/gi, " ")
+    .replace(/\b(edp|edt|edc|eau\s+de\s+parfum|eau\s+de\s+toilette|eau\s+de\s+cologne|extrait\s+de\s+parfum|extrait)\b/gi, " ")
+    .replace(/(?<!eau\s+de\s+)\bparfum\b/gi, " ")
+    .replace(/(?<![\p{L}\p{N}])(masculino|feminino|unissex|unisex)(?![\p{L}\p{N}])/giu, " ")
+    .replace(/[*_~`]/g, "");
+  return squash(out) || squash(name);
+}
+
+export function buildPost(item: Pick<ListItem, "name" | "concentration" | "volumeMl" | "priceCents">, sheet: FragranceSheet | null, opening: string) {
+  const sub = [item.concentration, item.volumeMl ? `${item.volumeMl} ml` : null].filter(Boolean).join(" · ");
+  const lines: string[] = [`✨ *${displayName(item.name)}*`];
+  if (sub) lines.push(`_${sub}_`);
+  const intro = opening.trim();
+  if (intro) lines.push("", intro);
+  if (sheet && sheet.status !== "nao_encontrada") {
+    const notes = (l: string[]) => joinPt(l.slice(0, 8));
+    const spec = [
+      sheet.family ? `• *Família olfativa:* ${sheet.family}` : null,
+      sheet.topNotes.length ? `• *Notas de saída:* ${notes(sheet.topNotes)}` : null,
+      sheet.heartNotes.length ? `• *Notas de coração:* ${notes(sheet.heartNotes)}` : null,
+      sheet.baseNotes.length ? `• *Notas de fundo:* ${notes(sheet.baseNotes)}` : null,
+      sheet.generalNotes.length ? `• *Notas:* ${notes(sheet.generalNotes)}` : null,
+      sheet.accords.length ? `• *Acordes principais:* ${joinPt(sheet.accords.slice(0, 5))}` : null,
+      sheet.gender ? `• *Classificação:* ${sheet.gender}` : null,
+      sheet.perfumers.length ? `• *${sheet.perfumers.length > 1 ? "Perfumistas" : "Perfumista"}:* ${joinPt(sheet.perfumers)}` : null,
+      sheet.launchYear ? `• *Lançamento:* ${sheet.launchYear}` : null,
+      sheet.longevity || sheet.sillage
+        ? `• ${[sheet.longevity ? `*Fixação:* ${sheet.longevity}` : null, sheet.sillage ? `*Projeção:* ${sheet.sillage}` : null].filter(Boolean).join(" · ")} _(avaliação dos usuários do ${sheet.performanceSource})_`
+        : null,
+      sheet.occasions.length ? `• *Quando usar:* ${joinPt(sheet.occasions)}` : null,
+    ].filter((l): l is string => l != null);
+    if (spec.length) lines.push("", "*Ficha olfativa*", ...spec);
+  }
+  if (item.priceCents != null) lines.push("", `💎 *${formatBRL(item.priceCents)}*`);
+  return lines.join("\n");
+}
+
+/**
+ * WhatsApp shows about 1,000 characters under a photo. A longer post goes as the photo with its
+ * first part (name, version, opening) followed right away by the rest as text.
+ */
+export function splitForCaption(text: string, max = VIP_CAPTION_MAX): [string] | [string, string] {
+  if (text.length <= max) return [text];
+  const head = text.slice(0, max);
+  const cut = head.lastIndexOf("\n\n") > 0 ? head.lastIndexOf("\n\n") : head.lastIndexOf("\n") > 0 ? head.lastIndexOf("\n") : max;
+  return [text.slice(0, cut).trim(), text.slice(cut).trim()];
+}
+
+export const VIP_CAPTION_MAX = 1000;
+/** A whole post (text, closing included) stays well inside one WhatsApp message. */
+export const VIP_POST_MAX = 3500;
 
 // ---------------------------------------------------------------------------
 // Checking a written post
@@ -301,14 +448,20 @@ export function normalizeSheet(input: RawSheet, seen: { urls: Set<string>; hosts
 
 // word edges that understand accents ("Últimas" starts with a letter JavaScript's \b does not see)
 const word = (body: string) => new RegExp(`(?<![\\p{L}\\p{N}])(?:${body})(?![\\p{L}\\p{N}])`, "iu");
-const CLAIMS = word("fixa[cç][aã]o|proje[cç][aã]o|durabilidade|longa\\s+dura[cç][aã]o|rastro|sillage|performance|\\d+\\s*(?:h|horas)");
+const CLAIMS = word("fixa[cç][aã]o|proje[cç][aã]o|durabilidade|longa\\s+dura[cç][aã]o|rastro|sillage|performance");
+const HOURS = word("\\d+\\s*(?:h|horas)");
 const STOCK = word("[uú]ltimas?\\s+unidades?|estoque|esgotad[oa]s?|esgotando|pronta\\s+entrega|poucas\\s+unidades|acabando");
 
 /**
  * Rules a post must follow before it can be approved without edits. Returns the problems found;
- * the admin may still publish after editing the text.
+ * the admin may still publish after editing the text. Fixação and projeção may appear only when the
+ * sheet brings them from Fragrantica or Parfumo; hours of duration never.
  */
-export function reviewPost(text: string, item: Pick<ListItem, "sourceLine" | "priceCents" | "details">, footer: string | null = null): string[] {
+export function reviewPost(
+  text: string,
+  item: Pick<ListItem, "sourceLine" | "priceCents" | "details">,
+  opts: { footer?: string | null; performanceSourced?: boolean } = {},
+): string[] {
   const problems: string[] = [];
   const prices = amountsIn(text);
   if (item.priceCents == null) {
@@ -321,14 +474,12 @@ export function reviewPost(text: string, item: Pick<ListItem, "sourceLine" | "pr
   const allowed = new Set(concentrationsIn(item.sourceLine));
   const versions = concentrationsIn(text).filter((v) => !allowed.has(v));
   if (versions.length > 0) problems.push(`O texto cita uma versão que a lista não informa (${versions.join(", ")}).`);
-  if (CLAIMS.test(text)) problems.push("O texto fala de fixação, projeção ou duração, que não foram verificadas.");
+  if (HOURS.test(text) || (!opts.performanceSourced && CLAIMS.test(text)))
+    problems.push("O texto fala de fixação, projeção ou duração sem avaliação do Fragrantica ou do Parfumo na ficha.");
   if (STOCK.test(text) && !STOCK.test(`${item.sourceLine} ${item.details ?? ""}`)) problems.push("O texto fala de estoque ou de últimas unidades, o que a lista não informa.");
-  if (composeMessage(text, footer).length > VIP_POST_MAX) problems.push(`O post (com o fechamento) passou de ${VIP_POST_MAX} caracteres.`);
+  if (composeMessage(text, opts.footer ?? null).length > VIP_POST_MAX) problems.push(`O post (com o fechamento) passou de ${VIP_POST_MAX} caracteres.`);
   return problems;
 }
-
-/** WhatsApp caps a photo caption at 1,024 characters; posts stay below that, closing included. */
-export const VIP_POST_MAX = 1000;
 
 /** The final message: the written text plus the admin's fixed closing (how to order). */
 export function composeMessage(body: string, footer: string | null) {

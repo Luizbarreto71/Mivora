@@ -1,11 +1,13 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { createHash } from "node:crypto";
 import sharp from "sharp";
-import { SITE_URL } from "@/lib/env";
+import { MEDIA_BUCKET, SITE_URL, SUPABASE_URL } from "@/lib/env";
 import { formatBRL } from "@/lib/money";
 import { isServiceRoleConfigured } from "@/lib/supabase/service";
-import { aiFailureMessage, researchFragrance, splitList, vipAiConfigured, writePost } from "./ai";
+import { aiFailureMessage, researchFragrance, splitList, vipAiConfigured, writeOpening } from "./ai";
 import {
+  buildPost,
   composeMessage,
   dedupeKey,
   fragranceKey,
@@ -14,6 +16,7 @@ import {
   reviewPost,
   scheduleSlots,
   simpleListDrafts,
+  splitForCaption,
   verifyItem,
   type FragranceSheet,
   type ListItem,
@@ -50,6 +53,8 @@ export type VipPostRow = {
   product_id: string | null;
   fragrance_id: string | null;
   image_url: string | null;
+  /** loja, enviada, nenhuma or where the research found it (absent before migration 025) */
+  image_source?: string | null;
   body: string | null;
   status: "pendente" | "pronto" | "revisar" | "erro" | "ignorado" | "agendado" | "enviando" | "enviado" | "falhou";
   problems: string[];
@@ -179,7 +184,7 @@ export async function createBatch(sb: Sb, listText: string, userId: string): Pro
 }
 
 // ---------------------------------------------------------------------------
-// 2. Research (cached per perfume and version) + writing + checking
+// 2. Research (cached per perfume and version) + photo + writing + checking
 // ---------------------------------------------------------------------------
 
 type FragranceRow = {
@@ -198,7 +203,20 @@ type FragranceRow = {
   remarks: string | null;
   sources: { title: string; url: string }[];
   researched_at: string;
+  // migration 025 (absent before it reaches the database)
+  sheet_version?: number;
+  accords?: string[];
+  perfumers?: string[];
+  launch_year?: number | null;
+  longevity?: string | null;
+  sillage?: string | null;
+  performance_source?: string | null;
+  image_url?: string | null;
+  image_source?: string | null;
 };
+
+/** Sheets researched before the full technical sheet (version 2) are researched again. */
+const SHEET_VERSION = 2;
 
 function rowToSheet(r: FragranceRow): FragranceSheet {
   return {
@@ -211,17 +229,107 @@ function rowToSheet(r: FragranceRow): FragranceSheet {
     heartNotes: r.heart_notes,
     baseNotes: r.base_notes,
     generalNotes: r.general_notes,
+    accords: r.accords ?? [],
+    perfumers: r.perfumers ?? [],
+    launchYear: r.launch_year ?? null,
+    longevity: r.longevity ?? null,
+    sillage: r.sillage ?? null,
+    performanceSource: r.performance_source ?? null,
     profile: r.profile,
     occasions: r.occasions,
     remarks: r.remarks,
     sources: r.sources,
+    imageUrl: r.image_url ?? null,
+    imageSource: r.image_source ?? null,
   };
 }
 
 /** A confirmed sheet is reused for 6 months; one not found is tried again after a week. */
 function stillFresh(r: FragranceRow) {
+  // without the column (migration 025 not applied yet) the sheet is used as it is
+  if ((r.sheet_version ?? SHEET_VERSION) < SHEET_VERSION) return false;
   const age = Date.now() - Date.parse(r.researched_at);
   return age < (r.status === "nao_encontrada" ? 7 : 180) * 86_400_000;
+}
+
+const missingColumn = (error: { message: string } | null) => Boolean(error && /column|schema cache/i.test(error.message));
+
+// --- photos ---------------------------------------------------------------
+
+const PHOTO_UA = "Mozilla/5.0 (compatible; MIVORA-curadoria/1.0; +https://mivoracosmeticos.com.br)";
+
+function privateHost(host: string) {
+  return host === "localhost" || !host.includes(".") || host.includes(":") || /^\d+(\.\d+){3}$/.test(host) || /\.(local|internal|localhost)$/.test(host);
+}
+
+/** Only public https addresses (the local tests point VIP_TEST_IMAGE_ORIGIN at their stand-in). */
+function downloadable(url: URL) {
+  const testOrigin = process.env.VIP_TEST_IMAGE_ORIGIN?.trim();
+  if (testOrigin && url.origin === testOrigin) return true;
+  return url.protocol === "https:" && !privateHost(url.hostname);
+}
+
+/** Downloads a photo the research found (official site or Fragrantica). */
+async function downloadPhoto(address: string): Promise<Buffer | null> {
+  try {
+    const url = new URL(address);
+    if (!downloadable(url)) return null;
+    const res = await fetch(url, { headers: { "User-Agent": PHOTO_UA, Accept: "image/*" }, cache: "no-store", signal: AbortSignal.timeout(15_000) });
+    if (!res.ok || !downloadable(new URL(res.url || url.href))) return null;
+    if (!(res.headers.get("content-type") ?? "").startsWith("image/")) return null;
+    const buffer = Buffer.from(await res.arrayBuffer());
+    return buffer.length > 0 && buffer.length <= 10_000_000 ? buffer : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Keeps a bottle photo in the store's storage (JPEG on white, up to 1200 px), so it never changes or disappears. */
+async function keepPhoto(sb: Sb, name: string, input: Buffer): Promise<string | null> {
+  try {
+    const meta = await sharp(input, { limitInputPixels: 50_000_000 }).metadata();
+    if (!meta.width || !meta.height || Math.max(meta.width, meta.height) < 300) return null;
+    const jpeg = await sharp(input, { limitInputPixels: 50_000_000 })
+      .rotate()
+      .resize({ width: 1200, height: 1200, fit: "inside", withoutEnlargement: true })
+      .flatten({ background: "#ffffff" })
+      .jpeg({ quality: 88 })
+      .toBuffer();
+    const path = `vip/${createHash("sha1").update(name).digest("hex").slice(0, 20)}-${Date.now()}.jpg`;
+    const { error } = await sb.storage.from(MEDIA_BUCKET).upload(path, jpeg, { contentType: "image/jpeg", cacheControl: "31536000" });
+    if (error) {
+      console.error("[comunidade vip] não foi possível guardar a foto", error.message.slice(0, 120));
+      return null;
+    }
+    return sb.storage.from(MEDIA_BUCKET).getPublicUrl(path).data.publicUrl;
+  } catch {
+    return null;
+  }
+}
+
+/** A photo the store already serves: its site (product photos) or its Supabase storage. */
+async function storePhoto(imageUrl: string): Promise<Buffer | null> {
+  try {
+    const url = new URL(imageUrl, SITE_URL);
+    if (url.host !== new URL(SITE_URL).host && url.host !== new URL(SUPABASE_URL).host && !url.host.endsWith(".supabase.co")) return null;
+    const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(20_000) });
+    if (!res.ok) return null;
+    const buffer = Buffer.from(await res.arrayBuffer());
+    return buffer.length <= 10_000_000 ? buffer : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A photo the admin sent for one post. */
+export async function keepPostPhoto(sb: Sb, postId: string, input: Buffer) {
+  return keepPhoto(sb, `post-${postId}`, input);
+}
+
+export const PHOTO_SOURCE_LABEL: Record<string, string> = { loja: "foto da loja", enviada: "foto enviada por você", Fragrantica: "foto do Fragrantica" };
+export function photoSourceLabel(source: string | null | undefined) {
+  if (!source || source === "nenhuma") return null;
+  return PHOTO_SOURCE_LABEL[source] ?? `foto do site ${source}`;
 }
 
 async function sheetFor(sb: Sb, item: ListItem, force: boolean): Promise<Result<{ id: string; sheet: FragranceSheet }>> {
@@ -230,8 +338,17 @@ async function sheetFor(sb: Sb, item: ListItem, force: boolean): Promise<Result<
   if (cached && !force && stillFresh(cached as FragranceRow)) return { ok: true, id: (cached as FragranceRow).id, sheet: rowToSheet(cached as FragranceRow) };
   const research = await researchFragrance(item);
   if (!research.ok) return { ok: false, message: aiFailureMessage(research.reason) };
-  const s = research.sheet;
-  const row = {
+  const { imageCandidates, ...s } = research.sheet;
+  for (const candidate of imageCandidates.slice(0, 3)) {
+    const raw = await downloadPhoto(candidate.url);
+    const kept = raw ? await keepPhoto(sb, key, raw) : null;
+    if (kept) {
+      s.imageUrl = kept;
+      s.imageSource = candidate.source.slice(0, 80);
+      break;
+    }
+  }
+  const base = {
     lookup_key: key,
     status: s.status,
     identified_as: s.identifiedAs,
@@ -248,19 +365,56 @@ async function sheetFor(sb: Sb, item: ListItem, force: boolean): Promise<Result<
     sources: s.sources,
     researched_at: new Date().toISOString(),
   };
-  const { data: saved, error } = await sb.from("vip_fragrances").upsert(row, { onConflict: "lookup_key" }).select("id").single();
-  if (error || !saved) return { ok: false, message: "Não foi possível salvar a ficha pesquisada. Tente novamente." };
-  return { ok: true, id: saved.id as string, sheet: s };
+  const full = {
+    ...base,
+    sheet_version: SHEET_VERSION,
+    accords: s.accords,
+    perfumers: s.perfumers,
+    launch_year: s.launchYear,
+    longevity: s.longevity,
+    sillage: s.sillage,
+    performance_source: s.performanceSource,
+    image_url: s.imageUrl,
+    image_source: s.imageSource,
+  };
+  let saved = await sb.from("vip_fragrances").upsert(full, { onConflict: "lookup_key" }).select("id").single();
+  // until migration 025 reaches the database the sheet is kept without the new fields (the post still has them)
+  if (missingColumn(saved.error)) saved = await sb.from("vip_fragrances").upsert(base, { onConflict: "lookup_key" }).select("id").single();
+  if (saved.error || !saved.data) return { ok: false, message: "Não foi possível salvar a ficha pesquisada. Tente novamente." };
+  return { ok: true, id: saved.data.id as string, sheet: s };
 }
 
-function sheetProblem(sheet: FragranceSheet) {
+function sheetProblems(item: ListItem, sheet: FragranceSheet) {
+  const out: string[] = [];
   if (sheet.status === "nao_encontrada")
-    return "Não encontrei este perfume com segurança no Fragrantica, no Parfumo ou no site da marca: o texto não cita notas. Confira o nome.";
-  if (sheet.status === "parcial") return `Ficha parcial: ${sheet.remarks ?? "confira se a versão é a mesma da lista"}`;
-  return null;
+    out.push("Não encontrei este perfume com segurança no Fragrantica, no Parfumo ou no site da marca: o post saiu sem ficha olfativa. Confira o nome.");
+  if (sheet.status === "parcial") out.push(`Ficha parcial: ${sheet.remarks ?? "confira se a versão é a mesma da lista"}`);
+  if (!item.concentration && sheet.concentration && sheet.status !== "nao_encontrada")
+    out.push(`A lista não informa a versão; a pesquisa encontrou ${sheet.concentration}. Se for essa, acrescente no texto.`);
+  return out;
 }
 
-/** Researches (or reuses the sheet), writes the post and checks it. Only for posts of a draft batch. */
+/**
+ * The post's photo: the one the admin sent or chose (store photo, or none) stays; otherwise the
+ * bottle photo the research kept.
+ */
+function choosePhoto(post: VipPostRow, sheet: FragranceSheet): { url: string | null; source: string | null } {
+  const kept = post.image_source ?? (post.image_url && post.product_id ? "loja" : null);
+  if (kept === "enviada" || kept === "loja" || kept === "nenhuma") return { url: kept === "nenhuma" ? null : post.image_url, source: kept };
+  if (sheet.imageUrl) return { url: sheet.imageUrl, source: sheet.imageSource ?? "pesquisa" };
+  return { url: null, source: null };
+}
+
+/** Updates a post; before migration 025 there is no image_source column, so it is left out. */
+export async function updatePost(sb: Sb, id: string, fields: Record<string, unknown>) {
+  const res = await sb.from("vip_posts").update(fields).eq("id", id);
+  if (!missingColumn(res.error) || !("image_source" in fields)) return res;
+  const rest = { ...fields };
+  delete rest.image_source;
+  return sb.from("vip_posts").update(rest).eq("id", id);
+}
+
+/** Researches (or reuses the sheet), picks the photo, writes the opening, lays out the post and checks it. */
 export async function preparePost(sb: Sb, postId: string, opts: { forceResearch?: boolean } = {}): Promise<Result<{ status: VipPostRow["status"] }>> {
   const { data } = await sb.from("vip_posts").select("*, batch:vip_batches(status)").eq("id", postId).maybeSingle();
   const post = data as (VipPostRow & { batch: { status: string } | null }) | null;
@@ -269,29 +423,52 @@ export async function preparePost(sb: Sb, postId: string, opts: { forceResearch?
   if (!["pendente", "erro", "revisar", "pronto"].includes(post.status)) return { ok: false, message: "Este post não pode mais ser refeito." };
 
   const item = ITEM_FIELDS(post);
-  const sheet = await sheetFor(sb, item, opts.forceResearch ?? false);
-  if (!sheet.ok) {
-    await sb.from("vip_posts").update({ status: "erro", problems: [sheet.message] }).eq("id", postId);
-    return { ok: false, message: sheet.message };
+  const found = await sheetFor(sb, item, opts.forceResearch ?? false);
+  if (!found.ok) {
+    await sb.from("vip_posts").update({ status: "erro", problems: [found.message] }).eq("id", postId);
+    return { ok: false, message: found.message };
   }
-  const written = await writePost(item, sheet.sheet);
+  const sheet = found.sheet;
+  const photo = choosePhoto(post, sheet);
+  const raw = photo.url ? await storePhoto(photo.url) : null;
+  const jpeg = raw
+    ? await sharp(raw).resize({ width: 1000, height: 1000, fit: "inside", withoutEnlargement: true }).flatten({ background: "#ffffff" }).jpeg({ quality: 85 }).toBuffer().catch(() => null)
+    : null;
+  const written = await writeOpening(item, sheet, jpeg);
   if (!written.ok) {
     const message = aiFailureMessage(written.reason);
-    await sb.from("vip_posts").update({ status: "erro", fragrance_id: sheet.id, problems: [message] }).eq("id", postId);
+    await sb.from("vip_posts").update({ status: "erro", fragrance_id: found.id, problems: [message] }).eq("id", postId);
     return { ok: false, message };
   }
+  const opening = written.opening;
+  const body = buildPost(item, sheet, opening.text);
   const settings = await loadVipSettings(sb);
   const duplicate = await recentDuplicate(sb, post.dedupe_key, settings?.dedupe_days ?? 7, post.batch_id);
   const { data: siblings } = await sb.from("vip_posts").select("id").eq("batch_id", post.batch_id).eq("dedupe_key", post.dedupe_key).lt("position", post.position).neq("status", "ignorado").limit(1);
+  const photoProblems = !photo.url
+    ? ["Post sem foto: envie uma foto do frasco ou escolha uma foto da loja."]
+    : !jpeg
+      ? ["A foto não pôde ser aberta. Envie outra foto do frasco."]
+      : opening.photo === "nao"
+        ? [`A foto parece ser de outro perfume${opening.photoReason ? ` (${opening.photoReason})` : ""}. Troque a foto antes de aprovar.`]
+        : [];
   const problems = [
     ...item.problems,
     ...(siblings?.length ? ["Este perfume aparece mais de uma vez nesta lista."] : []),
     ...(duplicate ? [duplicate] : []),
-    ...[sheetProblem(sheet.sheet)].filter((p): p is string => p != null),
-    ...reviewPost(written.text, item, settings?.footer ?? null),
+    ...sheetProblems(item, sheet),
+    ...photoProblems,
+    ...reviewPost(body, item, { footer: settings?.footer ?? null, performanceSourced: Boolean(sheet.longevity || sheet.sillage) }),
   ];
   const status = problems.length > 0 ? "revisar" : "pronto";
-  const { error } = await sb.from("vip_posts").update({ body: written.text.slice(0, 4000), fragrance_id: sheet.id, status, problems }).eq("id", postId);
+  const { error } = await updatePost(sb, postId, {
+    body: body.slice(0, 4000),
+    fragrance_id: found.id,
+    image_url: photo.url,
+    image_source: photo.source,
+    status,
+    problems,
+  });
   if (error) return { ok: false, message: "Não foi possível salvar o texto. Tente novamente." };
   return { ok: true, status };
 }
@@ -334,27 +511,38 @@ export async function approveBatch(sb: Sb, batchId: string, userId: string): Pro
 // 4. Sending
 // ---------------------------------------------------------------------------
 
-/** WhatsApp shows WebP as a sticker, so store photos go as PNG (base64, as Z-API accepts). */
+/** WhatsApp shows WebP as a sticker, so photos go as PNG (base64, as Z-API accepts). */
 async function photoForWhatsApp(imageUrl: string): Promise<string | null> {
+  const raw = await storePhoto(imageUrl);
+  if (!raw) return null;
   try {
-    const url = new URL(imageUrl, SITE_URL);
-    const site = new URL(SITE_URL);
-    if (url.host !== site.host && !url.host.endsWith(".supabase.co")) return null;
-    const res = await fetch(url, { cache: "no-store", signal: AbortSignal.timeout(20_000) });
-    if (!res.ok) return null;
-    const buffer = Buffer.from(await res.arrayBuffer());
-    if (buffer.length > 10_000_000) return null;
-    const png = await sharp(buffer).resize({ width: 1000, height: 1000, fit: "inside", withoutEnlargement: true }).flatten({ background: "#ffffff" }).png().toBuffer();
+    const png = await sharp(raw).resize({ width: 1000, height: 1000, fit: "inside", withoutEnlargement: true }).flatten({ background: "#ffffff" }).png().toBuffer();
     return `data:image/png;base64,${png.toString("base64")}`;
   } catch {
     return null;
   }
 }
 
-async function deliver(phone: string, body: string, footer: string | null, imageUrl: string | null) {
+type Delivery = { ok: true; messageId: string; photoMissing: boolean } | { ok: false; error: string };
+
+/**
+ * The post goes as the photo with the text under it; a post longer than a caption goes as the photo
+ * with its first part and, right after, the rest as text. Confirmed only when every message is.
+ */
+async function deliver(phone: string, body: string, footer: string | null, imageUrl: string | null): Promise<Delivery> {
+  const message = composeMessage(body, footer);
   const photo = imageUrl ? await photoForWhatsApp(imageUrl) : null;
-  const sent = await sendToGroup(phone, composeMessage(body, footer), photo);
-  return { sent, photoMissing: Boolean(imageUrl && !photo) };
+  if (!photo) {
+    const sent = await sendToGroup(phone, message, null);
+    return sent.ok ? { ok: true, messageId: sent.data.messageId, photoMissing: Boolean(imageUrl) } : sent;
+  }
+  const [caption, rest] = splitForCaption(message);
+  const first = await sendToGroup(phone, caption, photo);
+  if (!first.ok) return first;
+  if (!rest) return { ok: true, messageId: first.data.messageId, photoMissing: false };
+  const second = await sendToGroup(phone, rest, null);
+  if (!second.ok) return { ok: false, error: `A foto e o começo do post saíram, mas o restante não (${second.error}). Confira no grupo antes de tentar de novo.` };
+  return { ok: true, messageId: `${first.data.messageId}+${second.data.messageId}`, photoMissing: false };
 }
 
 /** Called by the clock every 5 minutes: sends at most one due post and records the confirmation. */
@@ -371,7 +559,7 @@ export async function sendNextDuePost(service: Sb): Promise<{ state: "idle" } | 
     await service.from("vip_posts").update({ status: "falhou", problems: ["Grupo de avisos ou texto ausente no momento do envio."] }).eq("id", post.id);
     return { state: "failed", postId: post.id };
   }
-  const { sent, photoMissing } = await deliver(settings.announcement_group_id, post.body, settings.footer, post.image_url);
+  const sent = await deliver(settings.announcement_group_id, post.body, settings.footer, post.image_url);
   if (!sent.ok) {
     await service.from("vip_posts").update({ status: "falhou", problems: [sent.error] }).eq("id", post.id);
     return { state: "failed", postId: post.id, detail: sent.error };
@@ -381,8 +569,8 @@ export async function sendNextDuePost(service: Sb): Promise<{ state: "idle" } | 
     .update({
       status: "enviado",
       sent_at: new Date().toISOString(),
-      provider_message_id: sent.data.messageId.slice(0, 200),
-      problems: photoMissing ? ["A foto não pôde ser preparada; o post saiu só com o texto."] : [],
+      provider_message_id: sent.messageId.slice(0, 200),
+      problems: sent.photoMissing ? ["A foto não pôde ser preparada; o post saiu só com o texto."] : [],
     })
     .eq("id", post.id);
   return { state: "sent", postId: post.id };
@@ -395,9 +583,9 @@ export async function sendPreview(sb: Sb, postId: string): Promise<Result> {
   if (!settings?.preview_phone) return { ok: false, message: "Cadastre o seu WhatsApp para prévias em Configurações do envio." };
   const { data } = await sb.from("vip_posts").select("body, image_url").eq("id", postId).maybeSingle();
   if (!data?.body) return { ok: false, message: "Este post ainda não tem texto." };
-  const { sent, photoMissing } = await deliver(settings.preview_phone, data.body as string, settings.footer, data.image_url as string | null);
+  const sent = await deliver(settings.preview_phone, data.body as string, settings.footer, data.image_url as string | null);
   if (!sent.ok) return { ok: false, message: sent.error };
-  return photoMissing ? { ok: false, message: "O texto chegou, mas a foto não pôde ser preparada." } : { ok: true };
+  return sent.photoMissing ? { ok: false, message: "O texto chegou, mas a foto não pôde ser preparada." } : { ok: true };
 }
 
 export function describePrice(cents: number | null) {

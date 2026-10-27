@@ -1,16 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
   amountsIn,
+  buildPost,
   composeMessage,
   concentrationsIn,
   dedupeKey,
+  displayName,
   fragranceKey,
+  fragranticaImage,
   matchProduct,
   normalizeSheet,
   reviewPost,
   scheduleSlots,
   seenOnTheWeb,
   simpleListDrafts,
+  splitForCaption,
   verifyItem,
   volumesIn,
   type RawSheet,
@@ -114,57 +118,149 @@ describe("checking a written post", () => {
     expect(reviewPost(good.replace("189,90", "179,90"), item).join(" ")).toMatch(/não traz o preço da lista.*valor que não está na lista/);
     expect(reviewPost(`${good}\nDe R$ 250,00 por R$ 189,90!`, item).join(" ")).toMatch(/valor que não está na lista \(R\$ 250,00\)/);
     expect(reviewPost(good.replace("Eau de Parfum", "Eau de Toilette"), item).join(" ")).toMatch(/versão que a lista não informa \(Eau de Toilette\)/);
-    expect(reviewPost(`${good}\nFixação de 12 horas.`, item).join(" ")).toMatch(/fixação/);
+    expect(reviewPost(`${good}\nFixação marcante.`, item).join(" ")).toMatch(/fixação/);
     expect(reviewPost(`${good}\nÚltimas unidades!`, item).join(" ")).toMatch(/estoque/);
     expect(reviewPost(`${good}\nÚltimas unidades!`, { ...item, details: "últimas unidades" })).toEqual([]);
     expect(reviewPost("Um perfume elegante. R$ 99,90", { sourceLine: "Bidaya Ayat", priceCents: null, details: null }).join(" ")).toMatch(/lista não informa preço/);
   });
 
-  it("counts the closing in the caption limit", () => {
+  it("fixação and projeção are fine when the sheet brings them from Fragrantica or Parfumo; hours never", () => {
+    const rated = `${good}\n• *Fixação:* duradoura · *Projeção:* moderada _(avaliação dos usuários do Fragrantica)_`;
+    expect(reviewPost(rated, item, { performanceSourced: true })).toEqual([]);
+    expect(reviewPost(rated, item).join(" ")).toMatch(/fixação/);
+    expect(reviewPost(`${good}\nDura 12 horas.`, item, { performanceSourced: true }).join(" ")).toMatch(/fixação, projeção ou duração/);
+  });
+
+  it("counts the closing in the post limit", () => {
     expect(composeMessage(" Texto ", " Pedidos no privado ")).toBe("Texto\n\nPedidos no privado");
     expect(composeMessage("Texto", null)).toBe("Texto");
-    expect(reviewPost(`${good}\n${"x".repeat(900)}`, item, "Pedidos no privado").join(" ")).toMatch(/passou de 1000 caracteres/);
+    expect(reviewPost(`${good}\n${"x".repeat(3480)}`, item, { footer: "Pedidos no privado" }).join(" ")).toMatch(/passou de 3500 caracteres/);
   });
 });
 
-describe("olfactory sheet", () => {
-  const raw: RawSheet = {
-    status: "confirmada",
-    identificado_como: "Lattafa Asad Eau de Parfum",
-    concentracao: "Eau de Parfum",
-    genero: "masculino",
-    familia: "Âmbar especiado",
-    notas_topo: ["pimenta-preta", "abacaxi", " pimenta-preta "],
-    notas_coracao: ["café"],
-    notas_fundo: ["baunilha"],
-    notas_gerais: [],
-    perfil: "Quente e especiado.",
-    ocasioes: ["noite", "inverno"],
-    observacoes: "",
-    fontes: [
-      { titulo: "Fragrantica", url: "https://www.fragrantica.com.br/perfume/Lattafa-Perfumes/Asad-63546.html" },
-      { titulo: "Inventada", url: "https://example.com/asad" },
-      { titulo: "Inválida", url: "javascript:alert(1)" },
-    ],
-  };
-  const seen = seenOnTheWeb([
-    { type: "web_search_tool_result", content: [{ type: "web_search_result", url: "https://www.fragrantica.com.br/perfume/Lattafa-Perfumes/Asad-63546.html", title: "Asad" }] },
-    { type: "text", text: "https://example.com/asad" },
-  ]);
+const RAW: RawSheet = {
+  status: "confirmada",
+  identificado_como: "Lattafa Asad Eau de Parfum",
+  concentracao: "Eau de Parfum",
+  genero: "masculino",
+  familia: "Âmbar especiado",
+  notas_topo: ["pimenta-preta", "abacaxi", " pimenta-preta "],
+  notas_coracao: ["café", "patchouli"],
+  notas_fundo: ["baunilha", "âmbar"],
+  notas_gerais: [],
+  acordes: ["âmbar", "especiado", "doce"],
+  perfumistas: [],
+  ano_lancamento: "2021",
+  fixacao: "duradoura",
+  projecao: "moderada",
+  fonte_desempenho: "https://www.fragrantica.com.br/perfume/Lattafa-Perfumes/Asad-70001.html",
+  perfil: "Quente e especiado.",
+  ocasioes: ["noite", "outono", "inverno"],
+  imagem_url: "https://lattafa.example/media/asad.png",
+  observacoes: "",
+  fontes: [
+    { titulo: "Fragrantica", url: "https://www.fragrantica.com.br/perfume/Lattafa-Perfumes/Asad-70001.html" },
+    { titulo: "Inventada", url: "https://example.com/asad" },
+    { titulo: "Inválida", url: "javascript:alert(1)" },
+  ],
+};
+const SEEN = seenOnTheWeb([
+  { type: "web_search_tool_result", content: [{ type: "web_search_result", url: "https://www.fragrantica.com.br/perfume/Lattafa-Perfumes/Asad-70001.html", title: "Asad" }] },
+  { type: "web_fetch_tool_result", content: { type: "web_fetch_result", url: "https://lattafa.example/asad", content: { source: { data: "foto: https://lattafa.example/media/asad.png" } } } },
+  { type: "text", text: "https://example.com/asad" },
+]);
+const ASAD = { brand: "Lattafa", name: "Lattafa Asad EDP 100ml" };
 
+describe("olfactory sheet", () => {
   it("keeps only sources the research really reached", () => {
-    const sheet = normalizeSheet(raw, seen);
+    const sheet = normalizeSheet(RAW, SEEN, ASAD);
     expect(sheet.sources.map((s) => s.title)).toEqual(["Fragrantica"]);
     expect(sheet.status).toBe("confirmada");
     expect(sheet.topNotes).toEqual(["pimenta-preta", "abacaxi"]);
+    expect(sheet).toMatchObject({ accords: ["âmbar", "especiado", "doce"], launchYear: 2021, longevity: "duradoura", sillage: "moderada", performanceSource: "Fragrantica" });
   });
 
-  it("a confirmed sheet without a checkable source becomes partial; a perfume not found carries no notes", () => {
-    const unchecked = normalizeSheet({ ...raw, fontes: [{ titulo: "Inventada", url: "https://example.com/asad" }] }, seen);
+  it("a confirmed sheet without a checkable source becomes partial; a perfume not found carries nothing", () => {
+    const unchecked = normalizeSheet({ ...RAW, fontes: [{ titulo: "Inventada", url: "https://example.com/asad" }] }, SEEN, ASAD);
     expect(unchecked.status).toBe("parcial");
     expect(unchecked.remarks).toMatch(/conferida/);
-    const missing = normalizeSheet({ ...raw, status: "nao_encontrada" }, seen);
-    expect(missing).toMatchObject({ family: null, topNotes: [], heartNotes: [], baseNotes: [], profile: null, occasions: [] });
+    // the ratings' page is no longer among the sources: no fixação/projeção
+    expect(unchecked).toMatchObject({ longevity: null, sillage: null, performanceSource: null });
+    const missing = normalizeSheet({ ...RAW, status: "nao_encontrada" }, SEEN, ASAD);
+    expect(missing).toMatchObject({ family: null, topNotes: [], accords: [], launchYear: null, longevity: null, profile: null, occasions: [], imageCandidates: [] });
+  });
+
+  it("ratings count only from Fragrantica or Parfumo, and years must be real", () => {
+    const blog = normalizeSheet({ ...RAW, fonte_desempenho: "https://example.com/asad" }, SEEN, ASAD);
+    expect(blog.longevity).toBeNull();
+    expect(normalizeSheet({ ...RAW, ano_lancamento: "21" }, SEEN, ASAD).launchYear).toBeNull();
+  });
+
+  it("photo candidates: the official one seen on a fetched page first, then Fragrantica's for the same page", () => {
+    expect(normalizeSheet(RAW, SEEN, ASAD).imageCandidates).toEqual([
+      { url: "https://lattafa.example/media/asad.png", source: "lattafa.example" },
+      { url: "https://fimgs.net/mdimg/perfume/o.70001.jpg", source: "Fragrantica" },
+    ]);
+    // an address the research never saw is not trusted
+    expect(normalizeSheet({ ...RAW, imagem_url: "https://cdn.other.example/x.png" }, SEEN, ASAD).imageCandidates.map((c) => c.source)).toEqual(["Fragrantica"]);
+  });
+
+  it("a Fragrantica photo only for the very same perfume (never a flanker or another perfume)", () => {
+    const page = "https://www.fragrantica.com.br/perfume/Lattafa-Perfumes/Asad-70001.html";
+    expect(fragranticaImage(page, { brand: "Lattafa", name: "Asad" })).toBe("https://fimgs.net/mdimg/perfume/o.70001.jpg");
+    expect(fragranticaImage(page, { brand: "Lattafa", name: "Asad Elixir" })).toBeNull();
+    expect(fragranticaImage("https://www.fragrantica.com/perfume/Lattafa-Perfumes/Asad-Bourbon-90000.html", { brand: "Lattafa", name: "Asad" })).toBeNull();
+    expect(fragranticaImage("https://example.com/perfume/Lattafa-Perfumes/Asad-70001.html", { brand: "Lattafa", name: "Asad" })).toBeNull();
+  });
+});
+
+describe("the post laid out by the store", () => {
+  const sheet = normalizeSheet(RAW, SEEN, ASAD);
+  const item = { name: "Lattafa Asad EDP 100ml Masculino", concentration: "Eau de Parfum", volumeMl: 100, priceCents: 18990 };
+
+  it("one perfume per post: photo caption with name, version, opening, the whole sheet and the price", () => {
+    const post = buildPost(item, sheet, "Um âmbar especiado marcante.");
+    expect(post).toBe(
+      [
+        "✨ *Lattafa Asad*",
+        "_Eau de Parfum · 100 ml_",
+        "",
+        "Um âmbar especiado marcante.",
+        "",
+        "*Ficha olfativa*",
+        "• *Família olfativa:* Âmbar especiado",
+        "• *Notas de saída:* pimenta-preta e abacaxi",
+        "• *Notas de coração:* café e patchouli",
+        "• *Notas de fundo:* baunilha e âmbar",
+        "• *Acordes principais:* âmbar, especiado e doce",
+        "• *Classificação:* masculino",
+        "• *Lançamento:* 2021",
+        "• *Fixação:* duradoura · *Projeção:* moderada _(avaliação dos usuários do Fragrantica)_",
+        "• *Quando usar:* noite, outono e inverno",
+        "",
+        "💎 *R$ 189,90*",
+      ].join("\n"),
+    );
+    expect(reviewPost(post, { sourceLine: "Lattafa Asad EDP 100ml R$ 189,90", priceCents: 18990, details: null }, { performanceSourced: true })).toEqual([]);
+  });
+
+  it("without a sheet or a price, only what the list says", () => {
+    const post = buildPost({ name: "Bidaya Ayat", concentration: null, volumeMl: 100, priceCents: null }, normalizeSheet({ ...RAW, status: "nao_encontrada" }, SEEN, ASAD), "Elegante.");
+    expect(post).toBe("✨ *Bidaya Ayat*\n_100 ml_\n\nElegante.");
+  });
+
+  it("names keep flankers but lose size, version and gender", () => {
+    expect(displayName("Lattafa Asad Elixir EDP 100ml Masculino")).toBe("Lattafa Asad Elixir");
+    expect(displayName("French Avenue Irida Extrait EDP Feminino")).toBe("French Avenue Irida");
+    expect(displayName("Parfums de Marly Layton Eau de Parfum")).toBe("Parfums de Marly Layton");
+  });
+
+  it("a post longer than a photo caption is split at a paragraph", () => {
+    const long = `${"a".repeat(600)}\n\n${"b".repeat(600)}\n\n${"c".repeat(100)}`;
+    const [caption, rest] = splitForCaption(long);
+    expect(caption).toBe("a".repeat(600));
+    expect(rest).toBe(`${"b".repeat(600)}\n\n${"c".repeat(100)}`);
+    expect(splitForCaption("curto")).toEqual(["curto"]);
   });
 });
 

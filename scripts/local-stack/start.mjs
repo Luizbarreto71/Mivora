@@ -324,7 +324,7 @@ async function anthropicDouble(req, res) {
   const betas = String(req.headers["anthropic-beta"] ?? "");
   const body = JSON.parse((await readBody(req)).toString() || "{}");
   const systemText = (Array.isArray(body.system) ? body.system : [{ text: body.system ?? "" }]).map((b) => b.text ?? "").join(" ");
-  if (/lista diária|ficha olfativa|Perfume VIP AI/.test(systemText)) return vipDouble(body, betas, systemText, res);
+  if (/lista diária|ficha (olfativa|técnica) de perfumes|Perfume VIP AI/.test(systemText)) return vipDouble(body, betas, systemText, res);
   const image = (body.messages?.[0]?.content ?? []).find((b) => b.type === "image");
   // the request the store must send: current model, server-side fallback, structured output, one JPEG photo
   if (
@@ -398,7 +398,8 @@ function vipDouble(body, betas, systemText, res) {
     return anthropicError(res, 400, "invalid_request_error", "unexpected request shape");
   }
   const first = body.messages?.[0]?.content;
-  const user = typeof first === "string" ? first : JSON.stringify(first ?? "");
+  const user = typeof first === "string" ? first : (first ?? []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
+  const photo = Array.isArray(first) ? first.find((b) => b.type === "image") : null;
   const reply = (content, stop_reason = "end_turn") =>
     json(res, 200, { id: "msg_local_" + randomUUID().slice(0, 8), type: "message", role: "assistant", model: body.model, content, stop_reason, stop_sequence: null, usage: { input_tokens: 900, output_tokens: 200 } });
   const structured = body.output_config?.format?.type === "json_schema";
@@ -417,18 +418,26 @@ function vipDouble(body, betas, systemText, res) {
       });
     return reply([{ type: "text", text: JSON.stringify({ itens }) }]);
   }
-  if (systemText.includes("ficha olfativa")) {
+  if (/ficha (olfativa|técnica) de perfumes/.test(systemText)) {
     const tools = body.tools ?? [];
     const sheet = tools.find((t) => t.name === "registrar_ficha");
     if (!tools.some((t) => t.type === "web_search_20260209") || !tools.some((t) => t.type === "web_fetch_20260209") || !sheet?.strict) {
       return anthropicError(res, 400, "invalid_request_error", "web tools and a strict registrar_ficha tool expected");
     }
     const unknown = /Desconhecido/i.test(user);
-    const url = "https://www.fragrantica.com.br/perfume/Lattafa-Perfumes/Asad-63546.html";
+    const url = "https://www.fragrantica.com.br/perfume/Lattafa-Perfumes/Asad-99999.html";
+    const official = "https://lattafa.example/asad";
+    const bottle = "http://localhost:" + cfg.gatewayPort + "/test/frasco-asad.png";
     return reply(
       [
         { type: "server_tool_use", id: "srvtoolu_local1", name: "web_search", input: { query: "Lattafa Asad fragrantica" } },
         { type: "web_search_tool_result", tool_use_id: "srvtoolu_local1", content: [{ type: "web_search_result", url, title: "Asad Lattafa Perfumes", encrypted_content: "local", page_age: null }] },
+        { type: "server_tool_use", id: "srvtoolu_local2", name: "web_fetch", input: { url: official } },
+        {
+          type: "web_fetch_tool_result",
+          tool_use_id: "srvtoolu_local2",
+          content: { type: "web_fetch_result", url: official, retrieved_at: new Date().toISOString(), content: { type: "document", source: { type: "text", media_type: "text/plain", data: "Asad — Eau de Parfum. Foto: " + bottle }, title: "Asad" } },
+        },
         {
           type: "tool_use",
           id: "toolu_local1",
@@ -443,10 +452,17 @@ function vipDouble(body, betas, systemText, res) {
             notas_coracao: unknown ? [] : ["café"],
             notas_fundo: unknown ? [] : ["baunilha", "âmbar"],
             notas_gerais: [],
+            acordes: unknown ? [] : ["âmbar", "especiado", "doce"],
+            perfumistas: [],
+            ano_lancamento: unknown ? "" : "2021",
+            fixacao: unknown ? "" : "duradoura",
+            projecao: unknown ? "" : "moderada",
+            fonte_desempenho: unknown ? "" : url,
             perfil: unknown ? "" : "Especiado e adocicado, com fundo quente de baunilha.",
             ocasioes: unknown ? [] : ["noite", "outono"],
+            imagem_url: unknown ? "" : bottle,
             observacoes: unknown ? "Nenhuma fonte confiável encontrada." : "",
-            fontes: unknown ? [] : [{ titulo: "Fragrantica", url }],
+            fontes: unknown ? [] : [{ titulo: "Fragrantica", url }, { titulo: "Lattafa", url: official }],
           },
         },
       ],
@@ -454,11 +470,10 @@ function vipDouble(body, betas, systemText, res) {
     );
   }
   if (!structured) return anthropicError(res, 400, "invalid_request_error", "structured output expected");
-  const name = /- Perfume: (.+)/.exec(user)?.[1] ?? "Perfume";
-  const price = /- Preço: (R\$ [\d.,]+)/.exec(user)?.[1];
-  const notes = /Notas de topo: (.+)/.exec(user)?.[1];
-  const texto = ["*" + name + "*", notes ? "Abre com " + notes + ", sobre um fundo quente." : "Uma assinatura elegante para o dia a dia.", price ? "💎 " + price : null].filter(Boolean).join("\n");
-  return reply([{ type: "text", text: JSON.stringify({ texto }) }]);
+  if (photo && (photo.source?.type !== "base64" || photo.source.media_type !== "image/jpeg")) return anthropicError(res, 400, "invalid_request_error", "photo must be a base64 JPEG");
+  const family = /Família: (.+)/.exec(user)?.[1];
+  const abertura = family ? "Um " + family.toLowerCase() + " marcante e envolvente, feito para noites especiais." : "Uma assinatura elegante para o dia a dia.";
+  return reply([{ type: "text", text: JSON.stringify({ abertura, foto_confere: photo ? "sim" : "sem_foto", motivo_foto: "" }) }]);
 }
 
 // Z-API double for the VIP community (never the real WhatsApp): one connected number in one community,
@@ -468,6 +483,10 @@ const ZAPI_COMMUNITY = "98372465382764532938";
 const zapiSent = [];
 async function zapiDouble(req, res, url) {
   if (url.pathname === "/zapi/test/sent") return json(res, 200, zapiSent);
+  if (url.pathname === "/zapi/test/reset" && req.method === "POST") {
+    zapiSent.length = 0;
+    return json(res, 200, { ok: true });
+  }
   const m = url.pathname.match(/^\/zapi\/instances\/([^/]+)\/token\/([^/]+)\/(.+)$/);
   if (!m || m[1] !== TEST_ZAPI.instance || m[2] !== TEST_ZAPI.token) return json(res, 400, { error: "Instance not found" });
   if (req.headers["client-token"] !== TEST_ZAPI.client) return json(res, 400, { error: "null not allowed" });
@@ -768,6 +787,11 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === "/anthropic/v1/messages" && req.method === "POST") return anthropicDouble(req, res);
     if (url.pathname.startsWith("/zapi/")) return zapiDouble(req, res, url);
+    if (url.pathname === "/test/frasco-asad.png" && req.method === "GET") {
+      const png = await sharp({ create: { width: 600, height: 900, channels: 3, background: { r: 40, g: 30, b: 60 } } }).png().toBuffer();
+      res.writeHead(200, { "content-type": "image/png" });
+      return res.end(png);
+    }
     // Mercado Pago test doubles
     if (url.pathname.startsWith("/mercadopago/")) {
       const mpPath = url.pathname.slice("/mercadopago".length);
@@ -1041,7 +1065,7 @@ writeFileSync(
     // skin analysis against the Anthropic double (never the real API)
     `export ANTHROPIC_API_KEY=${TEST_ANTHROPIC_KEY}\nexport ANTHROPIC_BASE_URL=http://localhost:${cfg.gatewayPort}/anthropic\n` +
     // VIP community posts against the Z-API double (never the real WhatsApp)
-    `export ZAPI_BASE_URL=http://localhost:${cfg.gatewayPort}/zapi/instances\nexport ZAPI_INSTANCE_ID=${TEST_ZAPI.instance}\nexport ZAPI_INSTANCE_TOKEN=${TEST_ZAPI.token}\nexport ZAPI_CLIENT_TOKEN=${TEST_ZAPI.client}\n`,
+    `export ZAPI_BASE_URL=http://localhost:${cfg.gatewayPort}/zapi/instances\nexport ZAPI_INSTANCE_ID=${TEST_ZAPI.instance}\nexport ZAPI_INSTANCE_TOKEN=${TEST_ZAPI.token}\nexport ZAPI_CLIENT_TOKEN=${TEST_ZAPI.client}\nexport VIP_TEST_IMAGE_ORIGIN=http://localhost:${cfg.gatewayPort}\n`,
 );
 
 // .env.local for the Next.js app

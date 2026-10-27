@@ -5,7 +5,7 @@ import { z } from "zod";
 import { dbErrorMessage, fail, formBool, formInt, formNullable, formString, success, type ActionState } from "@/lib/admin/action-state";
 import { requireAdminAction } from "@/lib/admin/auth";
 import { reviewPost, readLine } from "@/lib/vip/core";
-import { approveBatch, createBatch, perfumeProducts, preparePost, sendPreview, type VipPostRow } from "@/lib/vip/pipeline";
+import { approveBatch, createBatch, keepPostPhoto, perfumeProducts, preparePost, sendPreview, updatePost, type VipPostRow } from "@/lib/vip/pipeline";
 import { instanceStatus, listCommunities, type Community } from "@/lib/vip/zapi";
 
 const uuid = z.uuid();
@@ -28,7 +28,10 @@ export async function prepareVipPost(postId: string, forceResearch = false) {
   return res.ok ? { ok: true, status: res.status } : { ok: false, message: res.message };
 }
 
-/** The admin's edit of the text (and photo) counts as their review: the post becomes ready. */
+/**
+ * The admin's edit of the text and photo counts as their review: the post becomes ready. The photo
+ * can be the research's bottle photo, a store product's photo, one the admin sends, or none.
+ */
 export async function saveVipPost(_: ActionState, fd: FormData): Promise<ActionState> {
   const { supabase } = await requireAdminAction();
   const id = uuid.safeParse(formString(fd, "id"));
@@ -36,29 +39,46 @@ export async function saveVipPost(_: ActionState, fd: FormData): Promise<ActionS
   const body = formString(fd, "body");
   if (body.length < 10) return fail("Escreva o texto do post.");
   if (body.length > 4000) return fail("O texto passou de 4.000 caracteres.");
-  const { data } = await supabase.from("vip_posts").select("*, batch:vip_batches(status)").eq("id", id.data).maybeSingle();
-  const post = data as (VipPostRow & { batch: { status: string } | null }) | null;
+  const { data } = await supabase.from("vip_posts").select("*, batch:vip_batches(status), fragrance:vip_fragrances(*)").eq("id", id.data).maybeSingle();
+  const post = data as (VipPostRow & { batch: { status: string } | null; fragrance: Record<string, unknown> | null }) | null;
   if (!post) return fail("Post não encontrado.");
   if (post.batch?.status !== "rascunho" || !["pronto", "revisar", "erro", "pendente"].includes(post.status)) return fail("Este post já foi aprovado ou não pode mais ser editado.");
 
   let imageUrl = post.image_url;
+  let imageSource = post.image_source ?? (post.image_url && post.product_id ? "loja" : null);
   let productId = post.product_id;
-  const photo = formString(fd, "photo_product_id");
-  if (photo === "none") {
+  const file = fd.get("photo_file");
+  const choice = formString(fd, "photo");
+  if (file instanceof File && file.size > 0) {
+    if (file.size > 6 * 1024 * 1024) return fail("A foto passou de 6 MB.");
+    const kept = await keepPostPhoto(supabase, id.data, Buffer.from(await file.arrayBuffer()));
+    if (!kept) return fail("Não foi possível usar esta foto (use JPG, PNG ou WebP com pelo menos 300 px).");
+    imageUrl = kept;
+    imageSource = "enviada";
+  } else if (choice === "none") {
     imageUrl = null;
-    productId = null;
-  } else if (photo && photo !== productId) {
-    if (!uuid.safeParse(photo).success) return fail("Foto inválida.");
-    const product = (await perfumeProducts(supabase)).find((p) => p.id === photo);
-    if (!product) return fail("Produto não encontrado entre os perfumes da loja.");
+    imageSource = "nenhuma";
+  } else if (choice === "research") {
+    const researched = (post.fragrance?.image_url as string | null | undefined) ?? null;
+    if (!researched) return fail("A pesquisa não encontrou foto para este perfume. Envie uma foto ou escolha uma da loja.");
+    imageUrl = researched;
+    imageSource = (post.fragrance?.image_source as string | null | undefined) ?? "pesquisa";
+  } else if (choice.startsWith("product:")) {
+    const pid = choice.slice("product:".length);
+    if (!uuid.safeParse(pid).success) return fail("Foto inválida.");
+    const product = (await perfumeProducts(supabase)).find((p) => p.id === pid);
+    if (!product?.image) return fail("Produto sem foto entre os perfumes da loja.");
     imageUrl = product.image;
+    imageSource = "loja";
     productId = product.id;
   }
   const { data: settings } = await supabase.from("vip_settings").select("footer").eq("id", 1).maybeSingle();
-  const warnings = reviewPost(body, { sourceLine: post.source_line, priceCents: readLine(post.source_line).priceCents, details: post.details }, (settings?.footer as string | null) ?? null);
-  const { error } = await supabase.from("vip_posts").update({ body, image_url: imageUrl, product_id: productId, status: "pronto", problems: warnings }).eq("id", id.data);
+  const performanceSourced = Boolean(post.fragrance?.longevity || post.fragrance?.sillage);
+  const warnings = reviewPost(body, { sourceLine: post.source_line, priceCents: readLine(post.source_line).priceCents, details: post.details }, { footer: (settings?.footer as string | null) ?? null, performanceSourced });
+  if (!imageUrl) warnings.push("Post sem foto.");
+  const { error } = await updatePost(supabase, id.data, { body, image_url: imageUrl, image_source: imageSource, product_id: productId, status: "pronto", problems: warnings });
   if (error) return fail(dbErrorMessage(error));
-  return success(warnings.length ? "Texto salvo e marcado como revisado. Confira os avisos em amarelo." : "Texto salvo e marcado como revisado.");
+  return success(warnings.length ? "Post salvo e marcado como revisado. Confira os avisos em amarelo." : "Post salvo e marcado como revisado.");
 }
 
 async function setStatus(postId: string, from: VipPostRow["status"][], to: VipPostRow["status"], extra: Record<string, unknown> = {}) {

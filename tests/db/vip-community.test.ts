@@ -123,3 +123,21 @@ describe("Comunidade VIP: the sender takes one due post at a time", () => {
     expect(row.problems[0]).toMatch(/não foi confirmado/);
   });
 });
+
+describe("Comunidade VIP: full technical sheet (migration 025)", () => {
+  it("stores the whole sheet and accepts ratings only from Fragrantica or Parfumo", async () => {
+    await db.query(
+      `insert into vip_fragrances (lookup_key, status, accords, perfumers, launch_year, longevity, sillage, performance_source, image_url, image_source, sheet_version)
+       values ('asad lattafa|Eau de Parfum', 'confirmada', '{âmbar,especiado}', '{}', 2021, 'duradoura', 'moderada', 'Fragrantica', 'https://x.supabase.co/storage/v1/object/public/product-media/vip/a.jpg', 'Fragrantica', 2)`,
+    );
+    const row = await one<{ sheet_version: number; launch_year: number }>(`select sheet_version, launch_year from vip_fragrances where lookup_key = 'asad lattafa|Eau de Parfum'`);
+    expect(row).toEqual({ sheet_version: 2, launch_year: 2021 });
+    await expect(
+      db.query(`insert into vip_fragrances (lookup_key, status, longevity, performance_source) values ('outro|', 'confirmada', 'eterna', 'Blog do perfume')`),
+    ).rejects.toThrow(/check constraint/);
+    await expect(db.query(`insert into vip_fragrances (lookup_key, status, launch_year) values ('ano|', 'confirmada', 21)`)).rejects.toThrow(/check constraint/);
+    // sheets researched before the full sheet are marked as version 1, so they are researched again
+    expect((await one<{ v: number }>(`select sheet_version as v from vip_fragrances where lookup_key = 'asad lattafa|Eau de Parfum'`)).v).toBe(2);
+    expect((await one<{ d: string }>(`select column_default as d from information_schema.columns where table_name = 'vip_fragrances' and column_name = 'sheet_version'`)).d).toBe("1");
+  });
+});

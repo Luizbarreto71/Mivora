@@ -19,7 +19,7 @@ import {
 } from "@/lib/admin/actions/vip";
 import { requireAdmin } from "@/lib/admin/auth";
 import { composeMessage } from "@/lib/vip/core";
-import { describePrice, loadVipSettings, perfumeProducts, sendingBlockers, type VipPostRow } from "@/lib/vip/pipeline";
+import { describePrice, loadVipSettings, perfumeProducts, photoSourceLabel, sendingBlockers, type VipPostRow } from "@/lib/vip/pipeline";
 import { formatDateTime } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Lista do dia · Comunidade VIP" };
@@ -38,6 +38,8 @@ type Fragrance = {
   remarks: string | null;
   sources: { title: string; url: string }[];
   researched_at: string;
+  image_url?: string | null;
+  image_source?: string | null;
 };
 
 const POST_STATUS: Record<VipPostRow["status"], { label: string; tone: "green" | "gray" | "amber" | "red" | "blue" | "dark" }> = {
@@ -53,6 +55,13 @@ const POST_STATUS: Record<VipPostRow["status"], { label: string; tone: "green" |
 };
 
 const SHEET_STATUS = { confirmada: "Ficha confirmada", parcial: "Ficha parcial", nao_encontrada: "Perfume não encontrado" } as const;
+
+/** "current" keeps whatever the post has; the select only changes it when the admin picks something else. */
+function photoChoice(p: VipPostRow, f: Fragrance | undefined) {
+  if (p.image_source === "nenhuma" || !p.image_url) return "none";
+  if (f?.image_url && p.image_url === f.image_url) return "research";
+  return "current";
+}
 
 function Sheet({ f }: { f: Fragrance }) {
   const pyramid = [
@@ -209,17 +218,24 @@ export default async function VipBatchPage({ params }: { params: Promise<{ id: s
                       <Field label="Texto do post" htmlFor={`body-${p.id}`} hint={settings?.footer ? "O fechamento das Configurações do envio entra no fim de cada post." : undefined}>
                         <Textarea id={`body-${p.id}`} name="body" rows={10} defaultValue={p.body ?? ""} maxLength={4000} required />
                       </Field>
-                      <Field label="Foto" htmlFor={`photo-${p.id}`}>
-                        <Select id={`photo-${p.id}`} name="photo_product_id" defaultValue={p.product_id ?? "none"}>
-                          <option value="none">Sem foto (só texto)</option>
-                          {products.map((prod) => (
-                            <option key={prod.id} value={prod.id} disabled={!prod.image}>
-                              {prod.name}
-                              {prod.image ? "" : " (sem foto)"}
-                            </option>
-                          ))}
-                        </Select>
-                      </Field>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <Field label="Foto" htmlFor={`photo-${p.id}`} hint={photoSourceLabel(p.image_source ?? (p.image_url && p.product_id ? "loja" : null)) ?? undefined}>
+                          <Select id={`photo-${p.id}`} name="photo" defaultValue={photoChoice(p, fragrance)}>
+                            <option value="current">Manter a foto atual</option>
+                            {fragrance?.image_url ? <option value="research">Foto da pesquisa ({photoSourceLabel(fragrance.image_source) ?? "pesquisa"})</option> : null}
+                            <option value="none">Sem foto (só texto)</option>
+                            {products.map((prod) => (
+                              <option key={prod.id} value={`product:${prod.id}`} disabled={!prod.image}>
+                                Loja: {prod.name}
+                                {prod.image ? "" : " (sem foto)"}
+                              </option>
+                            ))}
+                          </Select>
+                        </Field>
+                        <Field label="Ou envie a foto do frasco" htmlFor={`photo-file-${p.id}`} hint="JPG, PNG ou WebP, até 6 MB">
+                          <input id={`photo-file-${p.id}`} name="photo_file" type="file" accept="image/jpeg,image/png,image/webp" className="block w-full text-sm" />
+                        </Field>
+                      </div>
                       <SubmitButton variant="outline">Salvar e marcar como revisado</SubmitButton>
                     </ActionForm>
                   ) : p.body ? (
@@ -228,10 +244,15 @@ export default async function VipBatchPage({ params }: { params: Promise<{ id: s
                     <p className="text-sm text-muted">{p.status === "pendente" ? "Aguardando a pesquisa e o texto." : "Sem texto."}</p>
                   )}
                   {p.image_url ? (
-                    <div className="relative h-36 w-36 overflow-hidden rounded-md border border-line bg-white">
-                      <Image src={p.image_url} alt="" fill sizes="144px" className="object-contain p-1" />
-                    </div>
-                  ) : null}
+                    <figure className="space-y-1">
+                      <div className="relative h-36 w-36 overflow-hidden rounded-md border border-line bg-white">
+                        <Image src={p.image_url} alt={`Foto do post: ${p.name}`} fill sizes="144px" className="object-contain p-1" />
+                      </div>
+                      <figcaption className="text-xs text-muted">{photoSourceLabel(p.image_source ?? (p.product_id ? "loja" : null))}</figcaption>
+                    </figure>
+                  ) : (
+                    <div className="flex h-36 w-36 items-center justify-center rounded-md border border-dashed border-line text-center text-xs text-muted">Sem foto</div>
+                  )}
                 </div>
               </div>
             </Card>

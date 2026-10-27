@@ -2217,9 +2217,10 @@ test("Análise de pele no celular (390 px) — pop-up proporcional, seção da h
   await ctx.close();
 });
 
-test("Comunidade VIP: lista do dia → pesquisa e texto → aprovação → post no grupo de avisos (dublês da IA e da Z-API)", async ({ request }) => {
+test("Comunidade VIP: lista do dia → ficha completa com foto → aprovação → post no grupo de avisos (dublês da IA e da Z-API)", async ({ request }) => {
   test.setTimeout(120_000);
   const serviceHeaders = { apikey: SERVICE_KEY, Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" };
+  await request.post(`${SUPABASE_URL}/zapi/test/reset`);
 
   // 1. the dedicated number, its community and the sending window
   await admin.goto("/admin/comunidade-vip/configuracoes");
@@ -2247,11 +2248,17 @@ test("Comunidade VIP: lista do dia → pesquisa e texto → aprovação → post
   const asad = card(/^1\. Lattafa Asad EDP/);
   const unknown = card(/^2\. Perfume Desconhecido/);
   await expect(asad.getByText("Pronto", { exact: true })).toBeVisible();
-  await expect(asad.getByLabel("Texto do post")).toHaveValue(/pimenta-preta[\s\S]*\n💎 R\$ 189,90/);
+  // one perfume per post: name, version and size, opening, the whole sheet, price — and the bottle photo
+  await expect(asad.getByLabel("Texto do post")).toHaveValue(
+    /^✨ \*Lattafa Asad\*\n_Eau de Parfum · 100 ml_\n\nUm âmbar especiado[\s\S]*\*Notas de saída:\* pimenta-preta e abacaxi\n• \*Notas de coração:\* café\n• \*Notas de fundo:\* baunilha e âmbar\n• \*Acordes principais:\* âmbar, especiado e doce[\s\S]*\*Lançamento:\* 2021\n• \*Fixação:\* duradoura · \*Projeção:\* moderada _\(avaliação dos usuários do Fragrantica\)_\n• \*Quando usar:\* noite e outono\n\n💎 \*R\$ 189,90\*$/,
+  );
+  await expect(asad.getByRole("img", { name: "Foto do post: Lattafa Asad EDP" })).toBeVisible();
+  await expect(asad.locator("figcaption")).toHaveText("foto do site localhost");
   await expect(asad.getByText(/Ficha confirmada: Lattafa Asad Eau de Parfum/)).toBeVisible();
   await expect(unknown.getByText("Revisar", { exact: true })).toBeVisible();
   await expect(unknown.getByText(/A lista não informa o preço/)).toBeVisible();
   await expect(unknown.getByText(/Não encontrei este perfume com segurança/)).toBeVisible();
+  await expect(unknown.getByText(/Post sem foto/)).toBeVisible();
   await expect(unknown.getByLabel("Texto do post")).not.toHaveValue(/R\$/);
 
   // 3. nothing goes out while a post still needs a decision
@@ -2274,9 +2281,10 @@ test("Comunidade VIP: lista do dia → pesquisa e texto → aprovação → post
   expect(await tick.json()).toMatchObject({ state: "sent" });
   expect(await (await request.post("/api/cron/comunidade-vip")).json()).toEqual({ state: "idle" });
   const sent = (await (await request.get(`${SUPABASE_URL}/zapi/test/sent`)).json()) as { phone: string; text: string; route: string }[];
+  // the photo, with the whole post as its caption
   expect(sent).toHaveLength(1);
-  expect(sent[0]).toMatchObject({ phone: "120363019502650977-group", route: "send-text" });
-  expect(sent[0].text).toMatch(/pimenta-preta[\s\S]*R\$ 189,90\n\nPara garantir o seu, chame no privado\.$/);
+  expect(sent[0]).toMatchObject({ phone: "120363019502650977-group", route: "send-image" });
+  expect(sent[0].text).toMatch(/^✨ \*Lattafa Asad\*[\s\S]*\*Notas de saída:\* pimenta-preta e abacaxi[\s\S]*💎 \*R\$ 189,90\*\n\nPara garantir o seu, chame no privado\.$/);
   expect(sent[0].text).not.toMatch(/Desconhecido/);
   await admin.reload();
   await expect(asad.getByText("Enviado", { exact: true })).toBeVisible();
