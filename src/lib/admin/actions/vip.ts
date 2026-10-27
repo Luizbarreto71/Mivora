@@ -184,7 +184,11 @@ export async function checkVipConnection(): Promise<{ ok: boolean; message: stri
   await requireAdminAction();
   const status = await instanceStatus();
   if (!status.ok) return { ok: false, message: status.error };
-  if (!status.data.connected) return { ok: false, message: "O número não está conectado na Z-API. Abra o painel da Z-API e leia o QR Code com o WhatsApp do chip da comunidade." };
+  if (!status.data.connected)
+    return {
+      ok: false,
+      message: `O número não está conectado na Z-API${status.data.detail ? ` (${status.data.detail})` : ""}. Abra o painel da Z-API e leia o QR Code com o WhatsApp do chip da comunidade.`,
+    };
   const communities = await listCommunities();
   if (!communities.ok) return { ok: true, message: `Número conectado, mas não consegui listar as comunidades: ${communities.error}` };
   return {

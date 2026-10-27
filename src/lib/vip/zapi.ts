@@ -23,6 +23,17 @@ export function zapiConfigured() {
 
 type ZapiResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
+/** Z-API also writes plain information in "error" (status says "You are already connected."). */
+type ZapiBody = { error?: unknown; message?: unknown };
+const zapiNote = (data: unknown) => {
+  const d = data as ZapiBody | null;
+  return d && typeof d === "object" ? String(d.error ?? d.message ?? "").slice(0, 160) : "";
+};
+
+/**
+ * One request. Only the HTTP status decides failure here: each caller checks the fields it needs,
+ * because Z-API answers 200 with an "error" text even on success.
+ */
 async function call<T>(method: "GET" | "POST", path: string, body?: unknown): Promise<ZapiResult<T>> {
   const c = credentials();
   if (!c.instance || !c.token) return { ok: false, error: "A Z-API não está configurada no servidor (ZAPI_INSTANCE_ID e ZAPI_INSTANCE_TOKEN)." };
@@ -34,11 +45,11 @@ async function call<T>(method: "GET" | "POST", path: string, body?: unknown): Pr
       cache: "no-store",
       signal: AbortSignal.timeout(30_000),
     });
-    const data = (await res.json().catch(() => null)) as (T & { error?: unknown; message?: unknown }) | null;
-    if (!res.ok || data == null || (typeof data === "object" && "error" in data && data.error)) {
-      const detail = data && typeof data === "object" ? String(data.error ?? data.message ?? "") : "";
-      console.error("[comunidade vip] Z-API respondeu", res.status, detail.slice(0, 200));
-      return { ok: false, error: `A Z-API recusou o pedido (HTTP ${res.status}${detail ? `: ${detail.slice(0, 160)}` : ""}).` };
+    const data = (await res.json().catch(() => null)) as (T & ZapiBody) | null;
+    if (!res.ok || data == null) {
+      const detail = zapiNote(data);
+      console.error("[comunidade vip] Z-API respondeu", res.status, detail);
+      return { ok: false, error: `A Z-API recusou o pedido (HTTP ${res.status}${detail ? `: ${detail}` : ""}).` };
     }
     return { ok: true, data };
   } catch (error) {
@@ -54,14 +65,18 @@ export async function sendToGroup(groupId: string, text: string, imageUrl: strin
     : await call<{ messageId?: string; zaapId?: string }>("POST", "send-text", { phone: groupId, message: text });
   if (!res.ok) return res;
   const messageId = res.data.messageId ?? res.data.zaapId;
-  if (!messageId) return { ok: false, error: "A Z-API não devolveu o código da mensagem; o envio não foi confirmado." };
+  if (!messageId) {
+    const note = zapiNote(res.data);
+    return { ok: false, error: `A Z-API não devolveu o código da mensagem; o envio não foi confirmado${note ? ` (${note})` : ""}.` };
+  }
   return { ok: true, data: { messageId: String(messageId) } };
 }
 
 export async function instanceStatus(): Promise<ZapiResult<{ connected: boolean; smartphoneConnected: boolean | null; detail: string | null }>> {
-  const res = await call<{ connected?: boolean; smartphoneConnected?: boolean; error?: string }>("GET", "status");
+  const res = await call<{ connected?: boolean; smartphoneConnected?: boolean }>("GET", "status");
   if (!res.ok) return res;
-  return { ok: true, data: { connected: res.data.connected === true, smartphoneConnected: res.data.smartphoneConnected ?? null, detail: null } };
+  const connected = res.data.connected === true;
+  return { ok: true, data: { connected, smartphoneConnected: res.data.smartphoneConnected ?? null, detail: connected ? null : zapiNote(res.data) || null } };
 }
 
 export type Community = { id: string; name: string; announcementGroupId: string | null };
@@ -70,11 +85,15 @@ export type Community = { id: string; name: string; announcementGroupId: string 
 export async function listCommunities(): Promise<ZapiResult<Community[]>> {
   const list = await call<{ id?: string; name?: string }[]>("GET", "communities");
   if (!list.ok) return list;
+  if (!Array.isArray(list.data)) {
+    const note = zapiNote(list.data);
+    return { ok: false, error: `A Z-API não devolveu a lista de comunidades${note ? ` (${note})` : ""}.` };
+  }
   const out: Community[] = [];
-  for (const c of (Array.isArray(list.data) ? list.data : []).slice(0, 20)) {
+  for (const c of list.data.slice(0, 20)) {
     if (!c.id) continue;
     const meta = await call<{ subGroups?: { phone?: string; isGroupAnnouncement?: boolean }[] }>("GET", `communities-metadata/${encodeURIComponent(c.id)}`);
-    const announcement = meta.ok ? (meta.data.subGroups ?? []).find((g) => g.isGroupAnnouncement && g.phone) : undefined;
+    const announcement = meta.ok && Array.isArray(meta.data.subGroups) ? meta.data.subGroups.find((g) => g.isGroupAnnouncement && g.phone) : undefined;
     out.push({ id: String(c.id), name: String(c.name ?? "Comunidade sem nome"), announcementGroupId: announcement?.phone ?? null });
   }
   return { ok: true, data: out };

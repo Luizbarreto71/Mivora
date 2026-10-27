@@ -491,7 +491,8 @@ async function zapiDouble(req, res, url) {
   if (!m || m[1] !== TEST_ZAPI.instance || m[2] !== TEST_ZAPI.token) return json(res, 400, { error: "Instance not found" });
   if (req.headers["client-token"] !== TEST_ZAPI.client) return json(res, 400, { error: "null not allowed" });
   const route = m[3];
-  if (route === "status" && req.method === "GET") return json(res, 200, { connected: true, smartphoneConnected: true, session: true });
+  // the real Z-API writes this note in "error" even when everything is fine
+  if (route === "status" && req.method === "GET") return json(res, 200, { connected: true, error: "You are already connected.", smartphoneConnected: true });
   if (route === "communities" && req.method === "GET") return json(res, 200, [{ name: "MIVORA VIP", id: ZAPI_COMMUNITY }]);
   if (route === "communities-metadata/" + ZAPI_COMMUNITY && req.method === "GET") {
     return json(res, 200, {
