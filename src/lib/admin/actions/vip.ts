@@ -1,11 +1,12 @@
 "use server";
 
+import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { dbErrorMessage, fail, formBool, formInt, formNullable, formString, success, type ActionState } from "@/lib/admin/action-state";
 import { requireAdminAction } from "@/lib/admin/auth";
 import { reviewPost, readLine } from "@/lib/vip/core";
-import { approveBatch, createBatch, keepPostPhoto, perfumeProducts, preparePost, sendPreview, updatePost, type VipPostRow } from "@/lib/vip/pipeline";
+import { approveBatch, createBatch, keepPostPhoto, perfumeProducts, preparePost, sendPostNow, sendPreview, updatePost, type VipPostRow } from "@/lib/vip/pipeline";
 import { instanceStatus, listCommunities, type Community } from "@/lib/vip/zapi";
 
 const uuid = z.uuid();
@@ -78,6 +79,8 @@ export async function saveVipPost(_: ActionState, fd: FormData): Promise<ActionS
   if (!imageUrl) warnings.push("Post sem foto.");
   const { error } = await updatePost(supabase, id.data, { body, image_url: imageUrl, image_source: imageSource, product_id: productId, status: "pronto", problems: warnings });
   if (error) return fail(dbErrorMessage(error));
+  // the status pill and the counts of the list follow the save
+  refresh();
   return success(warnings.length ? "Post salvo e marcado como revisado. Confira os avisos em amarelo." : "Post salvo e marcado como revisado.");
 }
 
@@ -122,6 +125,13 @@ export async function cancelVipBatch(batchId: string) {
   if (error) return fail(dbErrorMessage(error));
   await supabase.from("vip_batches").update({ status: "cancelado" }).eq("id", id);
   return success("Lista cancelada. O que ainda não tinha saído não será enviado.");
+}
+
+/** Publishes one ready or scheduled post in the community right now. */
+export async function sendVipPostNow(postId: string) {
+  const { supabase } = await requireAdminAction();
+  const res = await sendPostNow(supabase, uuid.parse(postId));
+  return res.ok ? success("Post publicado na comunidade.") : fail(res.message);
 }
 
 export async function previewVipPost(postId: string) {
@@ -169,6 +179,7 @@ export async function saveVipSettings(_: ActionState, fd: FormData): Promise<Act
     })
     .eq("id", 1);
   if (error) return fail(dbErrorMessage(error));
+  refresh();
   return success(enabled ? "Configurações salvas. O envio automático está ligado." : "Configurações salvas. O envio automático está desligado.");
 }
 

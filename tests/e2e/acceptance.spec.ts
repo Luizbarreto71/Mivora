@@ -2296,4 +2296,27 @@ test("Comunidade VIP: lista do dia → ficha completa com foto → aprovação �
   await admin.getByRole("button", { name: "Preparar posts" }).click();
   await expect(admin.getByText("Preparação concluída.")).toBeVisible({ timeout: 60_000 });
   await expect(card(/^1\. Lattafa Asad EDP/).getByText(/já foi publicado em/)).toBeVisible();
+
+  // 6. "Enviar agora": the admin decides to repeat it and publishes it at once, without waiting for its time
+  await card(/^1\. Lattafa Asad EDP/).getByRole("button", { name: "Salvar e marcar como revisado" }).click();
+  await expect(card(/^1\. Lattafa Asad EDP/).getByText("Pronto", { exact: true })).toBeVisible();
+  admin.once("dialog", (d) => d.accept());
+  await admin.getByRole("button", { name: "Aprovar o dia" }).click();
+  await expect(admin.getByText(/Aprovada em/)).toBeVisible();
+  await admin.goto("/admin/comunidade-vip");
+  const upcoming = admin.locator("section").filter({ has: admin.getByRole("heading", { name: "Próximos envios" }) });
+  await expect(upcoming.getByRole("link", { name: "Lattafa Asad EDP" })).toBeVisible();
+  admin.once("dialog", (d) => {
+    expect(d.message()).toBe("Publicar agora na comunidade: Lattafa Asad EDP?");
+    void d.accept();
+  });
+  await upcoming.getByRole("button", { name: "Enviar agora" }).click();
+  await expect(upcoming.getByText("Nenhum post agendado.")).toBeVisible();
+  const after = (await (await request.get(`${SUPABASE_URL}/zapi/test/sent`)).json()) as { phone: string; route: string }[];
+  expect(after).toHaveLength(2);
+  expect(after[1]).toMatchObject({ phone: "120363019502650977-group", route: "send-image" });
+  // the clock never sends it a second time
+  await request.patch(`${SUPABASE_URL}/rest/v1/vip_posts?status=eq.enviado`, { headers: serviceHeaders, data: { sent_at: new Date(Date.now() - 3_600_000).toISOString() } });
+  expect(await (await request.post("/api/cron/comunidade-vip")).json()).toEqual({ state: "idle" });
+  expect((await (await request.get(`${SUPABASE_URL}/zapi/test/sent`)).json()).length).toBe(2);
 });

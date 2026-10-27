@@ -576,6 +576,44 @@ export async function sendNextDuePost(service: Sb): Promise<{ state: "idle" } | 
   return { state: "sent", postId: post.id };
 }
 
+/**
+ * "Enviar agora": the admin publishes one ready or scheduled post at once, outside the daily window
+ * and the spacing (and even with the automatic sending paused). The post is taken over first, so
+ * the clock or a second click can never send it twice.
+ */
+export async function sendPostNow(sb: Sb, postId: string): Promise<Result> {
+  const settings = await loadVipSettings(sb);
+  if (!zapiConfigured()) return { ok: false, message: "A Z-API ainda não está configurada no servidor." };
+  if (!settings?.announcement_group_id) return { ok: false, message: "Escolha o grupo de avisos da comunidade em Configurações do envio." };
+  const { data } = await sb.from("vip_posts").select("id, status, body, image_url, attempts, batch:vip_batches(status)").eq("id", postId).maybeSingle();
+  const post = data as (Pick<VipPostRow, "id" | "status" | "body" | "image_url" | "attempts"> & { batch: { status: string } | null }) | null;
+  if (!post) return { ok: false, message: "Post não encontrado." };
+  if (!post.body) return { ok: false, message: "Este post ainda não tem texto." };
+  if (post.batch?.status === "cancelado") return { ok: false, message: "Esta lista foi cancelada." };
+  const { data: taken } = await sb
+    .from("vip_posts")
+    .update({ status: "enviando", attempts: post.attempts + 1, problems: [] })
+    .eq("id", postId)
+    .in("status", ["pronto", "agendado"])
+    .select("id");
+  if (!taken?.length) return { ok: false, message: "Este post mudou de situação (pode já estar sendo enviado). Atualize a página." };
+  const sent = await deliver(settings.announcement_group_id, post.body, settings.footer, post.image_url);
+  if (!sent.ok) {
+    await sb.from("vip_posts").update({ status: "falhou", problems: [sent.error] }).eq("id", postId);
+    return { ok: false, message: sent.error };
+  }
+  await sb
+    .from("vip_posts")
+    .update({
+      status: "enviado",
+      sent_at: new Date().toISOString(),
+      provider_message_id: sent.messageId.slice(0, 200),
+      problems: sent.photoMissing ? ["A foto não pôde ser preparada; o post saiu só com o texto."] : [],
+    })
+    .eq("id", postId);
+  return { ok: true };
+}
+
 /** Sends one post to the admin's own WhatsApp, exactly as the community would see it. */
 export async function sendPreview(sb: Sb, postId: string): Promise<Result> {
   const settings = await loadVipSettings(sb);

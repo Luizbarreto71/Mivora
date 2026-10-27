@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { ActionButton } from "@/components/admin/action-button";
 import { ActionForm, SubmitButton } from "@/components/admin/form-kit";
 import { missingTables, NotMigrated } from "@/components/admin/vip/not-migrated";
 import { AdminPage, Card, EmptyRow, StatusPill, Table, Td, Th } from "@/components/admin/ui";
 import { LinkButton } from "@/components/ui/button";
 import { Field, Textarea } from "@/components/ui/form";
-import { createVipBatch } from "@/lib/admin/actions/vip";
+import { createVipBatch, sendVipPostNow } from "@/lib/admin/actions/vip";
 import { requireAdmin } from "@/lib/admin/auth";
 import { vipAiConfigured } from "@/lib/vip/ai";
 import { loadVipSettings, sendingBlockers } from "@/lib/vip/pipeline";
@@ -89,11 +90,16 @@ export default async function VipCommunityPage() {
           ) : (
             <ul className="divide-y divide-line text-sm">
               {next.map((p) => (
-                <li key={p.id} className="flex items-center justify-between gap-4 py-2">
+                <li key={p.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 py-2">
                   <Link href={`/admin/comunidade-vip/${p.batch_id}`} className="min-w-0 truncate hover:underline">
                     {p.name}
                   </Link>
-                  <span className="shrink-0 tabular-nums text-muted">{formatDateTime(p.scheduled_for)}</span>
+                  <span className="flex shrink-0 items-center gap-3">
+                    <span className="tabular-nums text-muted">{formatDateTime(p.scheduled_for)}</span>
+                    <ActionButton action={sendVipPostNow.bind(null, p.id)} variant="primary" confirm={`Publicar agora na comunidade: ${p.name}?`}>
+                      Enviar agora
+                    </ActionButton>
+                  </span>
                 </li>
               ))}
             </ul>

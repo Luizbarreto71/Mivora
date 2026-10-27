@@ -16,6 +16,7 @@ import {
   restoreVipPost,
   retryVipPost,
   saveVipPost,
+  sendVipPostNow,
 } from "@/lib/admin/actions/vip";
 import { requireAdmin } from "@/lib/admin/auth";
 import { composeMessage } from "@/lib/vip/core";
@@ -184,6 +185,19 @@ export default async function VipBatchPage({ params }: { params: Promise<{ id: s
                     </>
                   ) : null}
                   {p.body && settings?.preview_phone && p.status !== "ignorado" ? <ActionButton action={previewVipPost.bind(null, p.id)}>Prévia no meu WhatsApp</ActionButton> : null}
+                  {(p.status === "agendado" || (p.status === "pronto" && batch.status !== "cancelado")) && p.body ? (
+                    <ActionButton
+                      action={sendVipPostNow.bind(null, p.id)}
+                      variant="primary"
+                      confirm={
+                        p.status === "agendado"
+                          ? `Publicar agora na comunidade, sem esperar o horário: ${p.name}?`
+                          : `Publicar agora na comunidade, sem esperar a aprovação do dia: ${p.name}?`
+                      }
+                    >
+                      Enviar agora
+                    </ActionButton>
+                  ) : null}
                   {p.status === "falhou" ? (
                     <ActionButton action={retryVipPost.bind(null, p.id)} confirm="Confira no grupo se este post não saiu. Tentar enviar de novo?">
                       Tentar de novo
