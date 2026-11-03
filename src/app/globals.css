@@ -217,6 +217,23 @@ body {
     }
   }
 
+  /* Vertical banner art (hero carousel): soft edges where the art meets its own blurred extension.
+     Phones: top and bottom (the sides are the screen edges); tablets: all sides; computers: left and right. */
+  .poster-feather {
+    mask-image: linear-gradient(to bottom, transparent, #000 4%, #000 96%, transparent);
+  }
+  @media (min-width: 640px) {
+    .poster-feather {
+      mask-image: linear-gradient(to right, transparent, #000 8%, #000 92%, transparent), linear-gradient(to bottom, transparent, #000 4%, #000 96%, transparent);
+      mask-composite: intersect;
+    }
+  }
+  @media (min-width: 1024px) {
+    .poster-feather {
+      mask-image: linear-gradient(to right, transparent, #000 10%, #000 90%, transparent);
+    }
+  }
+
   /* Product photos are shot on white: multiply blends them into ivory cards */
   .product-photo {
     mix-blend-mode: multiply;

@@ -119,6 +119,18 @@ async function socialLogin(page: Page, provider: "Google" | "Apple", email: stri
   await expect(page.getByText(/Pronto, você entrou na sua conta/)).toBeVisible();
 }
 
+const activeSlide = (carousel: Locator) => carousel.locator('[aria-roledescription="slide"]:not([aria-hidden])');
+
+/** The vertical art's extension (its own edges, mirrored and blurred) covers the whole slide around it. */
+async function expectPosterCoversSlide(carousel: Locator, poster: Locator) {
+  const slide = (await activeSlide(carousel).boundingBox())!;
+  const fill = (await poster.locator("[data-poster-backdrop]").boundingBox())!;
+  expect(fill.x).toBeLessThanOrEqual(slide.x);
+  expect(fill.y).toBeLessThanOrEqual(slide.y);
+  expect(fill.x + fill.width).toBeGreaterThanOrEqual(slide.x + slide.width);
+  expect(fill.y + fill.height).toBeGreaterThanOrEqual(slide.y + slide.height);
+}
+
 async function saveProduct(page: Page) {
   await page.getByRole("button", { name: /Salvar alterações|Criar produto/ }).click();
   await expect(page.getByRole("status").filter({ hasText: /Produto (salvo|criado)/ })).toBeVisible();
@@ -641,17 +653,30 @@ test("Home — carrossel: artes de Black Friday, banner do mockup, produtos reai
   await carousel.getByRole("button", { name: "Pausar a troca automática" }).click();
   await expect(carousel.getByRole("button", { name: "Retomar a troca automática" })).toBeVisible();
 
-  // the owner's vertical Black Friday art opens the carousel, whole, beside its copy, leading to the real offers
-  await expect(carousel.getByRole("heading", { level: 1, name: "Black Friday MIVORA" })).toBeVisible();
+  // the owner's vertical Black Friday art opens the carousel: whole, centred and full height, its own edges
+  // (mirrored and blurred) covering the rest of the banner; the copy is in the art (screen readers only)
+  await expect(carousel.getByRole("heading", { level: 1, name: "Black Friday MIVORA" })).toHaveCount(1);
   const poster = carousel.getByRole("link", { name: /^Arte de Black Friday da MIVORA: Medicube Zero Pore Pad de R\$ 219,99 por R\$ 129,99/ });
   await expect(poster).toHaveAttribute("href", "/ofertas");
-  await expect.poll(() => poster.locator("img").evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+  await expect.poll(() => poster.locator("img.poster-feather").evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
   const box = (await poster.boundingBox())!;
   expect(box.width / box.height).toBeCloseTo(3 / 4, 1);
-  await expect(carousel.getByRole("link", { name: /Ver ofertas/ })).toHaveAttribute("href", "/ofertas");
+  const slide = (await activeSlide(carousel).boundingBox())!;
+  expect(box.height).toBeCloseTo(slide.height, 0);
+  await expectPosterCoversSlide(carousel, poster);
+  await expect(carousel.getByRole("link", { name: /Ver ofertas/ })).toHaveCount(0);
   await carousel.getByRole("button", { name: "Próximo destaque" }).click();
-  await expect(carousel.getByRole("heading", { name: "Skincare coreano em oferta" })).toBeVisible();
-  await expect(carousel.getByRole("link", { name: /até 50% de desconto nos produtos coreanos/ })).toHaveAttribute("href", "/ofertas");
+  await expect(carousel.getByRole("heading", { name: "Skincare coreano em oferta" })).toHaveCount(1);
+  const dark = carousel.getByRole("link", { name: /até 50% de desconto nos produtos coreanos/ });
+  await expect(dark).toHaveAttribute("href", "/ofertas");
+  // the dark art's own colour reaches the banner's left edge (no flat rosé around it)
+  await expect
+    .poll(async () => {
+      const { data, info } = await sharp(await activeSlide(carousel).screenshot()).raw().toBuffer({ resolveWithObject: true });
+      const i = (Math.round(info.height / 2) * info.width + 8) * info.channels;
+      return 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+    })
+    .toBeLessThan(140);
 
   await carousel.getByRole("button", { name: "Próximo destaque" }).click();
   await expect(carousel.getByRole("heading", { level: 2, name: "Sua pele, seu ritual." })).toBeVisible();
@@ -681,7 +706,7 @@ test("Home — carrossel: artes de Black Friday, banner do mockup, produtos reai
   await expect(page).toHaveURL(/\/categorias\/hidratantes$/);
 });
 
-test("Black Friday no celular — a arte vertical ocupa a largura do banner e é o próprio link; sem texto duplicado", async ({ browser }) => {
+test("Black Friday no celular — a arte vertical vai de ponta a ponta, a própria arte cobre o resto do banner e é o link; sem texto duplicado", async ({ browser }) => {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, storageState: RETURNING_VISITOR });
   const page = await ctx.newPage();
   await page.goto("/");
@@ -689,8 +714,9 @@ test("Black Friday no celular — a arte vertical ocupa a largura do banner e é
   const poster = carousel.getByRole("link", { name: /^Arte de Black Friday da MIVORA: Medicube Zero Pore Pad/ });
   await expect(poster).toBeVisible();
   const box = (await poster.boundingBox())!;
-  expect(box.width).toBeGreaterThan(390 - 2 * 24 - 1);
+  expect(box.width).toBeGreaterThanOrEqual(389);
   expect(box.y + box.height).toBeLessThan(844);
+  await expectPosterCoversSlide(carousel, poster);
   // the copy is in the art: kept for screen readers only, and no invisible button in the tab order
   const heading = carousel.getByRole("heading", { level: 1, name: "Black Friday MIVORA" });
   await expect(heading).toHaveCount(1);
@@ -700,6 +726,10 @@ test("Black Friday no celular — a arte vertical ocupa a largura do banner e é
   const next = (await carousel.getByRole("button", { name: "Próximo destaque" }).filter({ visible: true }).boundingBox())!;
   const whatsapp = (await page.getByRole("link", { name: "Falar com a MIVORA no WhatsApp" }).boundingBox())!;
   expect(next.x + next.width).toBeLessThanOrEqual(whatsapp.x);
+  // the controls below the art stay usable: its extension never covers them
+  await carousel.getByRole("button", { name: "Pausar a troca automática" }).filter({ visible: true }).click();
+  await expect(carousel.getByRole("button", { name: "Retomar a troca automática" }).filter({ visible: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/$/);
   await poster.click();
   await expect(page).toHaveURL(/\/ofertas$/);
   await ctx.close();

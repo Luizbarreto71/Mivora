@@ -142,7 +142,7 @@ function BannerForm({ banner, placement, products }: { banner?: BannerRow; place
       <Field
         label="Layout"
         htmlFor={`layout-${id}`}
-        hint="Arte completa: a imagem já tem logo/textos e aparece inteira, sem texto por cima (proporção 16:9). Arte vertical: imagem pronta em pé (3:4, ex.: 1080×1440), inteira no celular e ao lado do texto no computador."
+        hint="Arte completa: a imagem já tem logo/textos e aparece inteira, sem texto por cima (proporção 16:9). Arte vertical: imagem pronta em pé (3:4, ex.: 1080×1440), inteira e centralizada; as bordas da própria arte se estendem, desfocadas, até as laterais do banner."
       >
         <Select id={`layout-${id}`} name="layout" defaultValue={banner?.layout ?? "split"}>
           <option value="split">Foto ao lado do texto</option>

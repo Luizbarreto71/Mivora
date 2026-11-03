@@ -29,8 +29,9 @@ function usePrefersReducedMotion() {
  * reduced motion. Campaign photos dissolve into the slide colour; slides without a photo show
  * the chosen product under a soft studio light, passing from right to left and linking to its page. "Full" slides show finished art (logo and
  * copy already in the image) whole and clickable; their copy stays for screen readers and,
- * on phones, below the image. "Poster" slides show vertical art (3:4, like a feed post) whole: full width on
- * phones, where the art speaks for itself, and beside the copy on computers.
+ * on phones, below the image. "Poster" slides show vertical art (3:4, like a feed post) whole and centred, and
+ * its own edges, mirrored and blurred, fill the rest of the banner; the art carries the copy, which stays for
+ * screen readers.
  */
 export function HeroCarousel({ slides }: { slides: Banner[] }) {
   const count = slides.length;
@@ -108,18 +109,24 @@ export function HeroCarousel({ slides }: { slides: Banner[] }) {
               aria-label={multiple ? `${i + 1} de ${count}` : undefined}
               aria-hidden={active ? undefined : true}
               inert={!active}
-              className={cn("relative col-start-1 row-start-1 transition-opacity duration-700 ease-out motion-reduce:transition-none", active ? "z-10 opacity-100" : "pointer-events-none opacity-0")}
+              className={cn(
+                "relative col-start-1 row-start-1 transition-opacity duration-700 ease-out motion-reduce:transition-none",
+                active ? "z-10 opacity-100" : "pointer-events-none opacity-0",
+                // the art's extension stays inside its slide (never over the controls bar below it)
+                poster && "overflow-hidden",
+              )}
               style={{ backgroundColor: s.background_color ?? DEFAULT_BG }}
             >
               <div
                 className={cn(
                   "container-page grid gap-6 pb-8 pt-4 sm:pt-6 lg:h-[var(--hero-h)] lg:items-center lg:gap-12 lg:py-10",
                   full ? "lg:grid-cols-1" : "lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]",
-                  // phones: the art sits in the middle of the tallest slide's height
-                  poster && "h-full content-center",
+                  // the art sits in the middle of the tallest slide (edge to edge on phones, full height on computers)
+                  // (computers: the row stretches to the banner height, since the copy is out of the flow)
+                  poster && "h-full content-center py-0 max-sm:px-0 sm:py-0 lg:grid-cols-1 lg:content-normal lg:py-0",
                 )}
               >
-                <div className={cn("order-2 lg:order-1 lg:pb-14", full && "lg:sr-only", poster && "max-lg:sr-only")}>
+                <div className={cn("order-2 lg:order-1 lg:pb-14", full && "lg:sr-only", poster && "sr-only")}>
                   <div className="max-w-[34rem]">
                     {s.eyebrow ? (
                       <p className={cn("t-label mb-4 text-ink/65", reveal)} style={delay(0)}>
@@ -135,8 +142,8 @@ export function HeroCarousel({ slides }: { slides: Banner[] }) {
                       </p>
                     ) : null}
                     {(s.cta_label && s.cta_href) || (s.cta2_label && s.cta2_href) ? (
-                      // the art is the link on phones: no invisible buttons in the tab order
-                      <div className={cn("mt-7 flex flex-wrap gap-3 sm:mt-8", poster && "max-lg:hidden", reveal)} style={delay(3)}>
+                      // the art is the link: no invisible buttons in the tab order
+                      <div className={cn("mt-7 flex flex-wrap gap-3 sm:mt-8", poster && "hidden", reveal)} style={delay(3)}>
                         {s.cta_label && s.cta_href ? (
                           <Link href={s.cta_href} className={buttonClasses("primary", "md", "group/cta h-11 gap-3 px-6 sm:h-12 sm:px-7")}>
                             {s.cta_label} <ArrowRight className="h-4 w-4 transition-transform group-hover/cta:translate-x-0.5" strokeWidth={1.75} />
@@ -195,17 +202,18 @@ function SlideVisual({ slide: s, active, leaving, preload, full, poster }: { sli
   const frame = "relative order-1 overflow-hidden rounded-panel lg:order-2";
 
   if (poster) {
-    // the art carries its own copy and "compre agora": the image description names the link
+    // the art carries its own copy and "compre agora": the image description names the link, and the
+    // extension around it belongs to the link too, so the whole banner is clickable
     return (
       <Link
         href={s.cta_href ?? "/produtos"}
         className={cn(
-          frame,
-          "mx-auto block aspect-[3/4] w-full max-w-[26rem] shadow-[0_24px_48px_-24px_rgba(0,0,0,0.35)] transition-transform duration-700 ease-out motion-reduce:transition-none lg:h-full lg:w-auto lg:max-w-full",
+          "relative isolate order-1 mx-auto block aspect-[3/4] w-full transition-transform duration-700 ease-out motion-reduce:transition-none sm:max-w-[26rem] lg:order-2 lg:h-full lg:w-auto lg:max-w-none",
           active ? "translate-y-0" : "translate-y-3",
         )}
       >
-        <Image src={s.image_desktop_url!} alt={s.image_alt ?? s.title} fill preload={preload} sizes="(min-width: 640px) 26rem, 100vw" className="object-cover" />
+        <PosterBackdrop src={s.image_desktop_url!} />
+        <Image src={s.image_desktop_url!} alt={s.image_alt ?? s.title} fill preload={preload} sizes="(min-width: 640px) 28rem, 100vw" className="poster-feather object-cover" />
       </Link>
     );
   }
@@ -268,6 +276,34 @@ function SlideVisual({ slide: s, active, leaving, preload, full, poster }: { sli
         </span>
       </span>
     </Link>
+  );
+}
+
+/**
+ * Fills the banner around a vertical art with the art itself: each edge (its outer 12%) mirrored outward,
+ * stretched and blurred, so the art's own colours and light run to the banner's edges without cropping it.
+ * Sized from the art (2.5 widths to each side, 1 height above and below), so it covers phones to wide screens.
+ */
+function PosterBackdrop({ src }: { src: string }) {
+  const edge = (box: string) => (
+    <div className="relative overflow-hidden">
+      <div className={cn("absolute", box)}>
+        <Image src={src} alt="" fill sizes="128px" className="object-fill" />
+      </div>
+    </div>
+  );
+  return (
+    <div data-poster-backdrop aria-hidden="true" className="absolute -inset-x-[250%] -inset-y-full -z-10 grid grid-cols-[5fr_2fr_5fr] grid-rows-3 blur-[40px]">
+      {edge("bottom-0 right-0 h-[833%] w-[833%] -scale-100")}
+      {edge("inset-x-0 bottom-0 h-[833%] -scale-y-100")}
+      {edge("bottom-0 left-0 h-[833%] w-[833%] -scale-100")}
+      {edge("inset-y-0 right-0 w-[833%] -scale-x-100")}
+      {edge("inset-0")}
+      {edge("inset-y-0 left-0 w-[833%] -scale-x-100")}
+      {edge("right-0 top-0 h-[833%] w-[833%] -scale-100")}
+      {edge("inset-x-0 top-0 h-[833%] -scale-y-100")}
+      {edge("left-0 top-0 h-[833%] w-[833%] -scale-100")}
+    </div>
   );
 }
 
