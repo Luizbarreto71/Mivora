@@ -1,6 +1,7 @@
 import { Flame } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
+import { discountPercent } from "@/lib/money";
 import type { ProductSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { ProductImagePlaceholder } from "./placeholder";
@@ -15,7 +16,10 @@ function pills(product: ProductSummary): Pill[] {
   if (product.isBestSeller && product.availability !== "coming_soon") list.push({ label: "Mais vendido", tone: "accent", icon: true });
   if (product.availability === "coming_soon") list.push({ label: "Em breve", tone: "dark" });
   else if (!product.isAvailable) list.push({ label: product.availability === "on_request" ? "Sob consulta" : "Esgotado", tone: "light" });
-  if (product.isAvailable && product.compareAtCents != null && product.priceCents != null && product.compareAtCents > product.priceCents) list.push({ label: "Oferta", tone: "accent" });
+  if (product.isAvailable && product.compareAtCents != null && product.priceCents != null && product.compareAtCents > product.priceCents) {
+    const off = discountPercent(product.priceCents, product.compareAtCents);
+    list.push({ label: off ? `-${off}%` : "Oferta", tone: "accent" });
+  }
   if (product.isNew && product.availability !== "coming_soon") list.push({ label: "Novidade", tone: "rose" });
   return list;
 }

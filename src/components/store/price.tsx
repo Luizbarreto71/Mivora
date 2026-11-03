@@ -1,7 +1,7 @@
-import { formatBRL } from "@/lib/money";
+import { discountPercent, formatBRL } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
-/** Real price only. No price → "Consultar preço"; "de/por" only with a real higher previous price. */
+/** Real price only. No price → "Consultar preço"; "de/por" only with a real higher previous price (the large size also shows the % off). */
 export function Price({
   priceCents,
   compareAtCents,
@@ -17,6 +17,7 @@ export function Price({
     return <span className={cn("text-[0.8125rem] font-medium text-muted", className)}>Consultar preço</span>;
   }
   const showCompare = compareAtCents != null && compareAtCents > priceCents;
+  const off = size === "lg" ? discountPercent(priceCents, compareAtCents) : null;
   return (
     <span className={cn("inline-flex flex-wrap items-baseline gap-x-2", className)}>
       {showCompare ? (
@@ -29,6 +30,11 @@ export function Price({
         {showCompare ? <span className="sr-only">Por </span> : null}
         {formatBRL(priceCents)}
       </span>
+      {off ? (
+        <span className="self-center rounded-full bg-accent px-2.5 py-1 text-[0.6875rem] font-semibold leading-none text-paper">
+          -{off}%<span className="sr-only"> de desconto</span>
+        </span>
+      ) : null}
     </span>
   );
 }

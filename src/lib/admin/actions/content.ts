@@ -211,8 +211,9 @@ export async function saveBanner(_: ActionState, fd: FormData): Promise<ActionSt
   if (highlights.length > 5 || highlights.some((h) => h.length > 90)) return fail("Use até 5 destaques, com até 90 caracteres cada.");
   const footnote = formNullable(fd, "footnote");
   if (footnote && footnote.length > 300) return fail("O texto auxiliar deve ter até 300 caracteres.");
-  const layout = formString(fd, "layout") === "full" ? "full" : "split";
-  if (layout === "full" && !formNullable(fd, "image_desktop_url")) return fail("A arte completa precisa de uma imagem.");
+  const layoutValue = formString(fd, "layout");
+  const layout = layoutValue === "full" || layoutValue === "poster" ? layoutValue : "split";
+  if (layout !== "split" && !formNullable(fd, "image_desktop_url")) return fail(layout === "full" ? "A arte completa precisa de uma imagem." : "A arte vertical precisa de uma imagem.");
   const row = {
     placement,
     eyebrow: formNullable(fd, "eyebrow"),

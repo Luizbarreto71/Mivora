@@ -177,8 +177,8 @@ export type Banner = {
   placement?: BannerPlacement;
   /** Banner background (hex). Photos dissolve into it. */
   background_color?: string | null;
-  /** split = copy beside the photo; full = finished art shown whole (logo/copy in the image) */
-  layout?: "split" | "full";
+  /** split = copy beside the photo; full = finished art shown whole (logo/copy in the image); poster = vertical (3:4) finished art */
+  layout?: "split" | "full" | "poster";
   /** Product shown on the banner when there is no campaign photo */
   product?: { slug: string; name: string; image: ImageRef | null } | null;
   eyebrow: string | null;

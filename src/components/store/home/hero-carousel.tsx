@@ -29,7 +29,8 @@ function usePrefersReducedMotion() {
  * reduced motion. Campaign photos dissolve into the slide colour; slides without a photo show
  * the chosen product under a soft studio light, passing from right to left and linking to its page. "Full" slides show finished art (logo and
  * copy already in the image) whole and clickable; their copy stays for screen readers and,
- * on phones, below the image.
+ * on phones, below the image. "Poster" slides show vertical art (3:4, like a feed post) whole: full width on
+ * phones, where the art speaks for itself, and beside the copy on computers.
  */
 export function HeroCarousel({ slides }: { slides: Banner[] }) {
   const count = slides.length;
@@ -98,6 +99,7 @@ export function HeroCarousel({ slides }: { slides: Banner[] }) {
           const reveal = cn("transition duration-700 ease-out motion-reduce:transition-none", active ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0");
           const delay = (step: number) => ({ transitionDelay: active ? `${120 + step * 90}ms` : "0ms" });
           const full = s.layout === "full" && Boolean(s.image_desktop_url);
+          const poster = s.layout === "poster" && Boolean(s.image_desktop_url);
           return (
             <div
               key={s.id}
@@ -113,9 +115,11 @@ export function HeroCarousel({ slides }: { slides: Banner[] }) {
                 className={cn(
                   "container-page grid gap-6 pb-8 pt-4 sm:pt-6 lg:h-[var(--hero-h)] lg:items-center lg:gap-12 lg:py-10",
                   full ? "lg:grid-cols-1" : "lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]",
+                  // phones: the art sits in the middle of the tallest slide's height
+                  poster && "h-full content-center",
                 )}
               >
-                <div className={cn("order-2 lg:order-1 lg:pb-14", full && "lg:sr-only")}>
+                <div className={cn("order-2 lg:order-1 lg:pb-14", full && "lg:sr-only", poster && "max-lg:sr-only")}>
                   <div className="max-w-[34rem]">
                     {s.eyebrow ? (
                       <p className={cn("t-label mb-4 text-ink/65", reveal)} style={delay(0)}>
@@ -131,7 +135,8 @@ export function HeroCarousel({ slides }: { slides: Banner[] }) {
                       </p>
                     ) : null}
                     {(s.cta_label && s.cta_href) || (s.cta2_label && s.cta2_href) ? (
-                      <div className={cn("mt-7 flex flex-wrap gap-3 sm:mt-8", reveal)} style={delay(3)}>
+                      // the art is the link on phones: no invisible buttons in the tab order
+                      <div className={cn("mt-7 flex flex-wrap gap-3 sm:mt-8", poster && "max-lg:hidden", reveal)} style={delay(3)}>
                         {s.cta_label && s.cta_href ? (
                           <Link href={s.cta_href} className={buttonClasses("primary", "md", "group/cta h-11 gap-3 px-6 sm:h-12 sm:px-7")}>
                             {s.cta_label} <ArrowRight className="h-4 w-4 transition-transform group-hover/cta:translate-x-0.5" strokeWidth={1.75} />
@@ -146,7 +151,7 @@ export function HeroCarousel({ slides }: { slides: Banner[] }) {
                     ) : null}
                   </div>
                 </div>
-                <SlideVisual slide={s} active={active} leaving={(i - index + count) % count === count - 1} preload={i === 0} full={full} />
+                <SlideVisual slide={s} active={active} leaving={(i - index + count) % count === count - 1} preload={i === 0} full={full} poster={poster} />
               </div>
             </div>
           );
@@ -185,9 +190,25 @@ export function HeroCarousel({ slides }: { slides: Banner[] }) {
  * The slide's picture in a soft-cornered frame: campaign photo (separate crop for phones), finished art shown
  * whole (and clickable), or — without a photo — the chosen product under a soft studio light.
  */
-function SlideVisual({ slide: s, active, leaving, preload, full }: { slide: Banner; active: boolean; leaving: boolean; preload: boolean; full: boolean }) {
+function SlideVisual({ slide: s, active, leaving, preload, full, poster }: { slide: Banner; active: boolean; leaving: boolean; preload: boolean; full: boolean; poster: boolean }) {
   const motion = cn("absolute inset-0 transition-transform duration-[7000ms] ease-out motion-reduce:transition-none", active ? "scale-100" : "scale-[1.04]");
   const frame = "relative order-1 overflow-hidden rounded-panel lg:order-2";
+
+  if (poster) {
+    // the art carries its own copy and "compre agora": the image description names the link
+    return (
+      <Link
+        href={s.cta_href ?? "/produtos"}
+        className={cn(
+          frame,
+          "mx-auto block aspect-[3/4] w-full max-w-[26rem] shadow-[0_24px_48px_-24px_rgba(0,0,0,0.35)] transition-transform duration-700 ease-out motion-reduce:transition-none lg:h-full lg:w-auto lg:max-w-full",
+          active ? "translate-y-0" : "translate-y-3",
+        )}
+      >
+        <Image src={s.image_desktop_url!} alt={s.image_alt ?? s.title} fill preload={preload} sizes="(min-width: 640px) 26rem, 100vw" className="object-cover" />
+      </Link>
+    );
+  }
 
   if (full) {
     return (
@@ -265,8 +286,9 @@ function Indicators({
   onEnd: () => void;
   compact?: boolean;
 }) {
+  // phones: tighter, so six slides and the buttons still fit beside the floating WhatsApp button
   return (
-    <div className="flex items-center gap-3">
+    <div className={cn("flex items-center", compact ? "gap-2" : "gap-3")}>
       {slides.map((s, i) => {
         const active = i === index;
         return (
@@ -276,11 +298,11 @@ function Indicators({
             onClick={() => onSelect(i)}
             aria-label={`Ir para o destaque ${i + 1}: ${s.title}`}
             aria-current={active ? "true" : undefined}
-            className="group flex h-8 items-center gap-3 text-[0.6875rem] font-semibold tabular-nums tracking-[0.08em]"
+            className={cn("group flex h-8 items-center text-[0.6875rem] font-semibold tabular-nums tracking-[0.08em]", compact ? "gap-2" : "gap-3")}
           >
             <span className={cn("transition-colors", active ? "text-ink" : "text-ink/60 group-hover:text-ink")}>{String(i + 1).padStart(2, "0")}</span>
             {active ? (
-              <span className={cn("relative block h-px overflow-hidden bg-ink/15", compact ? "w-8" : "w-12")}>
+              <span className={cn("relative block h-px overflow-hidden bg-ink/15", compact ? "w-6" : "w-12")}>
                 {/* the bar's end advances to the next slide */}
                 <span
                   key={index}

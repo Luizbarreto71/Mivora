@@ -5,6 +5,13 @@ export function formatBRL(cents: number) {
   return brl.format(cents / 100).replace(/ /g, " ");
 }
 
+/** Real discount from the previous price, rounded down so it never overstates; null without a higher previous price. */
+export function discountPercent(priceCents: number | null | undefined, compareAtCents: number | null | undefined) {
+  if (priceCents == null || compareAtCents == null || compareAtCents <= priceCents) return null;
+  const pct = Math.floor(((compareAtCents - priceCents) * 100) / compareAtCents);
+  return pct >= 1 ? pct : null;
+}
+
 /**
  * Parses a user typed BRL value ("119,90", "R$ 1.299,00", "119.9") into cents.
  * Returns null for empty input and NaN for invalid input.

@@ -635,16 +635,29 @@ test("Frete — admin configura origem e zona por CEP; cliente calcula no produt
 // ---------------------------------------------------------------------------
 // Home — carrossel de fotos
 // ---------------------------------------------------------------------------
-test("Home — carrossel: banner do mockup, produtos reais passando com link para a página, texto em HTML, setas, indicadores e pausa", async ({ page }) => {
+test("Home — carrossel: artes de Black Friday, banner do mockup, produtos reais passando com link para a página, texto em HTML, setas, indicadores e pausa", async ({ page }) => {
   await page.goto("/");
   const carousel = page.getByRole("region", { name: "Destaques da MIVORA" });
-  await expect(carousel.getByRole("heading", { level: 1, name: "Sua pele, seu ritual." })).toBeVisible();
+  await carousel.getByRole("button", { name: "Pausar a troca automática" }).click();
+  await expect(carousel.getByRole("button", { name: "Retomar a troca automática" })).toBeVisible();
+
+  // the owner's vertical Black Friday art opens the carousel, whole, beside its copy, leading to the real offers
+  await expect(carousel.getByRole("heading", { level: 1, name: "Black Friday MIVORA" })).toBeVisible();
+  const poster = carousel.getByRole("link", { name: /^Arte de Black Friday da MIVORA: Medicube Zero Pore Pad de R\$ 219,99 por R\$ 129,99/ });
+  await expect(poster).toHaveAttribute("href", "/ofertas");
+  await expect.poll(() => poster.locator("img").evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+  const box = (await poster.boundingBox())!;
+  expect(box.width / box.height).toBeCloseTo(3 / 4, 1);
+  await expect(carousel.getByRole("link", { name: /Ver ofertas/ })).toHaveAttribute("href", "/ofertas");
+  await carousel.getByRole("button", { name: "Próximo destaque" }).click();
+  await expect(carousel.getByRole("heading", { name: "Skincare coreano em oferta" })).toBeVisible();
+  await expect(carousel.getByRole("link", { name: /até 50% de desconto nos produtos coreanos/ })).toHaveAttribute("href", "/ofertas");
+
+  await carousel.getByRole("button", { name: "Próximo destaque" }).click();
+  await expect(carousel.getByRole("heading", { level: 2, name: "Sua pele, seu ritual." })).toBeVisible();
   await expect(carousel.getByText("Beleza que cuida de você")).toBeVisible();
   await expect(carousel.getByRole("link", { name: /Explorar produtos/ })).toHaveAttribute("href", "/produtos");
   await expect(carousel.getByRole("img", { name: /PDRN Pink Peptide/i })).toBeVisible();
-
-  await carousel.getByRole("button", { name: "Pausar a troca automática" }).click();
-  await expect(carousel.getByRole("button", { name: "Retomar a troca automática" })).toBeVisible();
 
   // product slides: the real product leads to its page; the copy and both buttons are HTML; no editorial photo left
   await expect(carousel.locator('img[src*="editorial"]')).toHaveCount(0);
@@ -653,11 +666,11 @@ test("Home — carrossel: banner do mockup, produtos reais passando com link par
   await expect(carousel.getByRole("link", { name: /Ver SKIN1004 Madagascar Centella Ampoule/ })).toHaveAttribute("href", "/produtos/skin1004-madagascar-centella-ampoule");
   await expect(carousel.getByRole("link", { name: "Ver marcas" })).toHaveAttribute("href", "/marcas");
 
-  await carousel.getByRole("button", { name: /Ir para o destaque 4/ }).click();
+  await carousel.getByRole("button", { name: /Ir para o destaque 6/ }).click();
   await expect(carousel.getByRole("heading", { name: "Sua rotina em etapas, do jeito certo" })).toBeVisible();
   await expect(carousel.getByRole("link", { name: /Monte seu ritual/ })).toHaveAttribute("href", "/ritual");
   await carousel.getByRole("button", { name: "Próximo destaque" }).click();
-  await expect(carousel.getByRole("heading", { level: 1, name: "Sua pele, seu ritual." })).toBeVisible();
+  await expect(carousel.getByRole("heading", { level: 1, name: "Black Friday MIVORA" })).toBeVisible();
   await carousel.getByRole("button", { name: "Destaque anterior" }).click();
   await carousel.getByRole("button", { name: "Destaque anterior" }).click();
   await expect(carousel.getByRole("link", { name: /Ver Dr\. Althea 345 Relief Cream/ })).toHaveAttribute("href", "/produtos/dr-althea-345-relief-cream");
@@ -666,6 +679,55 @@ test("Home — carrossel: banner do mockup, produtos reais passando com link par
 
   await carousel.getByRole("link", { name: /Ver hidratantes/ }).click();
   await expect(page).toHaveURL(/\/categorias\/hidratantes$/);
+});
+
+test("Black Friday no celular — a arte vertical ocupa a largura do banner e é o próprio link; sem texto duplicado", async ({ browser }) => {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, storageState: RETURNING_VISITOR });
+  const page = await ctx.newPage();
+  await page.goto("/");
+  const carousel = page.getByRole("region", { name: "Destaques da MIVORA" });
+  const poster = carousel.getByRole("link", { name: /^Arte de Black Friday da MIVORA: Medicube Zero Pore Pad/ });
+  await expect(poster).toBeVisible();
+  const box = (await poster.boundingBox())!;
+  expect(box.width).toBeGreaterThan(390 - 2 * 24 - 1);
+  expect(box.y + box.height).toBeLessThan(844);
+  // the copy is in the art: kept for screen readers only, and no invisible button in the tab order
+  const heading = carousel.getByRole("heading", { level: 1, name: "Black Friday MIVORA" });
+  await expect(heading).toHaveCount(1);
+  expect(await heading.evaluate((el) => el.getBoundingClientRect().width)).toBeLessThanOrEqual(1);
+  await expect(carousel.getByRole("link", { name: /Ver ofertas/ })).toHaveCount(0);
+  // six slides: the indicators and buttons still end before the floating WhatsApp button
+  const next = (await carousel.getByRole("button", { name: "Próximo destaque" }).filter({ visible: true }).boundingBox())!;
+  const whatsapp = (await page.getByRole("link", { name: "Falar com a MIVORA no WhatsApp" }).boundingBox())!;
+  expect(next.x + next.width).toBeLessThanOrEqual(whatsapp.x);
+  await poster.click();
+  await expect(page).toHaveURL(/\/ofertas$/);
+  await ctx.close();
+});
+
+test("Ofertas — preço anterior real vira selo com a % de desconto no card e na página do produto", async ({ page }) => {
+  const slug = "medicube-zero-pore-pad";
+  await editProductBySlug(admin, slug);
+  const previous = await admin.getByLabel("Preço de venda (R$)").inputValue();
+  await admin.getByLabel("Preço de venda (R$)").fill("129,99");
+  await admin.getByLabel("Preço anterior (R$)").fill("219,99");
+  await saveProduct(admin);
+
+  await page.goto("/ofertas");
+  const card = page.locator("article").filter({ hasText: "Zero Pore Pad", visible: true }).first();
+  // 40,9% off is shown as 40% (never rounded up)
+  await expect(card.getByText("-40%", { exact: true })).toBeVisible();
+  await expect(card).toContainText("R$ 219,99");
+  await expect(card).toContainText("R$ 129,99");
+  await page.goto(`/produtos/${slug}`);
+  await expect(page.getByText("-40% de desconto").filter({ visible: true }).first()).toBeVisible();
+
+  await editProductBySlug(admin, slug);
+  await admin.getByLabel("Preço de venda (R$)").fill(previous);
+  await admin.getByLabel("Preço anterior (R$)").fill("");
+  await saveProduct(admin);
+  await page.goto("/ofertas");
+  await expect(page.locator("article").filter({ hasText: "Zero Pore Pad", visible: true })).toHaveCount(0);
 });
 
 test("Home premium — cabeçalho, busca, seções do mockup, produto em abas, newsletter e depoimentos reais", async ({ page }) => {

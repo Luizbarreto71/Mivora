@@ -61,3 +61,11 @@ Fotos de produto extraídas do catálogo de atacado "BIGS K-Beauty" de 21/10/202
 - 558 arquivos em `public/products/<slug>.webp`, um por produto importado. A lista completa (código do catálogo → produto, categoria e se tem foto) está em `assets/catalogo-bigs-2026-10-21.csv`. Os preços de atacado não ficam no repositório.
 - Tratamento: fundo cinza-claro convertido em branco, recorte do espaço vazio, produto centralizado em quadrado de 600 px (WebP). As fotos originais do catálogo têm 300 px, por isso ampliações pequenas (no máximo 2,2×). Elas ficam menos nítidas que as fotos oficiais de 1200 px quando ampliadas na página do produto.
 - 7 itens do catálogo não tinham foto (Tsubaki Kit Damage, Tsubaki Kit Moist, Dr. Althea 2% Salicylic Acid Clear, Elroel Blanc Cover Cream Stick Light, VT Cosmetics V-Mode Gua Sha, Lattafa Asad Bourbon, Lattafa Emeer). Esses produtos foram cadastrados como rascunho até receberem foto.
+
+## Artes de Black Friday (03/11/2026)
+
+Artes prontas da própria MIVORA, enviadas pela loja para o carrossel da home (layout "Arte vertical", 3:4). Preços e frases são os da arte; os preços dos produtos no site foram ajustados para coincidir.
+
+- `public/banners/black-friday-medicube-celimax.webp`: Medicube Zero Pore Pad de R$ 219,99 por R$ 129,99 e Celimax Retinal Shot Tightening Booster de R$ 179,99 por R$ 119,99.
+- `public/banners/black-friday-ate-50.webp`: "Até 50% de desconto nos produtos coreanos".
+- Tratamento: PNG 1086×1448 convertido para WebP (qualidade 88), sem recorte nem alteração.

@@ -636,8 +636,23 @@ describe("home carousel", () => {
       ),
     );
 
-  it("opens with the mockup slide (real serum photo on rosé), then real products; the editorial photos and the owner's 837 px art are kept switched off", async () => {
+  it("opens with the owner's two vertical Black Friday art pieces, linking to the real offers", async () => {
     const rows = await slides();
+    expect(rows.slice(0, 2)).toMatchObject([
+      { title: "Black Friday MIVORA", image_desktop_url: "/banners/black-friday-medicube-celimax.webp", layout: "poster", cta_href: "/ofertas", product_slug: null },
+      { title: "Skincare coreano em oferta", image_desktop_url: "/banners/black-friday-ate-50.webp", layout: "poster", cta_href: "/ofertas", product_slug: null },
+    ]);
+    // the description repeats what the art says (prices and claims are the owner's, from the art itself)
+    expect(rows[0].image_alt).toContain("de R$ 219,99 por R$ 129,99");
+    expect(rows[1].image_alt).toContain("até 50% de desconto");
+    await db.query(`update banners set layout = 'poster' where placement = 'routines'`);
+    await expect(db.query(`update banners set layout = 'story' where placement = 'routines'`)).rejects.toThrow(/banners_layout_check/);
+    await db.query(`update banners set layout = 'split' where placement = 'routines'`);
+  });
+
+  it("then the mockup slide (real serum photo on rosé) and real products; the editorial photos and the owner's 837 px art are kept switched off", async () => {
+    const every = await slides();
+    const rows = every.filter((r) => r.layout !== "poster");
     expect(rows[0]).toMatchObject({
       title: "Sua pele, seu ritual.",
       product_slug: "medicube-pdrn-pink-peptide-serum",
@@ -658,9 +673,9 @@ describe("home carousel", () => {
     const art = await all<{ image_desktop_url: string; is_active: boolean }>(`select image_desktop_url, is_active from banners where placement = 'hero' and layout = 'full' order by sort_order`);
     expect(art).toEqual(ART.map((image_desktop_url) => ({ image_desktop_url, is_active: false })));
     // no campaign photo with people is left
-    expect(rows.some((r) => r.image_desktop_url?.includes("medicube") || r.image_desktop_url?.includes("aparelho"))).toBe(false);
-    expect(new Set(rows.map((r) => r.title)).size).toBe(rows.length);
-    for (const r of rows) {
+    expect(every.some((r) => r.image_desktop_url?.includes("/banners/home-medicube") || r.image_desktop_url?.includes("aparelho"))).toBe(false);
+    expect(new Set(every.map((r) => r.title)).size).toBe(every.length);
+    for (const r of every) {
       expect(r.cta_label).toBeTruthy();
       expect(r.cta_href).toMatch(/^\//);
       expect(r.background_color).toMatch(/^#[0-9A-F]{6}$/);
@@ -673,16 +688,16 @@ describe("home carousel", () => {
     }
   });
 
-  it("re-running the carousel, premium home and banner art migrations changes nothing (idempotent)", async () => {
+  it("re-running the carousel, premium home, banner art and Black Friday migrations changes nothing (idempotent)", async () => {
     const before = await slides();
     const banners = await all(`select placement, title, sort_order from banners order by placement, sort_order, title`);
-    for (const name of ["home_carousel", "premium_home", "authored_banners", "visual_refresh_content", "hero_products", "product_best_seller"]) {
+    for (const name of ["home_carousel", "premium_home", "authored_banners", "visual_refresh_content", "hero_products", "product_best_seller", "black_friday"]) {
       const file = readdirSync(path.join(process.cwd(), "supabase", "migrations")).find((f) => f.includes(name))!;
       await db.exec(readFileSync(path.join(process.cwd(), "supabase", "migrations", file), "utf8"));
     }
     expect(await slides()).toEqual(before);
     expect(await all(`select placement, title, sort_order from banners order by placement, sort_order, title`)).toEqual(banners);
-    expect((await one<{ n: number }>(`select count(*)::int as n from banners where placement = 'hero'`)).n).toBe(11);
+    expect((await one<{ n: number }>(`select count(*)::int as n from banners where placement = 'hero'`)).n).toBe(13);
   });
 });
 

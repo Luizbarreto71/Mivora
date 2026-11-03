@@ -139,10 +139,15 @@ function BannerForm({ banner, placement, products }: { banner?: BannerRow; place
         }
       />
       <MediaField name="image_mobile_url" label="Imagem (celular, opcional)" defaultValue={banner?.image_mobile_url ?? null} folder="banners" />
-      <Field label="Layout" htmlFor={`layout-${id}`} hint="Arte completa: a imagem já tem logo/textos e aparece inteira, sem texto por cima (proporção 16:9)">
+      <Field
+        label="Layout"
+        htmlFor={`layout-${id}`}
+        hint="Arte completa: a imagem já tem logo/textos e aparece inteira, sem texto por cima (proporção 16:9). Arte vertical: imagem pronta em pé (3:4, ex.: 1080×1440), inteira no celular e ao lado do texto no computador."
+      >
         <Select id={`layout-${id}`} name="layout" defaultValue={banner?.layout ?? "split"}>
           <option value="split">Foto ao lado do texto</option>
           <option value="full">Arte completa (imagem pronta)</option>
+          <option value="poster">Arte vertical (formato post 3:4)</option>
         </Select>
       </Field>
       <Field label="Descrição da imagem (acessibilidade)" htmlFor={`alt-${id}`}>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { clampQuantity, computeTotals, deliveryQuote, lineKey, type CartLine } from "@/lib/cart/math";
-import { formatBRL, parseBRLToCents } from "@/lib/money";
+import { discountPercent, formatBRL, parseBRLToCents } from "@/lib/money";
 import { normalizeSearch, searchTerms } from "@/lib/search";
 import { catalogQueryString, parseCatalogParams } from "@/lib/catalog/filters";
 import { categoryAncestors, expandCategorySlugs, isIrritatingPair } from "@/lib/catalog/rules";
@@ -41,6 +41,17 @@ describe("money", () => {
     expect(parseBRLToCents("119.9")).toBe(11990);
     expect(parseBRLToCents("")).toBeNull();
     expect(parseBRLToCents("abc")).toBeNaN();
+  });
+
+  it("shows the real discount, rounded down, only with a higher previous price", () => {
+    expect(discountPercent(12999, 21999)).toBe(40); // 40,9% → never "41%"
+    expect(discountPercent(11999, 17999)).toBe(33);
+    expect(discountPercent(5000, 10000)).toBe(50);
+    expect(discountPercent(10000, 10000)).toBeNull();
+    expect(discountPercent(10000, 9000)).toBeNull();
+    expect(discountPercent(10000, null)).toBeNull();
+    expect(discountPercent(null, 10000)).toBeNull();
+    expect(discountPercent(9999, 10000)).toBeNull(); // under 1%
   });
 });
 
