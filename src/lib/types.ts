@@ -54,6 +54,7 @@ export type ProductSummary = {
   maxQuantity: number | null;
   isNew: boolean;
   isFeatured: boolean;
+  isBestSeller: boolean;
   image: ImageRef | null;
   hasVariants: boolean;
 };

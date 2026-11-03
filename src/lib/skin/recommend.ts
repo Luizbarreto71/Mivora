@@ -94,6 +94,7 @@ function summaryOf(p: SkinCatalogProduct): ProductSummary {
     maxQuantity: p.maxQuantity,
     isNew: p.isNew,
     isFeatured: p.isFeatured,
+    isBestSeller: p.isBestSeller,
     image: p.image,
     hasVariants: p.hasVariants,
   };

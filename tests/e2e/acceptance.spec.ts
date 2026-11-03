@@ -190,6 +190,32 @@ test("Teste 2 — preço alterado no admin aparece no catálogo e na página do 
   await expect(page.locator("article").filter({ hasText: "Madagascar Centella Ampoule", visible: true }).first()).toContainText(brl(11990));
 });
 
+test("Mais vendido — selo só no produto marcado no painel (card, página do produto e lista de mais vendidos)", async ({ page }) => {
+  const slug = "skin1004-madagascar-centella-ampoule";
+  const card = () => page.locator("article").filter({ hasText: "Madagascar Centella Ampoule", visible: true }).first();
+  await page.goto("/marcas/skin1004");
+  await expect(card().getByText("Mais vendido")).toHaveCount(0);
+
+  await editProductBySlug(admin, slug);
+  await admin.getByLabel(/Marcar como mais vendido/).check();
+  await saveProduct(admin);
+
+  await page.goto("/marcas/skin1004");
+  await expect(card().getByText("Mais vendido")).toBeVisible();
+  // other products of the same brand do not get the label
+  await expect(page.locator("article").filter({ hasText: "Mais vendido", visible: true })).toHaveCount(1);
+  await page.goto(`/produtos/${slug}`);
+  await expect(page.getByText("Mais vendido", { exact: true }).filter({ visible: true }).first()).toBeVisible();
+  await page.goto("/mais-vendidos");
+  await expect(page.locator("article").first()).toContainText("Madagascar Centella Ampoule");
+
+  await editProductBySlug(admin, slug);
+  await admin.getByLabel(/Marcar como mais vendido/).uncheck();
+  await saveProduct(admin);
+  await page.goto("/marcas/skin1004");
+  await expect(card().getByText("Mais vendido")).toHaveCount(0);
+});
+
 test("Testes 1 e 12 — admin cadastra produto com foto, preço e estoque; após publicar aparece na loja", async ({ page }) => {
   await admin.goto("/admin/produtos/novo");
   await admin.getByLabel("Nome comercial").fill(NEW_PRODUCT);
@@ -604,7 +630,7 @@ test("Frete — admin configura origem e zona por CEP; cliente calcula no produt
 // ---------------------------------------------------------------------------
 // Home — carrossel de fotos
 // ---------------------------------------------------------------------------
-test("Home — carrossel: banner do mockup, slides editoriais em alta resolução com texto em HTML, setas, indicadores e pausa", async ({ page }) => {
+test("Home — carrossel: banner do mockup, produtos reais passando com link para a página, texto em HTML, setas, indicadores e pausa", async ({ page }) => {
   await page.goto("/");
   const carousel = page.getByRole("region", { name: "Destaques da MIVORA" });
   await expect(carousel.getByRole("heading", { level: 1, name: "Sua pele, seu ritual." })).toBeVisible();
@@ -615,10 +641,11 @@ test("Home — carrossel: banner do mockup, slides editoriais em alta resoluçã
   await carousel.getByRole("button", { name: "Pausar a troca automática" }).click();
   await expect(carousel.getByRole("button", { name: "Retomar a troca automática" })).toBeVisible();
 
-  // editorial slides: licensed photo in a frame, the copy and both buttons in HTML
+  // product slides: the real product leads to its page; the copy and both buttons are HTML; no editorial photo left
+  await expect(carousel.locator('img[src*="editorial"]')).toHaveCount(0);
   await carousel.getByRole("button", { name: "Próximo destaque" }).click();
   await expect(carousel.getByRole("heading", { name: "Skincare coreano escolhido para a sua rotina" })).toBeVisible();
-  await expect(carousel.getByRole("img", { name: /Texturas de séruns e cremes/ })).toBeVisible();
+  await expect(carousel.getByRole("link", { name: /Ver SKIN1004 Madagascar Centella Ampoule/ })).toHaveAttribute("href", "/produtos/skin1004-madagascar-centella-ampoule");
   await expect(carousel.getByRole("link", { name: "Ver marcas" })).toHaveAttribute("href", "/marcas");
 
   await carousel.getByRole("button", { name: /Ir para o destaque 4/ }).click();
@@ -628,7 +655,7 @@ test("Home — carrossel: banner do mockup, slides editoriais em alta resoluçã
   await expect(carousel.getByRole("heading", { level: 1, name: "Sua pele, seu ritual." })).toBeVisible();
   await carousel.getByRole("button", { name: "Destaque anterior" }).click();
   await carousel.getByRole("button", { name: "Destaque anterior" }).click();
-  await expect(carousel.getByRole("img", { name: /creme branco/ })).toBeVisible();
+  await expect(carousel.getByRole("link", { name: /Ver Dr\. Althea 345 Relief Cream/ })).toHaveAttribute("href", "/produtos/dr-althea-345-relief-cream");
   // the owner's low-resolution art stays off the banner
   await expect(page.locator('img[src*="home-mivora-"]')).toHaveCount(0);
 
@@ -673,6 +700,14 @@ test("Home premium — cabeçalho, busca, seções do mockup, produto em abas, n
   // each category is shown with one of its products, not an editorial photo
   await expect(categories.locator("img").first()).toBeVisible();
   await expect(categories.locator('img[src*="editorial"]')).toHaveCount(0);
+  // floating WhatsApp button: on the store pages and product pages, never during the purchase steps
+  const floating = page.getByRole("link", { name: "Falar com a MIVORA no WhatsApp" });
+  await expect(floating).toHaveAttribute("href", /^https:\/\/wa\.me\/\d+/);
+  await page.goto("/produtos/skin1004-madagascar-centella-ampoule");
+  await expect(floating).toBeVisible();
+  await page.goto("/carrinho");
+  await expect(floating).toHaveCount(0);
+  await page.goto("/");
   await expect(page.getByRole("list", { name: "Destaques da curadoria" }).locator("article").first()).toBeVisible();
   const guides = page.getByRole("region", { name: "Escolha com segurança" });
   await expect(guides.getByRole("link", { name: /Monte seu ritual em etapas/ })).toHaveAttribute("href", "/ritual");

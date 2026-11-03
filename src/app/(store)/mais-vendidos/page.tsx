@@ -19,7 +19,7 @@ export default async function BestSellersPage() {
         title="Mais vendidos"
         description={
           basedOnSales
-            ? "Ranking baseado nos pedidos confirmados na MIVORA."
+            ? "Os produtos que mais saem na MIVORA."
             : "Enquanto reunimos dados de vendas confirmadas, apresentamos os destaques escolhidos pela nossa curadoria."
         }
       >

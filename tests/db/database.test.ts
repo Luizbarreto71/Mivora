@@ -614,7 +614,7 @@ describe("shipping calculator", () => {
 describe("home carousel", () => {
   // the owner's own art, in the order she sent it (migration 013)
   const ART = ["/banners/home-mivora-serum.webp", "/banners/home-mivora-creme.webp", "/banners/home-mivora-gel.webp", "/banners/home-mivora-mascara.webp"];
-  // editorial photos (Unsplash License) of migration 023
+  // editorial photos (Unsplash License) of migration 023, switched off by migration 027
   const EDITORIAL = ["/editorial/hero-seruns-texturas.webp", "/editorial/hero-creme-bege.webp", "/editorial/hero-gotas-rose.webp"];
   type Slide = {
     title: string;
@@ -636,7 +636,7 @@ describe("home carousel", () => {
       ),
     );
 
-  it("opens with the mockup slide (real serum photo on rosé), then the editorial slides; the owner's 837 px art is kept switched off", async () => {
+  it("opens with the mockup slide (real serum photo on rosé), then real products; the editorial photos and the owner's 837 px art are kept switched off", async () => {
     const rows = await slides();
     expect(rows[0]).toMatchObject({
       title: "Sua pele, seu ritual.",
@@ -646,7 +646,11 @@ describe("home carousel", () => {
       background_color: "#F6E4E1",
       layout: "split",
     });
-    expect(rows.slice(1).map((r) => r.image_desktop_url)).toEqual(EDITORIAL);
+    expect(rows.slice(1).map((r) => r.image_desktop_url)).toEqual([null, null, null]);
+    expect(rows.slice(1).map((r) => r.product_slug)).toEqual(["skin1004-madagascar-centella-ampoule", "dr-althea-345-relief-cream", "celimax-the-vita-a-retinal-shot"]);
+    // the photo banners stay in the admin, switched off (not deleted)
+    const photos = await all<{ image_desktop_url: string; is_active: boolean }>(`select image_desktop_url, is_active from banners where placement = 'hero' and image_desktop_url like '/editorial/%' order by sort_order`);
+    expect(photos).toEqual(EDITORIAL.map((image_desktop_url) => ({ image_desktop_url, is_active: false })));
     expect(rows.slice(1).every((r) => r.layout === "split")).toBe(true);
     expect(rows[1]).toMatchObject({ title: "Skincare coreano escolhido para a sua rotina", cta_href: "/produtos", cta2_label: "Ver marcas" });
     expect(rows[2]).toMatchObject({ title: "Pele macia, confortável e com viço", cta_href: "/categorias/hidratantes" });
@@ -671,14 +675,14 @@ describe("home carousel", () => {
 
   it("re-running the carousel, premium home and banner art migrations changes nothing (idempotent)", async () => {
     const before = await slides();
-    const banners = await all(`select placement, title, sort_order from banners order by placement, sort_order`);
-    for (const name of ["home_carousel", "premium_home", "authored_banners", "visual_refresh_content"]) {
+    const banners = await all(`select placement, title, sort_order from banners order by placement, sort_order, title`);
+    for (const name of ["home_carousel", "premium_home", "authored_banners", "visual_refresh_content", "hero_products", "product_best_seller"]) {
       const file = readdirSync(path.join(process.cwd(), "supabase", "migrations")).find((f) => f.includes(name))!;
       await db.exec(readFileSync(path.join(process.cwd(), "supabase", "migrations", file), "utf8"));
     }
     expect(await slides()).toEqual(before);
-    expect(await all(`select placement, title, sort_order from banners order by placement, sort_order`)).toEqual(banners);
-    expect((await one<{ n: number }>(`select count(*)::int as n from banners where placement = 'hero'`)).n).toBe(8);
+    expect(await all(`select placement, title, sort_order from banners order by placement, sort_order, title`)).toEqual(banners);
+    expect((await one<{ n: number }>(`select count(*)::int as n from banners where placement = 'hero'`)).n).toBe(11);
   });
 });
 

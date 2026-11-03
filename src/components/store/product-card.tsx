@@ -1,3 +1,4 @@
+import { Flame } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import type { ProductSummary } from "@/lib/types";
@@ -6,11 +7,12 @@ import { ProductImagePlaceholder } from "./placeholder";
 import { Price } from "./price";
 import { FavoriteButton, QuickAddButton } from "./product-actions";
 
-type Pill = { label: string; tone: "accent" | "rose" | "light" | "dark" };
+type Pill = { label: string; tone: "accent" | "rose" | "light" | "dark"; icon?: boolean };
 
 /** Labels on the photo — always facts registered in the admin (availability, real offer, flagged as new). */
 function pills(product: ProductSummary): Pill[] {
   const list: Pill[] = [];
+  if (product.isBestSeller && product.availability !== "coming_soon") list.push({ label: "Mais vendido", tone: "accent", icon: true });
   if (product.availability === "coming_soon") list.push({ label: "Em breve", tone: "dark" });
   else if (!product.isAvailable) list.push({ label: product.availability === "on_request" ? "Sob consulta" : "Esgotado", tone: "light" });
   if (product.isAvailable && product.compareAtCents != null && product.priceCents != null && product.compareAtCents > product.priceCents) list.push({ label: "Oferta", tone: "accent" });
@@ -50,7 +52,8 @@ export function ProductCard({ product, priority = false, className }: { product:
         {labels.length > 0 ? (
           <div className="pointer-events-none absolute left-2.5 top-2.5 z-10 flex flex-col items-start gap-1.5 sm:left-3 sm:top-3">
             {labels.map((p) => (
-              <span key={p.label} className={cn("rounded-full px-2.5 py-1 text-[0.625rem] font-semibold uppercase leading-none tracking-[0.1em]", PILL[p.tone])}>
+              <span key={p.label} className={cn("inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[0.625rem] font-semibold uppercase leading-none tracking-[0.1em]", PILL[p.tone], p.icon && "shadow-soft")}>
+                {p.icon ? <Flame className="h-3 w-3" strokeWidth={2} aria-hidden="true" /> : null}
                 {p.label}
               </span>
             ))}

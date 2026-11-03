@@ -72,6 +72,7 @@ export const productSchema = z
     isFeatured: z.boolean(),
     featuredOrder: z.string().trim().regex(/^-?\d*$/),
     isNew: z.boolean(),
+    isBestSeller: z.boolean(),
     sortOrder: z.string().trim().regex(/^-?\d*$/),
     videoUrl: z
       .string()

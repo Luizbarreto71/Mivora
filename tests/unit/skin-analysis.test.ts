@@ -21,6 +21,7 @@ function product(name: string, categorySlugs: string[], over: Partial<SkinCatalo
     maxQuantity: null,
     isNew: false,
     isFeatured: false,
+    isBestSeller: false,
     image: null,
     hasVariants: false,
     categorySlugs,

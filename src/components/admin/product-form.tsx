@@ -303,6 +303,7 @@ export function ProductForm({
               <Input id="featuredOrder" inputMode="numeric" {...register("featuredOrder")} />
             </Field>
             <Checkbox label="Marcar como novidade" {...register("isNew")} />
+            <Checkbox label="Marcar como mais vendido (selo na foto do produto)" {...register("isBestSeller")} />
             <Checkbox label="Mídia pendente (aguardando fotos oficiais)" {...register("mediaPending")} />
             <Field label="Ordem no catálogo" htmlFor="sortOrder">
               <Input id="sortOrder" inputMode="numeric" {...register("sortOrder")} />

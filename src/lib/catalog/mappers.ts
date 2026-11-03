@@ -7,7 +7,7 @@ import type { Availability, ImageRef, ProductSummary, ProductVariant } from "@/l
 export type Row = Record<string, any>;
 
 export const PRODUCT_SUMMARY_SELECT =
-  "id, slug, code, name, volume, short_description, price_cents, compare_at_price_cents, availability, track_inventory, stock_quantity, reserved_quantity, is_available, is_new, is_featured, featured_order, sort_order, published_at, brand:brands!inner(id, slug, name), images:product_images(url, alt, width, height, sort_order, is_primary, fit), variants:product_variants(id)";
+  "id, slug, code, name, volume, short_description, price_cents, compare_at_price_cents, availability, track_inventory, stock_quantity, reserved_quantity, is_available, is_new, is_featured, is_best_seller, featured_order, sort_order, published_at, brand:brands!inner(id, slug, name), images:product_images(url, alt, width, height, sort_order, is_primary, fit), variants:product_variants(id)";
 
 export function availableQuantity(row: { track_inventory: boolean; stock_quantity: number | null; reserved_quantity: number }) {
   if (!row.track_inventory) return null;
@@ -37,6 +37,7 @@ export function toProductSummary(row: Row): ProductSummary {
     maxQuantity: availableQuantity(row as { track_inventory: boolean; stock_quantity: number | null; reserved_quantity: number }),
     isNew: Boolean(row.is_new),
     isFeatured: Boolean(row.is_featured),
+    isBestSeller: Boolean(row.is_best_seller),
     image: images[0] ?? null,
     hasVariants: Array.isArray(row.variants) && row.variants.length > 0,
   };

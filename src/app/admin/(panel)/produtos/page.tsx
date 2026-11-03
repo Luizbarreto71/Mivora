@@ -43,6 +43,7 @@ type Row = {
   reserved_quantity: number;
   media_pending: boolean;
   is_featured: boolean;
+  is_best_seller: boolean;
   brand: { name: string };
   images: { url: string; is_primary: boolean }[];
   code: string;
@@ -60,7 +61,7 @@ export default async function AdminProductsPage({ searchParams }: PageProps<"/ad
 
   let query = supabase
     .from("products")
-    .select("id, slug, code, name, status, price_cents, compare_at_price_cents, is_available, availability, track_inventory, stock_quantity, reserved_quantity, media_pending, is_featured, brand:brands(name), images:product_images(url, is_primary), private:product_private(content_verified, sku, sourcing_status, regulatory_status)")
+    .select("id, slug, code, name, status, price_cents, compare_at_price_cents, is_available, availability, track_inventory, stock_quantity, reserved_quantity, media_pending, is_featured, is_best_seller, brand:brands(name), images:product_images(url, is_primary), private:product_private(content_verified, sku, sourcing_status, regulatory_status)")
     .order("updated_at", { ascending: false })
     .limit(300);
   if (filtro === "publicados") query = query.eq("status", "published");
@@ -145,6 +146,7 @@ export default async function AdminProductsPage({ searchParams }: PageProps<"/ad
                     {r.code} · {r.brand?.name}
                     {r.private?.sku ? ` · SKU ${r.private.sku}` : ""}
                     {r.is_featured ? " · Destaque" : ""}
+                    {r.is_best_seller ? " · Mais vendido" : ""}
                   </p>
                   <div className="mt-1 flex flex-wrap gap-1">
                     {r.media_pending || r.images.length === 0 ? <StatusPill tone="amber">Mídia pendente</StatusPill> : null}

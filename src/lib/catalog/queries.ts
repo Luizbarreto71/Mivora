@@ -396,7 +396,7 @@ export async function getFeaturedProducts(limit = 8): Promise<ProductSummary[]> 
   return (await listProducts({}, limit)).items;
 }
 
-/** Best sellers come from manually confirmed/completed orders. Falls back to the curated selection. */
+/** Products the admin marked as best sellers, then the ranking of confirmed/completed orders. Falls back to the curated selection. */
 export async function getBestSellers(limit = 8): Promise<{ products: ProductSummary[]; basedOnSales: boolean }> {
   "use cache";
   cacheLife("hours");
@@ -405,7 +405,10 @@ export async function getBestSellers(limit = 8): Promise<{ products: ProductSumm
   if (!sb) return { products: [], basedOnSales: false };
   const { data, error } = await sb.rpc("best_selling_products", { p_limit: limit });
   if (error) fail("best sellers", error);
-  const ids = ((data ?? []) as { product_id: string }[]).map((r) => r.product_id);
+  const { data: marked, error: markedError } = await sb.from("products").select("id").eq("status", "published").eq("is_best_seller", true).order("sort_order").order("name").limit(limit);
+  if (markedError) fail("marked best sellers", markedError);
+  const ranked = ((data ?? []) as { product_id: string }[]).map((r) => r.product_id);
+  const ids = [...new Set([...(marked ?? []).map((r) => r.id as string), ...ranked])].slice(0, limit);
   if (ids.length > 0) return { products: await getProductsByIds(ids), basedOnSales: true };
   return { products: await getFeaturedProducts(limit), basedOnSales: false };
 }
@@ -413,7 +416,7 @@ export async function getBestSellers(limit = 8): Promise<{ products: ProductSumm
 const PRODUCT_DETAIL_SELECT = `
   id, slug, code, name, product_line, volume, coming_soon_note, short_description, description, benefits, key_ingredients, ingredients_full,
   how_to_use, warnings, skin_types, tags, price_cents, compare_at_price_cents, availability, track_inventory,
-  stock_quantity, reserved_quantity, is_available, is_new, is_featured, video_url, seo_title, seo_description,
+  stock_quantity, reserved_quantity, is_available, is_new, is_featured, is_best_seller, video_url, seo_title, seo_description,
   published_at, updated_at,
   brand:brands!inner(id, slug, name),
   images:product_images(url, alt, width, height, sort_order, is_primary, fit),

@@ -54,6 +54,7 @@ export async function saveProduct(values: ProductFormValues): Promise<SaveProduc
     is_featured: v.isFeatured,
     featured_order: intOr(v.featuredOrder, 0),
     is_new: v.isNew,
+    is_best_seller: v.isBestSeller,
     sort_order: intOr(v.sortOrder, 0),
     video_url: nullIfEmpty(v.videoUrl),
     media_pending: v.mediaPending,
@@ -223,7 +224,7 @@ export async function duplicateProduct(id: string) {
   /* eslint-enable @typescript-eslint/no-unused-vars */
   const { data: copy, error: insertError } = await supabase
     .from("products")
-    .insert({ ...rest, slug, name: `${p.name} (cópia)`, status: "draft", is_featured: false })
+    .insert({ ...rest, slug, name: `${p.name} (cópia)`, status: "draft", is_featured: false, is_best_seller: false })
     .select("id")
     .single();
   if (insertError) return fail(dbErrorMessage(insertError));

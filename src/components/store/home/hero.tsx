@@ -19,7 +19,7 @@ const FALLBACK: Banner = {
 /**
  * Editorial banner: copy never sits on top of a photo (always legible). Every active "hero"
  * banner is a slide, in the admin order. A banner without a campaign photo shows its product
- * (or a featured product) under a soft studio light.
+ * (or a featured product) under a soft studio light, linking to the product page.
  */
 export function Hero({ banners, fallbackProduct }: { banners: Banner[]; fallbackProduct: ProductSummary | null }) {
   const fallback = fallbackProduct?.image ? { slug: fallbackProduct.slug, name: fallbackProduct.name, image: fallbackProduct.image } : null;

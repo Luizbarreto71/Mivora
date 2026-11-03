@@ -27,7 +27,7 @@ function usePrefersReducedMotion() {
  * Home banner (mockup): wide rosé banner, copy on the left, photo or product on the right.
  * Crossfade between slides; autoplay pauses on hover, focus, off-screen, on request and for
  * reduced motion. Campaign photos dissolve into the slide colour; slides without a photo show
- * the chosen product under a soft studio light. "Full" slides show finished art (logo and
+ * the chosen product under a soft studio light, passing from right to left and linking to its page. "Full" slides show finished art (logo and
  * copy already in the image) whole and clickable; their copy stays for screen readers and,
  * on phones, below the image.
  */
@@ -146,7 +146,7 @@ export function HeroCarousel({ slides }: { slides: Banner[] }) {
                     ) : null}
                   </div>
                 </div>
-                <SlideVisual slide={s} active={active} preload={i === 0} full={full} />
+                <SlideVisual slide={s} active={active} leaving={(i - index + count) % count === count - 1} preload={i === 0} full={full} />
               </div>
             </div>
           );
@@ -167,7 +167,8 @@ export function HeroCarousel({ slides }: { slides: Banner[] }) {
             </div>
           </div>
           {/* mobile: a slim bar below the banner */}
-          <div className="flex items-center justify-between gap-4 border-b border-line bg-paper px-4 py-2 sm:px-6 lg:hidden">
+          {/* room on the right for the floating WhatsApp button */}
+          <div className="flex items-center justify-between gap-4 border-b border-line bg-paper py-2 pl-4 pr-20 sm:pl-6 sm:pr-24 lg:hidden">
             <Indicators {...controls} compact />
             <div className="flex items-center gap-1">
               {!reduced ? <PauseButton playing={playing} onToggle={() => setPlaying((p) => !p)} /> : null}
@@ -184,7 +185,7 @@ export function HeroCarousel({ slides }: { slides: Banner[] }) {
  * The slide's picture in a soft-cornered frame: campaign photo (separate crop for phones), finished art shown
  * whole (and clickable), or — without a photo — the chosen product under a soft studio light.
  */
-function SlideVisual({ slide: s, active, preload, full }: { slide: Banner; active: boolean; preload: boolean; full: boolean }) {
+function SlideVisual({ slide: s, active, leaving, preload, full }: { slide: Banner; active: boolean; leaving: boolean; preload: boolean; full: boolean }) {
   const motion = cn("absolute inset-0 transition-transform duration-[7000ms] ease-out motion-reduce:transition-none", active ? "scale-100" : "scale-[1.04]");
   const frame = "relative order-1 overflow-hidden rounded-panel lg:order-2";
 
@@ -220,7 +221,7 @@ function SlideVisual({ slide: s, active, preload, full }: { slide: Banner; activ
   const image = s.product?.image;
   if (!image) return null;
   return (
-    <div className={cn(frame, "aspect-[5/4] bg-paper/35 sm:aspect-[16/10] lg:aspect-auto lg:h-full")}>
+    <Link href={`/produtos/${s.product!.slug}`} aria-label={`Ver ${s.product!.name}`} className={cn(frame, "group/product block aspect-[5/4] bg-paper/35 sm:aspect-[16/10] lg:aspect-auto lg:h-full")}>
       {/* studio light: the product photo (white background) blends into it */}
       <div
         aria-hidden="true"
@@ -228,11 +229,24 @@ function SlideVisual({ slide: s, active, preload, full }: { slide: Banner; activ
         style={{ background: "radial-gradient(closest-side, rgba(255,255,255,0.98) 0%, rgba(255,255,255,0.88) 42%, rgba(255,255,255,0.35) 68%, rgba(255,255,255,0) 100%)" }}
       />
       <div aria-hidden="true" className="absolute bottom-[8%] left-1/2 h-[6%] w-[34%] -translate-x-1/2 rounded-[50%] bg-ink/10 blur-xl" />
-      {/* multiply on the animated wrapper (a transform would isolate a blend set on the image) */}
-      <div className={cn(motion, "mix-blend-multiply")}>
-        <Image src={image.url} alt={image.alt ?? s.product?.name ?? ""} fill preload={preload} sizes="(min-width: 1024px) 50vw, 100vw" className="object-contain px-[10%] py-[6%]" />
+      {/* multiply on the outer animated wrapper (a transform would isolate a blend set on the image); the product enters from the right and leaves to the left */}
+      <div
+        className={cn(
+          "absolute inset-0 mix-blend-multiply transition-transform duration-700 ease-out motion-reduce:translate-x-0 motion-reduce:transition-none",
+          active ? "translate-x-0" : leaving ? "-translate-x-[60%]" : "translate-x-[60%]",
+        )}
+      >
+        <div className={motion}>
+          <Image src={image.url} alt={image.alt ?? s.product?.name ?? ""} fill preload={preload} sizes="(min-width: 1024px) 50vw, 100vw" className="object-contain px-[10%] pb-[12%] pt-[6%]" />
+        </div>
       </div>
-    </div>
+      <span className="absolute inset-x-0 bottom-3 flex justify-center px-3 sm:bottom-4">
+        <span className="inline-flex max-w-full items-center gap-2 rounded-full bg-paper/85 px-4 py-2 text-xs font-medium text-ink shadow-soft backdrop-blur-sm transition group-hover/product:bg-paper">
+          <span className="truncate">{s.product!.name}</span>
+          <ArrowRight className="h-3.5 w-3.5 shrink-0 transition-transform group-hover/product:translate-x-0.5" strokeWidth={1.75} />
+        </span>
+      </span>
+    </Link>
   );
 }
 

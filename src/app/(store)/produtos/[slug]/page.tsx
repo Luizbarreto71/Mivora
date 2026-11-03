@@ -1,3 +1,4 @@
+import { Flame } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -134,6 +135,11 @@ async function ProductContent({ params }: { params: PageProps<"/produtos/[slug]"
             <Link href={`/marcas/${product.brand.slug}`} className="eyebrow text-ink hover:underline">
               {product.brand.name}
             </Link>
+            {product.isBestSeller && product.availability !== "coming_soon" ? (
+              <Badge tone="accent" className="gap-1">
+                <Flame className="h-3 w-3" strokeWidth={2} aria-hidden="true" /> Mais vendido
+              </Badge>
+            ) : null}
             {product.isNew ? <Badge tone="blush">Novidade</Badge> : null}
             {product.availability === "coming_soon" ? <Badge tone="dark">Em breve</Badge> : null}
           </div>
