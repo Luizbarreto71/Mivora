@@ -190,15 +190,20 @@ test("Teste 2 — preço alterado no admin aparece no catálogo e na página do 
   await expect(page.locator("article").filter({ hasText: "Madagascar Centella Ampoule", visible: true }).first()).toContainText(brl(11990));
 });
 
-test("Mais vendido — selo só no produto marcado no painel (card, página do produto e lista de mais vendidos)", async ({ page }) => {
+test("Mais vendido — marcado direto na lista do painel; selo só nesse produto (card, página do produto e lista de mais vendidos)", async ({ page }) => {
   const slug = "skin1004-madagascar-centella-ampoule";
   const card = () => page.locator("article").filter({ hasText: "Madagascar Centella Ampoule", visible: true }).first();
   await page.goto("/marcas/skin1004");
   await expect(card().getByText("Mais vendido")).toHaveCount(0);
 
-  await editProductBySlug(admin, slug);
-  await admin.getByLabel(/Marcar como mais vendido/).check();
-  await saveProduct(admin);
+  // marked straight from the product list, without opening the product
+  await admin.goto(`/admin/produtos?q=${encodeURIComponent("skin1004 madagascar centella")}`);
+  const toggle = admin.locator(`tr:has(a[href="/produtos/${slug}"])`).getByRole("button", { name: /^Mais vendido:/ });
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await admin.goto("/admin/produtos?filtro=mais-vendidos");
+  await expect(admin.locator(`tr:has(a[href="/produtos/${slug}"])`)).toBeVisible();
 
   await page.goto("/marcas/skin1004");
   await expect(card().getByText("Mais vendido")).toBeVisible();

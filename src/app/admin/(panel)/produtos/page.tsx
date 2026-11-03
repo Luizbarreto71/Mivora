@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
 import { ActionButton } from "@/components/admin/action-button";
+import { BestSellerToggle } from "@/components/admin/best-seller-toggle";
 import { AdminPage, EmptyRow, StatusPill, Table, Td, Th } from "@/components/admin/ui";
 import { buttonClasses } from "@/components/ui/button";
 import { duplicateProduct, setProductStatus } from "@/lib/admin/actions/products";
@@ -17,6 +18,7 @@ const FILTERS = [
   { value: "disponiveis", label: "Disponíveis" },
   { value: "em-breve", label: "Em breve" },
   { value: "sob-consulta", label: "Sob consulta" },
+  { value: "mais-vendidos", label: "Mais vendidos" },
   { value: "publicados", label: "Publicados" },
   { value: "rascunhos", label: "Rascunhos" },
   { value: "arquivados", label: "Arquivados" },
@@ -73,6 +75,7 @@ export default async function AdminProductsPage({ searchParams }: PageProps<"/ad
   if (filtro === "sob-consulta") query = query.eq("availability", "on_request");
   if (filtro === "disponiveis") query = query.eq("status", "published").eq("is_available", true);
   if (filtro === "em-breve") query = query.eq("availability", "coming_soon");
+  if (filtro === "mais-vendidos") query = query.eq("is_best_seller", true);
   for (const t of searchTerms(q)) query = query.ilike("search_text", `%${t}%`);
 
   const { data } = await query;
@@ -123,11 +126,12 @@ export default async function AdminProductsPage({ searchParams }: PageProps<"/ad
             <Th>Preço</Th>
             <Th>Estoque</Th>
             <Th>Status</Th>
+            <Th>Mais vendido</Th>
             <Th className="text-right">Ações</Th>
           </tr>
         </thead>
         <tbody>
-          {rows.length === 0 ? <EmptyRow colSpan={6}>Nenhum produto encontrado.</EmptyRow> : null}
+          {rows.length === 0 ? <EmptyRow colSpan={7}>Nenhum produto encontrado.</EmptyRow> : null}
           {rows.map((r) => {
             const img = r.images.find((i) => i.is_primary) ?? r.images[0];
             const available = r.track_inventory ? (r.stock_quantity ?? 0) - r.reserved_quantity : null;
@@ -146,7 +150,6 @@ export default async function AdminProductsPage({ searchParams }: PageProps<"/ad
                     {r.code} · {r.brand?.name}
                     {r.private?.sku ? ` · SKU ${r.private.sku}` : ""}
                     {r.is_featured ? " · Destaque" : ""}
-                    {r.is_best_seller ? " · Mais vendido" : ""}
                   </p>
                   <div className="mt-1 flex flex-wrap gap-1">
                     {r.media_pending || r.images.length === 0 ? <StatusPill tone="amber">Mídia pendente</StatusPill> : null}
@@ -170,6 +173,9 @@ export default async function AdminProductsPage({ searchParams }: PageProps<"/ad
                 </Td>
                 <Td>
                   <StatusPill tone={TONE[commercialStatus(r.status, r.availability as Availability)]}>{COMMERCIAL_STATUS_LABEL[commercialStatus(r.status, r.availability as Availability)]}</StatusPill>
+                </Td>
+                <Td>
+                  <BestSellerToggle productId={r.id} productName={r.name} initial={r.is_best_seller} />
                 </Td>
                 <Td>
                   <div className="flex flex-wrap justify-end gap-1.5">

@@ -209,6 +209,15 @@ export async function setProductStatus(id: string, status: "draft" | "published"
   return success(status === "published" ? "Produto publicado." : status === "archived" ? "Produto arquivado." : "Produto despublicado.");
 }
 
+/** Quick switch in the product list for the "Mais vendido" label. */
+export async function setProductBestSeller(id: string, value: boolean) {
+  const { supabase } = await requireAdminAction();
+  const { error } = await supabase.from("products").update({ is_best_seller: value }).eq("id", id);
+  if (error) return fail(dbErrorMessage(error));
+  updateTag(TAGS.catalog);
+  return success(value ? "Marcado como mais vendido." : "Selo de mais vendido removido.");
+}
+
 export async function duplicateProduct(id: string) {
   const { supabase } = await requireAdminAction();
   const { data: p, error } = await supabase.from("products").select("*").eq("id", id).single();
